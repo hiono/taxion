@@ -124,6 +124,10 @@ func (c *ProviderController) ResumeTaskExecution(
 		releaseErr := c.releasePlanningResumeDispatchClaim(ctx, current.ID, intent, outcome, principal)
 		return receipt, intent, previous, resumeResultFromObservation(previous), errors.Join(resultErr, releaseErr)
 	}
+	recordNotDispatched := func(cause error) (domain.PlanningResumeObservation, error) {
+		evidence := providerResumeNotDispatchedEvidence(intent.ID, cause)
+		return c.recordResumeObservation(ctx, jobID, intent.ID, domain.PlanningResumeNotDispatched, evidence, provider.ResumeResult{}, principal)
+	}
 
 	request := provider.ResumeRequest{
 		OperationID:        intent.OperationID,
@@ -132,29 +136,37 @@ func (c *ProviderController) ResumeTaskExecution(
 		RequireIdempotency: true,
 	}
 	if err := request.Validate(); err != nil {
-		return receipt, intent, domain.PlanningResumeObservation{}, provider.ResumeResult{}, provider.ErrProviderInvalidRequest
+		observation, persistErr := recordNotDispatched(err)
+		return receipt, intent, observation, provider.ResumeResult{}, errors.Join(provider.ErrProviderInvalidRequest, persistErr)
 	}
 	latest, currentExecution, currentPermission, currentTask, currentAssignment, currentStart, currentSession, err :=
 		c.taskProviderExecutionTarget(ctx, jobID, roleExecutionID, permissionID, permissionRequest, principal)
 	if err != nil {
-		return receipt, intent, domain.PlanningResumeObservation{}, provider.ResumeResult{}, err
+		observation, persistErr := recordNotDispatched(err)
+		return receipt, intent, observation, provider.ResumeResult{}, errors.Join(err, persistErr)
 	}
 	if latest.ID != job.ID || currentExecution.ID != execution.ID || currentPermission.ID != permission.ID ||
 		currentTask.ID != task.ID || currentAssignment != assignment || currentStart.ID != start.ID ||
 		currentSession != sessionID {
-		return receipt, intent, domain.PlanningResumeObservation{}, provider.ResumeResult{}, errors.New("Task Resume authority, Worktree, or accepted Session changed after intent commit")
+		cause := errors.New("Task Resume authority, Worktree, or accepted Session changed after intent commit")
+		observation, persistErr := recordNotDispatched(cause)
+		return receipt, intent, observation, provider.ResumeResult{}, errors.Join(cause, persistErr)
 	}
 	if err := currentPermission.ValidateFor(latest, currentPermission.OperationID, currentPermission.RequestSHA256, c.now()); err != nil {
-		return receipt, intent, domain.PlanningResumeObservation{}, provider.ResumeResult{}, err
+		observation, persistErr := recordNotDispatched(err)
+		return receipt, intent, observation, provider.ResumeResult{}, errors.Join(err, persistErr)
 	}
 	for _, stopIntent := range latest.ProviderStopIntents {
 		if stopIntent.RoleExecutionID == execution.ID && stopIntent.SessionID == sessionID {
-			return receipt, intent, domain.PlanningResumeObservation{}, provider.ResumeResult{}, errors.New("Task Provider Resume is blocked by an existing Stop intent")
+			cause := errors.New("Task Provider Resume is blocked by an existing Stop intent")
+			observation, persistErr := recordNotDispatched(cause)
+			return receipt, intent, observation, provider.ResumeResult{}, errors.Join(cause, persistErr)
 		}
 	}
 	if err := c.worktreeVerifier.Verify(ctx, latest.ID, currentTask, currentAssignment.Snapshot()); err != nil {
-		return receipt, intent, domain.PlanningResumeObservation{}, provider.ResumeResult{},
-			fmt.Errorf("reverify owned Task Worktree immediately before Resume: %w", err)
+		cause := fmt.Errorf("reverify owned Task Worktree immediately before Resume: %w", err)
+		observation, persistErr := recordNotDispatched(cause)
+		return receipt, intent, observation, provider.ResumeResult{}, errors.Join(cause, persistErr)
 	}
 
 	latest, err = c.store.GetJob(ctx, jobID)
@@ -178,15 +190,58 @@ func (c *ProviderController) ResumeTaskExecution(
 	}
 	_, claimedExecution, claimedPermission, claimedTask, claimedAssignment, claimedStart, claimedSession, err :=
 		c.taskProviderExecutionTarget(ctx, jobID, roleExecutionID, permissionID, permissionRequest, principal)
+	recordClaimedFailure := func(cause error) (domain.PlanningResumeObservation, error) {
+		evidence := providerResumeNotDispatchedEvidence(intent.ID, cause)
+		observation, persistErr := c.recordResumeObservation(
+			ctx, jobID, intent.ID, domain.PlanningResumeFailed, evidence, provider.ResumeResult{}, principal,
+		)
+		if persistErr != nil {
+			return observation, errors.Join(cause, persistErr)
+		}
+		releaseErr := c.releasePlanningResumeDispatchClaim(ctx, jobID, intent, domain.PlanningResumeDispatchReleasedFailed, principal)
+		return observation, errors.Join(cause, releaseErr)
+	}
 	if err != nil || claimedJob.ID != latest.ID || claimedExecution.ID != execution.ID ||
 		claimedPermission.ID != permission.ID || claimedTask.ID != task.ID ||
 		claimedAssignment != assignment || claimedStart.ID != start.ID || claimedSession != sessionID {
-		return receipt, intent, domain.PlanningResumeObservation{}, provider.ResumeResult{},
-			errors.Join(errors.New("Task Resume authority changed after acquiring dispatch claim"), err)
+		cause := errors.Join(errors.New("Task Resume authority changed after acquiring dispatch claim"), err)
+		observation, persistErr := recordClaimedFailure(cause)
+		return receipt, intent, observation, provider.ResumeResult{}, persistErr
+	}
+	if err := claimedPermission.ValidateFor(claimedJob, claimedPermission.OperationID, claimedPermission.RequestSHA256, c.now()); err != nil {
+		observation, persistErr := recordClaimedFailure(err)
+		return receipt, intent, observation, provider.ResumeResult{}, persistErr
+	}
+	for _, stopIntent := range claimedJob.ProviderStopIntents {
+		if stopIntent.RoleExecutionID == execution.ID && stopIntent.SessionID == sessionID {
+			cause := errors.New("Task Provider Resume is blocked by a Stop intent saved after claim acquisition")
+			observation, persistErr := recordClaimedFailure(cause)
+			return receipt, intent, observation, provider.ResumeResult{}, persistErr
+		}
 	}
 	if err := c.worktreeVerifier.Verify(ctx, claimedJob.ID, claimedTask, claimedAssignment.Snapshot()); err != nil {
-		return receipt, intent, domain.PlanningResumeObservation{}, provider.ResumeResult{},
-			fmt.Errorf("reverify owned Task Worktree after Resume dispatch claim: %w", err)
+		cause := fmt.Errorf("reverify owned Task Worktree after Resume dispatch claim: %w", err)
+		observation, persistErr := recordClaimedFailure(cause)
+		return receipt, intent, observation, provider.ResumeResult{}, persistErr
+	}
+	latestClaimedJob, err := c.store.GetJob(ctx, jobID)
+	if err != nil {
+		return receipt, intent, domain.PlanningResumeObservation{}, provider.ResumeResult{}, err
+	}
+	activeClaim, active := domain.ActivePlanningResumeDispatchClaim(latestClaimedJob, intent.OperationID)
+	if !active || activeClaim.ID != claim.ID {
+		return receipt, intent, domain.PlanningResumeObservation{}, provider.ResumeResult{}, provider.ErrResumeUnconfirmed
+	}
+	if err := claimedPermission.ValidateFor(latestClaimedJob, claimedPermission.OperationID, claimedPermission.RequestSHA256, c.now()); err != nil {
+		observation, persistErr := recordClaimedFailure(err)
+		return receipt, intent, observation, provider.ResumeResult{}, persistErr
+	}
+	for _, stopIntent := range latestClaimedJob.ProviderStopIntents {
+		if stopIntent.RoleExecutionID == execution.ID && stopIntent.SessionID == sessionID {
+			cause := errors.New("Task Provider Resume is blocked by a Stop intent saved before dispatch")
+			observation, persistErr := recordClaimedFailure(cause)
+			return receipt, intent, observation, provider.ResumeResult{}, persistErr
+		}
 	}
 
 	result, err := c.runtime.Resume(ctx, request)
