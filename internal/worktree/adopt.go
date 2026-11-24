@@ -37,7 +37,8 @@ func (m *Manager) Adopt(ctx context.Context, jobID string, task domain.Task, wor
 		return Snapshot{}, errors.New("adopted Worktree path is missing, non-canonical, or traverses a symbolic link")
 	}
 	if worktreePath == repositoryPath || pathWithin(repositoryPath, worktreePath) ||
-		pathWithin(worktreePath, repositoryPath) || pathWithin(m.root, worktreePath) {
+		pathWithin(worktreePath, repositoryPath) || pathWithin(m.root, worktreePath) ||
+		pathWithin(worktreePath, m.root) {
 		return Snapshot{}, errors.New("adopted Worktree path overlaps the trusted repository or managed workspace")
 	}
 	top, err := gitOutput(ctx, worktreePath, "rev-parse", "--show-toplevel")
@@ -81,9 +82,6 @@ func (m *Manager) Adopt(ctx context.Context, jobID string, task domain.Task, wor
 	}
 	key := sha256.Sum256([]byte(jobID + "\x00" + task.ID))
 	registrationPath := filepath.Join(m.root, hex.EncodeToString(key[:]))
-	if err := m.reserveAdoption(jobID, task.ID, repositoryID, worktreePath); err != nil {
-		return Snapshot{}, err
-	}
 	baselinePath := registrationPath + ".baseline.json"
 	record, readErr := readBaselineRecord(baselinePath)
 	if readErr == nil {
@@ -92,7 +90,13 @@ func (m *Manager) Adopt(ctx context.Context, jobID string, task domain.Task, wor
 			record.HeadMode != headMode || record.HeadRef != headRef {
 			return Snapshot{}, errors.New("existing Worktree adoption retry does not match its original state")
 		}
+		if err := m.reserveAdoption(jobID, task.ID, repositoryID, worktreePath); err != nil {
+			return Snapshot{}, err
+		}
 	} else if errors.Is(readErr, os.ErrNotExist) {
+		if err := m.reserveAdoption(jobID, task.ID, repositoryID, worktreePath); err != nil {
+			return Snapshot{}, err
+		}
 		record = baselineRecord{
 			Version: 2, JobID: jobID, TaskID: task.ID,
 			RepositoryID: repositoryID, RepositoryPath: repositoryPath,
