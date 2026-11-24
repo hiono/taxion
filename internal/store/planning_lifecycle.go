@@ -13,14 +13,14 @@ import (
 )
 
 const (
-	addProviderStopIntentCommandType       = "AddProviderStopIntent"
-	addProviderStopObservationCommandType  = "AddProviderStopObservation"
-	addProviderEventObservationCommandType = "AddProviderEventObservation"
-	addProviderStartObservationCommandType = "AddProviderStartObservation"
-	addPlanningTurnIntentCommandType       = "AddPlanningTurnIntent"
-	addPlanningTurnObservationCommandType  = "AddPlanningTurnObservation"
-	addPlanningEffectDecisionCommandType   = "AddPlanningEffectDecision"
-	addPlanningResumeIntentCommandType     = "AddPlanningResumeIntent"
+	addProviderStopIntentCommandType            = "AddProviderStopIntent"
+	addProviderStopObservationCommandType       = "AddProviderStopObservation"
+	addProviderEventObservationCommandType      = "AddProviderEventObservation"
+	addProviderStartObservationCommandType      = "AddProviderStartObservation"
+	addPlanningTurnIntentCommandType            = "AddPlanningTurnIntent"
+	addPlanningTurnObservationCommandType       = "AddPlanningTurnObservation"
+	addPlanningEffectDecisionCommandType        = "AddPlanningEffectDecision"
+	addPlanningResumeIntentCommandType          = "AddPlanningResumeIntent"
 	addTaskProviderResumeObservationCommandType = "AddTaskProviderResumeObservation"
 )
 
