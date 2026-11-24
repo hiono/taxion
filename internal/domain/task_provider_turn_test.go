@@ -260,7 +260,6 @@ func TestTaskTurnMustFollowPreviousTerminalObservationTime(t *testing.T) {
 	}
 }
 
-
 func TestTaskExecutionStartRequiresApprovedWorktreePath(t *testing.T) {
 	job, task, now := approvedJobWithTaskForExecutionPermission(t)
 	request := executionPermissionTestRequest(job, now)
