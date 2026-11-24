@@ -73,7 +73,7 @@ func NewWorktreeAssignment(job Job, task Task, execution RoleExecution, snapshot
 		return WorktreeAssignment{}, errors.New("Worktree and source repository paths must be separate")
 	}
 	if (snapshot.Origin != "" && snapshot.Origin != WorktreeOriginTaxionCreated && snapshot.Origin != WorktreeOriginAdopted) ||
-		(snapshot.InitialStateSHA256 != "" && !validGitCommit(snapshot.InitialStateSHA256)) ||
+		(snapshot.InitialStateSHA256 != "" && !validSHA256(snapshot.InitialStateSHA256)) ||
 		(snapshot.HeadMode != "" && snapshot.HeadMode != WorktreeHeadDetached && snapshot.HeadMode != WorktreeHeadBranchAttached) ||
 		(snapshot.HeadMode == WorktreeHeadBranchAttached && strings.TrimSpace(snapshot.HeadRef) == "") ||
 		(snapshot.HeadMode == WorktreeHeadDetached && snapshot.HeadRef != "") {
@@ -131,7 +131,7 @@ func validateWorktreeAssignments(job Job) error {
 			!filepath.IsAbs(assignment.RepositoryPath) || filepath.Clean(assignment.RepositoryPath) != assignment.RepositoryPath ||
 			!filepath.IsAbs(assignment.WorktreePath) || filepath.Clean(assignment.WorktreePath) != assignment.WorktreePath ||
 			(assignment.Origin != "" && assignment.Origin != WorktreeOriginTaxionCreated && assignment.Origin != WorktreeOriginAdopted) ||
-			(assignment.InitialStateSHA256 != "" && !validGitCommit(assignment.InitialStateSHA256)) ||
+			(assignment.InitialStateSHA256 != "" && !validSHA256(assignment.InitialStateSHA256)) ||
 			(assignment.HeadMode != "" && assignment.HeadMode != WorktreeHeadDetached && assignment.HeadMode != WorktreeHeadBranchAttached) ||
 			(assignment.HeadMode == WorktreeHeadBranchAttached && strings.TrimSpace(assignment.HeadRef) == "") ||
 			(assignment.HeadMode == WorktreeHeadDetached && assignment.HeadRef != "") ||

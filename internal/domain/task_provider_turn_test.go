@@ -259,3 +259,65 @@ func TestTaskTurnMustFollowPreviousTerminalObservationTime(t *testing.T) {
 		t.Fatal("Job.Validate accepted a Task Turn timestamp before the previous terminal observation")
 	}
 }
+
+
+func TestTaskExecutionStartRequiresApprovedWorktreePath(t *testing.T) {
+	job, task, now := approvedJobWithTaskForExecutionPermission(t)
+	request := executionPermissionTestRequest(job, now)
+	request.WorktreePath = "/tmp/approved-task-worktree"
+	requestSHA, err := ExecutionPermissionRequestSHA256(request)
+	if err != nil {
+		t.Fatalf("ExecutionPermissionRequestSHA256: %v", err)
+	}
+	permission, err := NewExecutionPermission(
+		job, request, requestSHA, executionPermissionTestAssessment(request, requestSHA, now), now,
+	)
+	if err != nil {
+		t.Fatalf("NewExecutionPermission: %v", err)
+	}
+	job.ExecutionPermissions = append(job.ExecutionPermissions, permission)
+	job.Revision++
+	job.UpdatedAt = permission.CreatedAt
+	snapshot := WorktreeSnapshot{
+		RepositoryID: task.TargetRepositories[0], RepositoryPath: "/tmp/taxion-src",
+		WorktreePath: "/tmp/unapproved-task-worktree", BaselineCommit: strings.Repeat("a", 40),
+		InitialStateSHA256: strings.Repeat("b", 64),
+	}
+	commandID := "cmd_d1010101010101010101010101010101"
+	if _, err := NewTaskRoleExecutionStart(
+		job, task.ID, permission.ID, commandID, requestSHA, snapshot, now.Add(time.Minute),
+	); err == nil {
+		t.Fatal("Task execution accepted a Worktree path outside the approved ExecutionPermission")
+	}
+	snapshot.WorktreePath = request.WorktreePath
+	if _, err := NewTaskRoleExecutionStart(
+		job, task.ID, permission.ID, commandID, requestSHA, snapshot, now.Add(time.Minute),
+	); err != nil {
+		t.Fatalf("Task execution rejected the approved Worktree path: %v", err)
+	}
+}
+
+func TestWorktreeInitialStateSHA256Requires64HexCharacters(t *testing.T) {
+	job, execution, _, now := taskTurnFixture(t)
+	task, found := taskByID(job, execution.TaskID)
+	if !found || len(job.WorktreeAssignments) != 1 {
+		t.Fatal("Task Worktree fixture is incomplete")
+	}
+	snapshot := job.WorktreeAssignments[0].Snapshot()
+	snapshot.InitialStateSHA256 = strings.Repeat("c", 64)
+	if _, err := NewWorktreeAssignment(job, task, execution, snapshot, now); err != nil {
+		t.Fatalf("valid SHA-256 initial state was rejected: %v", err)
+	}
+	snapshot.InitialStateSHA256 = strings.Repeat("c", 40)
+	if _, err := NewWorktreeAssignment(job, task, execution, snapshot, now); err == nil {
+		t.Fatal("40-character Git commit ID was accepted as an InitialStateSHA256")
+	}
+	job.WorktreeAssignments[0].InitialStateSHA256 = strings.Repeat("c", 64)
+	if err := job.Validate(); err != nil {
+		t.Fatalf("valid persisted SHA-256 initial state was rejected: %v", err)
+	}
+	job.WorktreeAssignments[0].InitialStateSHA256 = strings.Repeat("c", 40)
+	if err := job.Validate(); err == nil {
+		t.Fatal("persisted 40-character Git commit ID was accepted as an InitialStateSHA256")
+	}
+}
