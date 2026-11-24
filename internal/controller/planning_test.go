@@ -13,9 +13,9 @@ import (
 )
 
 type fakePlanningLifecycleStore struct {
-	job               domain.Job
-	turnErr           error
-	effect            domain.PlanningEffectDecision
+	job                    domain.Job
+	turnErr                error
+	effect                 domain.PlanningEffectDecision
 	resumeErr              error
 	resumeIntentCalls      int
 	resumeObservationCalls int
@@ -172,7 +172,7 @@ func TestPlanningControllerRejectsTaskCoderResumeObservation(t *testing.T) {
 	fake := &fakePlanningLifecycleStore{
 		job: domain.Job{
 			ID: "job_1", Revision: 5,
-			RoleExecutions: []domain.RoleExecution{{ID: "role_1", Role: domain.RoleCoder}},
+			RoleExecutions:        []domain.RoleExecution{{ID: "role_1", Role: domain.RoleCoder}},
 			PlanningResumeIntents: []domain.PlanningResumeIntent{{ID: "resume_1", RoleExecutionID: "role_1"}},
 		},
 	}
