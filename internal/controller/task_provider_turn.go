@@ -106,6 +106,11 @@ func (c *ProviderController) SendTaskExecution(
 	// A repeated call may follow a process crash after Send. Reconcile the same
 	// OperationID / TurnID before any idempotent retry.
 	if !created {
+		if _, active := domain.ActiveTaskTurnDispatchClaim(current, turn.OperationID); !active &&
+			taskTurnRetryAuthorized(current, turn.ID) {
+			request.RequireIdempotency = true
+			return c.dispatchTaskTurn(ctx, receipt, current, turn, request, permissionRequest, principal, capabilities)
+		}
 		return c.reconcileTaskTurn(ctx, receipt, current, turn, request, permissionRequest, principal, capabilities)
 	}
 	return c.dispatchTaskTurn(ctx, receipt, current, turn, request, permissionRequest, principal, capabilities)
@@ -140,6 +145,27 @@ func taskTurnNeverDispatched(job domain.Job, turnID string) bool {
 		}
 	}
 	return true
+}
+
+func taskTurnRetryAuthorized(job domain.Job, turnID string) bool {
+	var latest domain.TaskTurnDispatchClaim
+	found := false
+	for _, claim := range job.TaskTurnDispatchClaims {
+		if claim.TurnID == turnID && (!found || claim.CreatedRevision > latest.CreatedRevision) {
+			latest, found = claim, true
+		}
+	}
+	if !found {
+		return false
+	}
+	for _, release := range job.TaskTurnDispatchReleases {
+		if release.ClaimID != latest.ID || release.Outcome != domain.TaskTurnDispatchReleasedIdempotentRetry {
+			continue
+		}
+		observation, exists := taskTurnDispatchObservation(job, latest.ID, domain.TaskTurnDispatchObservationLookupNotFound)
+		return exists && observation.EvidenceSHA256 == release.EvidenceSHA256
+	}
+	return false
 }
 
 func permissionRequestDigest(request domain.ExecutionPermissionRequest) string {
@@ -430,6 +456,16 @@ func (c *ProviderController) reconcileTaskTurn(
 		return receipt, turn, domain.TaskTurnObservation{}, provider.TurnResult{}, provider.ErrStopUnconfirmed
 	}
 	claimID := claim.ID
+	if _, started := taskTurnDispatchObservation(job, claimID, domain.TaskTurnDispatchObservationStarted); !started {
+		if err := c.releaseTaskTurnDispatchClaimBeforeSend(ctx, job.ID, turn, claimID, principal); err != nil {
+			return receipt, turn, domain.TaskTurnObservation{}, provider.TurnResult{}, err
+		}
+		latest, err := c.store.GetJob(ctx, job.ID)
+		if err != nil {
+			return receipt, turn, domain.TaskTurnObservation{}, provider.TurnResult{}, err
+		}
+		return c.dispatchTaskTurn(ctx, receipt, latest, turn, request, permissionRequest, principal, capabilities)
+	}
 	if capabilities.Identity != c.runtime.Identity() {
 		return receipt, turn, domain.TaskTurnObservation{}, provider.TurnResult{}, provider.ErrUnsupportedCapability
 	}
@@ -493,11 +529,11 @@ func (c *ProviderController) reconcileTaskTurn(
 		}
 		return receipt, turn, observation, provider.TurnResult{}, provider.ErrUnsupportedCapability
 	}
-	evidenceSHA256 := providerCapabilityEvidenceSHA256(capabilities, provider.CapabilitySendIdempotency)
-	if !validProviderEvidenceSHA256(evidenceSHA256) {
+	idempotencyEvidence := providerCapabilityEvidenceSHA256(capabilities, provider.CapabilitySendIdempotency)
+	if !validProviderEvidenceSHA256(idempotencyEvidence) || !validProviderEvidenceSHA256(lookupEvidence) {
 		return receipt, turn, domain.TaskTurnObservation{}, provider.TurnResult{}, provider.ErrUnsupportedCapability
 	}
-	job, err := c.releaseTaskTurnDispatchClaimForIdempotentRetry(ctx, job, turn, principal, evidenceSHA256)
+	job, err := c.releaseTaskTurnDispatchClaimForIdempotentRetry(ctx, job, turn, principal, lookupEvidence)
 	if err != nil {
 		return receipt, turn, domain.TaskTurnObservation{}, provider.TurnResult{}, err
 	}
