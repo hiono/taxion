@@ -486,6 +486,9 @@ func TestExecutionControllerStartsCoderOnApprovedAdoptedWorktree(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Authorize adopted Worktree: %v", err)
 	}
+	if permission.WorktreePath != worktreePath {
+		t.Fatalf("ExecutionPermission WorktreePath = %q, want %q", permission.WorktreePath, worktreePath)
+	}
 	startCommand := "cmd_97979797979797979797979797979797"
 	receipt, execution, intent, err := controller.StartTaskExecution(ctx, permission.ID, startCommand, request)
 	if err != nil {
