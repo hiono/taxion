@@ -150,7 +150,7 @@ func TestTaskProviderResumeRequiresMatchingE5CapabilityEvidence(t *testing.T) {
 			}
 		}},
 		{name: "Resume idempotency evidence missing", mutate: func(f *taskProviderStopFixture) {
-			f.runtime.capabilities.ResumeIdempotency = false
+			f.runtime.capabilities.ResumeIdempotency = true
 			filtered := f.runtime.capabilities.Evidence[:0]
 			for _, evidence := range f.runtime.capabilities.Evidence {
 				if evidence.Capability != provider.CapabilityResumeIdempotency {
