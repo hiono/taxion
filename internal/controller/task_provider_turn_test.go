@@ -420,6 +420,62 @@ func TestTaskProviderTurnRejectsLookupResultDigestMismatch(t *testing.T) {
 	}
 }
 
+func TestTaskProviderTurnReleasesDefinitiveSendFailureAndRetriesSameIntent(t *testing.T) {
+	f := newTaskProviderStopFixture(t)
+	now := time.Now().UTC()
+	f.runtime.capabilities.SendLookup = true
+	f.runtime.capabilities.FinalOutputRetrieval = true
+	f.runtime.capabilities.UsageIdentity = true
+	f.runtime.capabilities.UsageCompleteness = true
+	f.runtime.capabilities.Evidence = append(f.runtime.capabilities.Evidence,
+		provider.CapabilityEvidence{Capability: provider.CapabilitySendLookup, Identity: f.runtime.identity, TestID: "turn-definitive-failure", EvidenceSHA256: strings.Repeat("1", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
+		provider.CapabilityEvidence{Capability: provider.CapabilityFinalOutput, Identity: f.runtime.identity, TestID: "turn-definitive-failure", EvidenceSHA256: strings.Repeat("2", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
+		provider.CapabilityEvidence{Capability: provider.CapabilityUsageIdentity, Identity: f.runtime.identity, TestID: "turn-definitive-failure", EvidenceSHA256: strings.Repeat("3", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
+		provider.CapabilityEvidence{Capability: provider.CapabilityUsageCompleteness, Identity: f.runtime.identity, TestID: "turn-definitive-failure", EvidenceSHA256: strings.Repeat("4", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
+	)
+	commandID := "cmd_83838383838383838383838383838383"
+	prompt := "Retry after a definitive Provider rejection."
+	f.runtime.sendErr = &provider.OperationError{Class: provider.FailureDefinitive, Code: provider.OperationCodeInvalidRequest}
+	_, turn, observation, _, err := f.controller.SendTaskExecution(
+		f.ctx, f.jobID, f.execution.ID, f.permission.ID, commandID,
+		prompt, f.permissionRequest, 100, f.principal,
+	)
+	if err == nil || turn.ID == "" || observation.ID != "" {
+		t.Fatalf("definitive Send rejection was not returned without a fabricated observation: turn=%#v observation=%#v err=%v",
+			turn, observation, err)
+	}
+	job, err := f.database.GetJob(f.ctx, f.jobID)
+	if err != nil {
+		t.Fatalf("GetJob after definitive Send rejection: %v", err)
+	}
+	if len(job.TaskTurnDispatchClaims) != 1 || len(job.TaskTurnDispatchReleases) != 1 ||
+		len(job.TaskTurnObservations) != 0 ||
+		job.TaskTurnDispatchReleases[0].Outcome != domain.TaskTurnDispatchReleasedDefinitiveFailure ||
+		!validProviderEvidenceSHA256(job.TaskTurnDispatchReleases[0].EvidenceSHA256) ||
+		domain.ActiveTaskTurnDispatchClaim(job, turn.OperationID) != (domain.TaskTurnDispatchClaim{}, false) ||
+		!taskTurnNeverDispatched(job, turn.ID) {
+		t.Fatalf("definitive Send rejection did not release its exact claim with evidence: claims=%#v releases=%#v observations=%#v",
+			job.TaskTurnDispatchClaims, job.TaskTurnDispatchReleases, job.TaskTurnObservations)
+	}
+
+	f.runtime.sendErr = nil
+	_, retriedTurn, completed, result, err := f.controller.SendTaskExecution(
+		f.ctx, f.jobID, f.execution.ID, f.permission.ID, commandID,
+		prompt, f.permissionRequest, 100, f.principal,
+	)
+	if err != nil || retriedTurn.ID != turn.ID || completed.Status != domain.TaskTurnCompleted ||
+		result.Status != domain.TaskTurnCompleted || f.runtime.sendCalls != 2 {
+		t.Fatalf("same Task Turn intent did not retry after definitive non-dispatch: turn=%#v observation=%#v result=%#v calls=%d err=%v",
+			retriedTurn, completed, result, f.runtime.sendCalls, err)
+	}
+	job, err = f.database.GetJob(f.ctx, f.jobID)
+	if err != nil || len(job.TaskTurnDispatchClaims) != 2 || len(job.TaskTurnDispatchReleases) != 2 ||
+		len(job.TaskTurnObservations) != 1 {
+		t.Fatalf("retry did not preserve claim-scoped dispatch history: claims=%d releases=%d observations=%d err=%v",
+			len(job.TaskTurnDispatchClaims), len(job.TaskTurnDispatchReleases), len(job.TaskTurnObservations), err)
+	}
+}
+
 func TestProviderCapabilityEvidenceSHA256AcceptsEvidenceAtLeastLive(t *testing.T) {
 	identity := provider.Identity{
 		ProviderID: "provider.test", AccountID: "account.primary",
