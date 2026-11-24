@@ -240,6 +240,8 @@ E2 test-only policyはテストコードからのみ利用可能とし、本番c
 | CTR-053 | Task Resume concurrent dispatch — 同じOperationID / SessionIDに対する並行Resume | E5 Session ReattachmentとE4 Resume IdempotencyでProvider reattachmentを一つに収束 |
 | CTR-054 | Task Send definitive failure — Runtime.SendがFailureDefinitiveを返す | 当該ClaimだけをEvidence digest付きで解放し、UNKNOWNを追加せず、同じTurn intent / OperationIDで再試行可能 |
 | CTR-055 | Task Send ambiguous failure — Runtime.SendがFailureAmbiguousまたは分類不能エラーを返す | UNKNOWN observationとactive Claimを保持し、E4 Send Idempotencyなしに再dispatchしない |
+| CTR-056 | Task Stop repeated definitive failure — 同じOperationIDの別Dispatch Claimが同じFailureDefinitiveを返す | claim IDごとに異なるObservationをappendし、各Claimを個別に解放 |
+| CTR-057 | Task Stop runtime capability recheck — DispatchStart後、RuntimeがAdapter呼出し前にErrUnsupportedCapabilityを返す | definitive failureとしてClaimを解放し、同じStop intentをLookup NOT_FOUND後に再試行 |
 | CTR-043 | Reviewer Start boundary — immutable Worktree snapshot / read-only enforcement evidenceなし | Provider dispatch 0回 |
 | CTR-044 | Task prompt integrity — caller-supplied prompt / context injection、Task immutable fieldsの改変 | 任意promptを受け付けず、deterministic prompt digestのみ使用 |
 | CTR-045 | Stop restart reconciliation — Stop intent commit後、Provider Stop成功・Observation保存前にprocess crash | E4 Stop Lookupで同一OperationID / SessionIDのSTOPPED / Quiescentを確認し、terminal Observationをappend |
