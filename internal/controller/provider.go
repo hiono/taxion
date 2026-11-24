@@ -1738,7 +1738,6 @@ func providerResumeObservationCommandID(resumeID, status, evidenceSHA256 string,
 	return "cmd_" + hex.EncodeToString(sum[:16])
 }
 
-
 func resumeResultFromObservation(observation domain.PlanningResumeObservation) provider.ResumeResult {
 	return provider.ResumeResult{
 		OperationID: observation.OperationID, SessionID: observation.ProviderSessionID,
