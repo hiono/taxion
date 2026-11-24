@@ -808,10 +808,14 @@ func TestRuntimeStopPassesDispatchFencingToken(t *testing.T) {
 	}
 }
 
-func TestStopRequestRequiresDispatchFencingToken(t *testing.T) {
+func TestStopRequestRequiresDispatchFencingTokenOnlyWhenRequired(t *testing.T) {
 	request := validStopRequest()
 	request.FencingToken = 0
+	if err := request.Validate(); err != nil {
+		t.Fatalf("Stop request without required fencing was rejected: %v", err)
+	}
+	request.RequireFencing = true
 	if err := request.Validate(); err == nil {
-		t.Fatal("Stop request without a dispatch fencing token was accepted")
+		t.Fatal("Stop request requiring fencing accepted a zero token")
 	}
 }
