@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"errors"
 	"time"
 
 	"github.com/hiono/taxion/internal/domain"
@@ -63,14 +62,7 @@ func (s *Store) StartTaskExecution(
 			return domain.TaskExecutionStart{}, false
 		},
 	)
-	if err != nil {
-		if job, readErr := s.GetJob(ctx, jobID); readErr == nil &&
-			legacyTaskExecutionStartWithoutWorktreeAssignment(job, commandID) {
-			return CommandReceipt{}, domain.TaskExecutionStart{}, errors.New(
-				"legacy TASK_EXECUTION_START has no WorktreeAssignment and cannot be replayed; re-authorize the Task and issue a new Start command",
-			)
-		}
-	}
+
 	return receipt, start, err
 }
 
