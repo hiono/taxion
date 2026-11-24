@@ -83,6 +83,11 @@ func NewProviderStopDispatchClaim(
 	if _, active := ActiveProviderStopDispatchClaim(job, intent.OperationID); active {
 		return ProviderStopDispatchClaim{}, errors.New("Provider Stop operation already has an active dispatch claim")
 	}
+	for _, observation := range job.ProviderStopObservations {
+		if observation.OperationID == intent.OperationID && observation.Quiescent {
+			return ProviderStopDispatchClaim{}, errors.New("Provider Stop operation is already confirmed quiescent")
+		}
+	}
 	claim := ProviderStopDispatchClaim{
 		ID: ProviderStopDispatchClaimID(commandID), CommandID: commandID, JobID: job.ID,
 		StopIntentID: intent.ID, RoleExecutionID: intent.RoleExecutionID,
@@ -185,6 +190,19 @@ func (r ProviderStopDispatchRelease) Validate(job Job) error {
 		r.CreatedRevision <= claim.CreatedRevision || r.CreatedAt.Before(claim.CreatedAt) {
 		return errors.New("Provider Stop dispatch release does not match its claim")
 	}
+	if r.Outcome == ProviderStopDispatchReleasedStopped {
+		var latest *ProviderStopObservation
+		for i := range job.ProviderStopObservations {
+			observation := &job.ProviderStopObservations[i]
+			if observation.OperationID == r.OperationID &&
+				(latest == nil || observation.CreatedRevision > latest.CreatedRevision) {
+				latest = observation
+			}
+		}
+		if latest == nil || !latest.Quiescent || latest.CreatedRevision >= r.CreatedRevision {
+			return errors.New("STOPPED dispatch release requires prior quiescent Provider evidence")
+		}
+	}
 	return nil
 }
 
@@ -211,13 +229,17 @@ func validateProviderStopDispatchFacts(job Job) error {
 	claimsByOperation := make(map[string][]ProviderStopDispatchClaim)
 	seenClaimIDs := make(map[string]struct{}, len(job.ProviderStopDispatchClaims))
 	seenClaimCommands := make(map[string]struct{}, len(job.ProviderStopDispatchClaims))
+	var previousClaimRevision uint64
+	var previousClaimAt time.Time
 	for _, claim := range job.ProviderStopDispatchClaims {
 		if err := claim.Validate(job); err != nil {
 			return fmt.Errorf("%w: invalid ProviderStopDispatchClaim: %v", ErrInvalidJob, err)
 		}
-		if claim.CreatedAt.After(job.UpdatedAt) || claim.CreatedRevision > job.Revision {
+		if claim.CreatedAt.After(job.UpdatedAt) || claim.CreatedRevision > job.Revision ||
+			claim.CreatedRevision <= previousClaimRevision || claim.CreatedAt.Before(previousClaimAt) {
 			return fmt.Errorf("%w: ProviderStopDispatchClaim append order is invalid", ErrInvalidJob)
 		}
+		previousClaimRevision, previousClaimAt = claim.CreatedRevision, claim.CreatedAt
 		if _, exists := seenClaimIDs[claim.ID]; exists {
 			return fmt.Errorf("%w: duplicate ProviderStopDispatchClaim ID", ErrInvalidJob)
 		}
@@ -231,13 +253,17 @@ func validateProviderStopDispatchFacts(job Job) error {
 	seenReleaseIDs := make(map[string]struct{}, len(job.ProviderStopDispatchReleases))
 	seenReleaseCommands := make(map[string]struct{}, len(job.ProviderStopDispatchReleases))
 	releasesByClaim := make(map[string]ProviderStopDispatchRelease)
+	var previousReleaseRevision uint64
+	var previousReleaseAt time.Time
 	for _, release := range job.ProviderStopDispatchReleases {
 		if err := release.Validate(job); err != nil {
 			return fmt.Errorf("%w: invalid ProviderStopDispatchRelease: %v", ErrInvalidJob, err)
 		}
-		if release.CreatedAt.After(job.UpdatedAt) || release.CreatedRevision > job.Revision {
+		if release.CreatedAt.After(job.UpdatedAt) || release.CreatedRevision > job.Revision ||
+			release.CreatedRevision <= previousReleaseRevision || release.CreatedAt.Before(previousReleaseAt) {
 			return fmt.Errorf("%w: ProviderStopDispatchRelease append order is invalid", ErrInvalidJob)
 		}
+		previousReleaseRevision, previousReleaseAt = release.CreatedRevision, release.CreatedAt
 		if _, exists := seenReleaseIDs[release.ID]; exists {
 			return fmt.Errorf("%w: duplicate ProviderStopDispatchRelease ID", ErrInvalidJob)
 		}
