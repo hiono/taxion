@@ -121,8 +121,8 @@ func (o *JobOutput) bindSources(job Job) error {
 		return errors.New("JobOutput requires a completed Coder Turn and its exclusively assigned Task Worktree")
 	}
 	for _, candidate := range job.TaskTurnIntents {
-		if candidate.RoleExecutionID == execution.ID && candidate.CreatedRevision > turn.CreatedRevision {
-			return errors.New("JobOutput must reference the latest Coder Turn")
+		if candidate.RoleExecutionID == execution.ID && candidate.CreatedRevision > o.CreatedRevision {
+			return errors.New("JobOutput cannot precede a later Coder Turn")
 		}
 	}
 	var result ProviderResultObservation
