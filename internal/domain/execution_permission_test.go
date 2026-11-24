@@ -340,7 +340,7 @@ func TestExecutionPermissionBindsAdoptedWorktreeToApprovedTaskResource(t *testin
 		Role: "CODER", Effect: "repository.write", Resource: worktreePath,
 		ProviderID: "provider.test", AccountID: "account.primary",
 		ConfigurationSHA256: revision.Contract.ConfigurationSHA256,
-		ReservedTurns: 1, ReservedTokens: 100, ExpiresAt: task.CreatedAt.Add(20 * time.Minute),
+		ReservedTurns:       1, ReservedTokens: 100, ExpiresAt: task.CreatedAt.Add(20 * time.Minute),
 		WorktreePath: worktreePath,
 	}
 	requestSHA, err := ExecutionPermissionRequestSHA256(request)
