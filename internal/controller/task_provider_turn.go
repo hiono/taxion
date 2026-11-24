@@ -94,7 +94,17 @@ func (c *ProviderController) SendTaskExecution(
 
 func taskTurnNeverDispatched(job domain.Job, turnID string) bool {
 	for _, claim := range job.TaskTurnDispatchClaims {
-		if claim.TurnID == turnID {
+		if claim.TurnID != turnID {
+			continue
+		}
+		releasedBeforeDispatch := false
+		for _, release := range job.TaskTurnDispatchReleases {
+			if release.ClaimID == claim.ID {
+				releasedBeforeDispatch = release.Outcome == domain.TaskTurnDispatchReleasedDefinitiveFailure
+				break
+			}
+		}
+		if !releasedBeforeDispatch {
 			return false
 		}
 	}
@@ -325,6 +335,13 @@ func (c *ProviderController) dispatchTaskTurn(
 	current = postClaimJob
 	result, err := c.runtime.Send(ctx, request)
 	if err != nil {
+		if evidenceSHA256, definitive := providerTurnDefinitiveFailureEvidence(turn.OperationID, err); definitive {
+			_, _, releaseErr := c.store.ReleaseTaskTurnDispatchClaim(
+				ctx, current.ID, claim.ID, principal,
+				domain.TaskTurnDispatchReleasedDefinitiveFailure, evidenceSHA256,
+			)
+			return receipt, turn, domain.TaskTurnObservation{}, provider.TurnResult{}, errors.Join(err, releaseErr)
+		}
 		observation, persistErr := c.recordTaskTurnObservation(ctx, current.ID, turn.ID, domain.TaskTurnUnknown, 0, "", false)
 		if persistErr != nil {
 			return receipt, turn, observation, provider.TurnResult{}, errors.Join(err, persistErr)
