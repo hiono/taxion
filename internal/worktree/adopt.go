@@ -188,14 +188,20 @@ func adoptionRegistrationPath(root, jobID, taskID string) string {
 	return filepath.Join(root, hex.EncodeToString(key[:]))
 }
 
-func (m *Manager) recoverOrphanedAdoptionReservations(reservation adoptionReservation) error {
-	directory := filepath.Join(m.root, ".adoptions")
+func adoptionReservationPaths(directory string, reservation adoptionReservation) []string {
 	taskKey := sha256.Sum256([]byte(reservation.JobID + "\x00" + reservation.TaskID))
 	gitDirKey := sha256.Sum256([]byte(reservation.GitDir))
-	paths := []string{
+	worktreeKey := sha256.Sum256([]byte(reservation.WorktreePath))
+	return []string{
 		filepath.Join(directory, "task-"+hex.EncodeToString(taskKey[:])+".json"),
 		filepath.Join(directory, "gitdir-"+hex.EncodeToString(gitDirKey[:])+".json"),
+		filepath.Join(directory, "path-"+hex.EncodeToString(worktreeKey[:])+".json"),
 	}
+}
+
+func (m *Manager) recoverOrphanedAdoptionReservations(reservation adoptionReservation) error {
+	directory := filepath.Join(m.root, ".adoptions")
+	paths := adoptionReservationPaths(directory, reservation)
 	for _, path := range paths {
 		data, err := os.ReadFile(path)
 		if errors.Is(err, os.ErrNotExist) {
@@ -232,12 +238,7 @@ func (m *Manager) removeOrphanedAdoptionReservation(reservation adoptionReservat
 	}
 
 	directory := filepath.Join(m.root, ".adoptions")
-	taskKey := sha256.Sum256([]byte(reservation.JobID + "\x00" + reservation.TaskID))
-	gitDirKey := sha256.Sum256([]byte(reservation.GitDir))
-	paths := []string{
-		filepath.Join(directory, "task-"+hex.EncodeToString(taskKey[:])+".json"),
-		filepath.Join(directory, "gitdir-"+hex.EncodeToString(gitDirKey[:])+".json"),
-	}
+	paths := adoptionReservationPaths(directory, reservation)
 	removed := false
 	for _, path := range paths {
 		data, err := os.ReadFile(path)
@@ -284,20 +285,21 @@ func (m *Manager) reserveAdoption(jobID, taskID, repositoryID, worktreePath, git
 		JobID: jobID, TaskID: taskID, RepositoryID: repositoryID,
 		WorktreePath: worktreePath, GitDir: gitDir,
 	}
-	taskKey := sha256.Sum256([]byte(jobID + "\x00" + taskID))
-	gitDirKey := sha256.Sum256([]byte(gitDir))
-	taskPath := filepath.Join(directory, "task-"+hex.EncodeToString(taskKey[:])+".json")
-	gitDirPath := filepath.Join(directory, "gitdir-"+hex.EncodeToString(gitDirKey[:])+".json")
-	taskCreated, err := writeAdoptionReservation(taskPath, reservation)
-	if err != nil {
-		return err
-	}
-	if _, err := writeAdoptionReservation(gitDirPath, reservation); err != nil {
-		if taskCreated {
-			_ = os.Remove(taskPath)
-			_ = syncDirectory(directory)
+	createdPaths := make([]string, 0, 3)
+	for _, path := range adoptionReservationPaths(directory, reservation) {
+		created, err := writeAdoptionReservation(path, reservation)
+		if err != nil {
+			for _, createdPath := range createdPaths {
+				_ = os.Remove(createdPath)
+			}
+			if len(createdPaths) > 0 {
+				_ = syncDirectory(directory)
+			}
+			return err
 		}
-		return err
+		if created {
+			createdPaths = append(createdPaths, path)
+		}
 	}
 	return nil
 }
@@ -534,12 +536,7 @@ func (m *Manager) verifyAdoptionReservation(jobID, taskID, repositoryID, worktre
 		JobID: jobID, TaskID: taskID, RepositoryID: repositoryID,
 		WorktreePath: worktreePath, GitDir: gitDir,
 	}
-	taskKey := sha256.Sum256([]byte(jobID + "\x00" + taskID))
-	gitDirKey := sha256.Sum256([]byte(gitDir))
-	for _, path := range []string{
-		filepath.Join(directory, "task-"+hex.EncodeToString(taskKey[:])+".json"),
-		filepath.Join(directory, "gitdir-"+hex.EncodeToString(gitDirKey[:])+".json"),
-	} {
+	for _, path := range adoptionReservationPaths(directory, reservation) {
 		data, err := os.ReadFile(path)
 		if err != nil {
 			return fmt.Errorf("read Worktree adoption reservation: %w", err)

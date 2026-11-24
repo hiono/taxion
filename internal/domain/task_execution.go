@@ -45,7 +45,11 @@ func NewTaskRoleExecutionStart(
 	if err := permission.ValidateFor(job, permission.OperationID, requestSHA256, now); err != nil {
 		return TaskExecutionStart{}, fmt.Errorf("ExecutionPermission is not valid for Task execution start: %w", err)
 	}
-	if permission.WorktreePath != "" && permission.WorktreePath != snapshot.WorktreePath {
+	if snapshot.Origin == WorktreeOriginAdopted {
+		if permission.WorktreePath == "" || permission.WorktreePath != snapshot.WorktreePath {
+			return TaskExecutionStart{}, errors.New("adopted Task Worktree requires an explicitly approved matching ExecutionPermission path")
+		}
+	} else if permission.WorktreePath != "" && permission.WorktreePath != snapshot.WorktreePath {
 		return TaskExecutionStart{}, errors.New("Task execution Worktree snapshot differs from the approved ExecutionPermission path")
 	}
 	for _, existing := range job.RoleExecutions {

@@ -377,6 +377,50 @@ func TestManagerPreparedWorktreeGitDirCannotBeAdoptedByAnotherTask(t *testing.T)
 	}
 }
 
+func TestManagerAdoptReservesCanonicalPathAcrossDifferentGitDirs(t *testing.T) {
+	repository := initRepository(t)
+	external := filepath.Join(canonicalTempDir(t), "reserved-worktree")
+	gitTestRun(t, repository, "worktree", "add", "--detach", external, "HEAD")
+	manager, err := NewManager(filepath.Join(canonicalTempDir(t), "managed-worktrees"), []Repository{{ID: "repo.primary", Path: repository}})
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	taskA := domain.Task{ID: "task_9123456789abcdef", TargetRepositories: []string{"repo.primary"}}
+	if _, err := manager.Adopt(context.Background(), "job_9123456789abcdef", taskA, external); err != nil {
+		t.Fatalf("Adopt Task A: %v", err)
+	}
+	moved := filepath.Join(canonicalTempDir(t), "moved-reserved-worktree")
+	gitTestRun(t, repository, "worktree", "move", external, moved)
+	gitTestRun(t, repository, "worktree", "add", "--detach", external, "HEAD")
+	taskB := domain.Task{ID: "task_a123456789abcdef", TargetRepositories: []string{"repo.primary"}}
+	if _, err := manager.Adopt(context.Background(), "job_a123456789abcdef", taskB, external); err == nil ||
+		!strings.Contains(err.Error(), "reserved") {
+		t.Fatalf("Task B adopted a path still reserved by Task A with a different Git admin directory: %v", err)
+	}
+}
+
+func TestManagerCleanupFailedPreparePreservesBaselineWhenWorktreeRemovalFails(t *testing.T) {
+	repository := initRepository(t)
+	manager, err := NewManager(filepath.Join(canonicalTempDir(t), "managed-worktrees"), []Repository{{ID: "repo.primary", Path: repository}})
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	worktreePath := filepath.Join(canonicalTempDir(t), "not-a-linked-worktree")
+	if err := os.MkdirAll(worktreePath, 0o700); err != nil {
+		t.Fatalf("create non-worktree directory: %v", err)
+	}
+	baselinePath := worktreePath + ".baseline.json"
+	if err := os.WriteFile(baselinePath, []byte("baseline"), 0o600); err != nil {
+		t.Fatalf("write baseline: %v", err)
+	}
+	if err := manager.cleanupFailedPrepare(context.Background(), repository, worktreePath, baselinePath, true, nil); err == nil {
+		t.Fatal("cleanup unexpectedly removed a path that is not a linked Worktree")
+	}
+	if content, err := os.ReadFile(baselinePath); err != nil || string(content) != "baseline" {
+		t.Fatalf("baseline was not preserved for cleanup retry: content=%q err=%v", content, err)
+	}
+}
+
 func TestManagerAdoptRejectsSubmoduleAssumeUnchangedIndex(t *testing.T) {
 	submoduleRepository := initRepository(t)
 	repository := initRepository(t)

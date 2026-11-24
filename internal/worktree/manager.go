@@ -235,8 +235,8 @@ func (m *Manager) cleanupFailedPrepare(
 		worktreeRemoved = false
 		cleanupErr = fmt.Errorf("inspect failed Task Worktree before cleanup: %w", err)
 	}
-	if baselineCreated {
-		baselineRemoved := false
+	baselineRemoved := !baselineCreated
+	if baselineCreated && worktreeRemoved {
 		if err := os.Remove(baselinePath); err != nil && !errors.Is(err, os.ErrNotExist) {
 			cleanupErr = errors.Join(cleanupErr, fmt.Errorf("remove failed Task Worktree baseline: %w", err))
 		} else if err := syncDirectory(filepath.Dir(baselinePath)); err != nil {
@@ -244,9 +244,9 @@ func (m *Manager) cleanupFailedPrepare(
 		} else {
 			baselineRemoved = true
 		}
-		if reservation != nil && worktreeRemoved && baselineRemoved {
-			cleanupErr = errors.Join(cleanupErr, m.removeOrphanedAdoptionReservation(*reservation))
-		}
+	}
+	if reservation != nil && worktreeRemoved && baselineRemoved {
+		cleanupErr = errors.Join(cleanupErr, m.removeOrphanedAdoptionReservation(*reservation))
 	}
 	return cleanupErr
 }
@@ -261,7 +261,7 @@ func verifyCleanInitialWorktree(ctx context.Context, worktreePath, baseline stri
 	}
 	status, err := gitOutput(
 		ctx, worktreePath, "--no-optional-locks", "status", "--porcelain=v2",
-		"--untracked-files=all", "--ignore-submodules=all",
+		"--untracked-files=all", "--ignore-submodules=none",
 	)
 	if err != nil {
 		return fmt.Errorf("inspect new Task Worktree after checkout hooks: %w", err)
