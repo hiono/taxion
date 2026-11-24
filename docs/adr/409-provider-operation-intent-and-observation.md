@@ -18,6 +18,7 @@ Providerの実行状態をRoleExecutionやJobの状態だけで表すと、外�
 - Providerの応答・event・result・usage・stopは、対応するoperation identityへ束縛した独立した事実として保存します。
 - 不明な結果は不明のまま保持し、同じidentityによる照合なしに新しいoperationとして再送しません。
 - Providerの停止、最終結果、利用量が照合されるまで、関連する実行資源の所有権を維持します。
+- Task-bound Startは同一OperationIDの並行dispatchをProvider側で重複排除するため、E4 Start Idempotencyを必須とします。Start Lookup単独は既存operationの照合にのみ使用し、新規Startのdispatch根拠にしません。RuntimeはRequireIdempotency要求をcredential取得前に検証します。
 - Stop dispatchはJobAggregate内のClaimとDispatchStartで直列化し、ClaimのJob revisionを単調増加するfencing tokenとしてProviderへ渡します。
 - DispatchStart後の再起動復旧では、E4 Stop LookupのNOT_FOUNDとE4 Stop Dispatch Fencingの両方を要求します。ProviderはOperationID / SessionIDごとにfencing tokenを原子的に比較し、古いtokenを拒否し、同一operationの重複要求を一つのoperationへ収束させます。
 - fencing capabilityが未検証の場合、DispatchStart済みClaimをNOT_FOUNDだけで解放せず、Providerの確定証拠が得られるまで保持します。Claimの経過時間による自動解放は行いません。
