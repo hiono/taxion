@@ -234,7 +234,8 @@ E2 test-only policyはテストコードからのみ利用可能とし、本番c
 | CTR-039 | Task Start retry — 既存intent、observationなし、Start LookupでNOT_FOUND、E4 Start Idempotencyあり | permission再検証後、RequireIdempotency付きで同じOperationIDのStartのみ許可 |
 | CTR-040 | Task Start ambiguous — StartまたはLookupがambiguous / unclassified error | UNKNOWNをappendし、新しいOperationIDで再送しない |
 | CTR-041 | Task Start reconciliation — UNKNOWNに対する同一OperationIDのaccepted / failed Lookup evidence | ReconcilesUnknown=trueでappend-only解消 |
-| CTR-042 | Task Start unsafe capability — Start Lookup / idempotency evidenceなし | Startを呼ばずUNKNOWN / unresolvedを保持 |
+| CTR-042 | Task Start unsafe capability — E4 Start Idempotencyなし（Start Lookupのみを含む） | Startを呼ばずUNKNOWN / unresolvedを保持 |
+| CTR-052 | Task Start concurrent dispatch — 同じOperationIDに対する並行Start、Lookup NOT_FOUND | E4 Start IdempotencyでProvider operationを一つに収束 |
 | CTR-043 | Reviewer Start boundary — immutable Worktree snapshot / read-only enforcement evidenceなし | Provider dispatch 0回 |
 | CTR-044 | Task prompt integrity — caller-supplied prompt / context injection、Task immutable fieldsの改変 | 任意promptを受け付けず、deterministic prompt digestのみ使用 |
 | CTR-045 | Stop restart reconciliation — Stop intent commit後、Provider Stop成功・Observation保存前にprocess crash | E4 Stop Lookupで同一OperationID / SessionIDのSTOPPED / Quiescentを確認し、terminal Observationをappend |
