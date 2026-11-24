@@ -2,6 +2,8 @@ package controller
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"strings"
 	"testing"
@@ -222,9 +224,12 @@ func TestProviderControllerSendTaskExecutionPersistsResultAndCompleteUsage(t *te
 		t.Fatalf("GetJob before Task Turn dispatch recovery: %v", err)
 	}
 	nextCommandID := "cmd_f5050505050505050505050505050505"
+	nextPrompt := "Implement the approved Task changes again."
+	nextPromptDigest := sha256.Sum256([]byte(nextPrompt))
+	nextPromptSHA256 := hex.EncodeToString(nextPromptDigest[:])
 	_, nextTurn, created, err := database.AddTaskTurnIntentWithStatus(
 		ctx, jobID, job.Revision, execution.ID, permission.ID, turn.ProviderSessionID,
-		nextCommandID, strings.Repeat("4", 64), 50,
+		nextCommandID, nextPromptSHA256, 50,
 	)
 	if err != nil || !created {
 		t.Fatalf("persist second Task Turn intent: created=%v err=%v", created, err)
@@ -249,7 +254,7 @@ func TestProviderControllerSendTaskExecutionPersistsResultAndCompleteUsage(t *te
 	}
 	_, recoveredTurn, recoveredObservation, _, err := providerController.SendTaskExecution(
 		ctx, jobID, execution.ID, permission.ID, nextCommandID,
-		"Implement the approved Task changes again.", permissionRequest, 50, principal,
+		nextPrompt, permissionRequest, 50, principal,
 	)
 	if err != nil || recoveredTurn.ID != nextTurn.ID || recoveredObservation.Status != domain.TaskTurnCompleted {
 		t.Fatalf("SendIdempotency did not recover an active dispatch claim: turn=%#v observation=%#v err=%v",
