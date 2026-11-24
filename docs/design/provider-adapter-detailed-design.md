@@ -97,6 +97,7 @@ Capability Verifierは次を照合する。
 | Send | Send idempotencyまたはSend lookup | E4 |
 | Stop | Stop proof | E4 |
 | Stop recovery lookup | Stop lookup（同一OperationID / SessionID） | E4 |
+| Stop recovery after DispatchStart | Stop dispatch fencing | E4 |
 | Resume | Cross-process reattachment | E5 |
 | Lookup | 対象がStartかSendかに対応するlookup | E4 |
 | Result | Final output retrieval | E4 |
@@ -259,8 +260,10 @@ Reviewer Startは、ADR-408 / ADR-507に従うimmutable Worktree snapshotとread
 ### 8.3 Stop / Resume（Controller実装済み）
 
 - Stop intentを先に保存し、Runtime.Stopの後にstop proof、quiescence、terminal result、Usageを照合する。
-- 既存Stop intentの再送ではE4 Stop lookupを先に実行する。STOPPEDかつStopped / Quiescent=trueなら同じintentのObservationを追加し、NOT_FOUNDなら同じOperationID / SessionIDでのみRuntime.Stopを再試行する。
-- Stop lookupが利用できない、または応答がUNKNOWN / 不整合の場合はRuntime.Stopを再実行せず、既存UNKNOWNを保持する。
+- 既存Stop intentの再送ではE4 Stop lookupを先に実行する。STOPPEDかつStopped / Quiescent=trueなら同じintentのObservationを追加する。
+- active ClaimにDispatchStartがない場合、検証済みNOT_FOUNDで旧Claimを未dispatchとして解放し、新しいClaimを作成する。
+- DispatchStart済みClaimは、E4 Stop LookupのNOT_FOUNDとE4 Stop Dispatch Fencingが揃う場合だけ、旧Claimをfenced_not_foundとして解放し、新しいJob revisionをfencing tokenとして同じOperationID / SessionIDで再dispatchする。Providerは古いtokenを拒否し、同一operationの重複要求を一つへ収束させる。
+- fencing capabilityがない、またはLookupがUNKNOWN / 不整合の場合はClaimを保持し、Runtime.Stopを再実行しない。ClaimのTTL・経過時間だけで解放しない。
 - Resume intentとCommand receiptをRuntime.Resumeより先に保存する。
 - E5 SessionReattach capability evidence、Principal / grant / Provider identity、既存accepted Session、configuration identityを検証する。
 - Resumeは同一OperationID / SessionIDで再照合し、Attached=trueとevidenceを得た場合だけATTACHED observationを追加する。曖昧な結果はUNKNOWNとして保存し、UNKNOWN解消時は同じOperationIDのterminal evidenceだけを許可する。

@@ -539,6 +539,15 @@ func enableTaskStopLookup(f *taskProviderStopFixture) {
 	})
 }
 
+func enableTaskStopFencing(f *taskProviderStopFixture) {
+	f.runtime.capabilities.StopDispatchFencing = true
+	f.runtime.capabilities.Evidence = append(f.runtime.capabilities.Evidence, provider.CapabilityEvidence{
+		Capability: provider.CapabilityStopDispatchFencing, Identity: f.runtime.identity,
+		TestID: "task-stop-fencing-test", EvidenceSHA256: strings.Repeat("9", 64),
+		EvidenceLevel: provider.EvidenceLive, VerifiedAt: f.controller.now(),
+	})
+}
+
 func restartTaskProviderController(t *testing.T, f taskProviderStopFixture) *ProviderController {
 	t.Helper()
 	controller, err := NewProviderControllerWithExecutionAndWorktree(
@@ -569,7 +578,7 @@ func TestTaskProviderStopReconcilesProviderSideEffectAfterControllerRestart(t *t
 	// Simulate the Provider completing Stop after the intent commit but before
 	// Taxion persists its terminal observation.
 	if _, err := f.runtime.Stop(f.ctx, provider.StopRequest{
-		OperationID: intent.OperationID, SessionID: "session_1",
+		OperationID: intent.OperationID, SessionID: "session_1", FencingToken: 1,
 	}); err != nil {
 		t.Fatalf("simulate Provider Stop side effect: %v", err)
 	}
@@ -714,6 +723,82 @@ func TestTaskProviderStopRecoversClaimCommittedBeforeDispatchAfterRestart(t *tes
 	}
 	if _, _, _, err := f.database.StartProviderStopDispatchClaim(f.ctx, f.jobID, claim.ID, f.principal); err == nil {
 		t.Fatal("released stale claim was allowed to cross the dispatch-start fence")
+	}
+}
+
+func TestTaskProviderStopReclaimsStartedClaimWithProviderFencing(t *testing.T) {
+	f := newTaskProviderStopFixture(t)
+	enableTaskStopLookup(&f)
+	enableTaskStopFencing(&f)
+	commandID := "cmd_17171717171717171717171717171717"
+	job, err := f.database.GetJob(f.ctx, f.jobID)
+	if err != nil {
+		t.Fatalf("GetJob before Stop intent: %v", err)
+	}
+	_, intent, err := f.database.AddProviderStopIntent(
+		f.ctx, f.jobID, job.Revision, f.execution.ID, "session_1",
+		commandID, domain.ProviderStopReasonTaskComplete, f.principal,
+	)
+	if err != nil {
+		t.Fatalf("persist Stop intent: %v", err)
+	}
+	job, err = f.database.GetJob(f.ctx, f.jobID)
+	if err != nil {
+		t.Fatalf("GetJob before dispatch claim: %v", err)
+	}
+	_, oldClaim, created, err := f.database.AddProviderStopDispatchClaim(
+		f.ctx, f.jobID, job.Revision, intent.ID,
+		"cmd_18181818181818181818181818181818", f.principal,
+	)
+	if err != nil || !created {
+		t.Fatalf("persist old dispatch claim: claim=%#v created=%v err=%v", oldClaim, created, err)
+	}
+	if _, _, started, err := f.database.StartProviderStopDispatchClaim(
+		f.ctx, f.jobID, oldClaim.ID, f.principal,
+	); err != nil || !started {
+		t.Fatalf("persist old dispatch-start fact: started=%v err=%v", started, err)
+	}
+	f.runtime.lookupResult = provider.LookupResult{
+		Found: false, OperationID: intent.OperationID, SessionID: "session_1",
+		Status: provider.LookupStatusNotFound, EvidenceSHA256: strings.Repeat("8", 64),
+	}
+
+	restarted := restartTaskProviderController(t, f)
+	_, replayedIntent, observation, err := restarted.StopTaskExecution(
+		f.ctx, f.jobID, f.execution.ID, f.permission.ID, commandID,
+		f.permissionRequest, domain.ProviderStopReasonTaskComplete, f.principal,
+	)
+	if err != nil || replayedIntent.ID != intent.ID || !observation.Stopped || !observation.Quiescent {
+		t.Fatalf("fenced Stop recovery failed: intent=%#v observation=%#v err=%v", replayedIntent, observation, err)
+	}
+	job, err = f.database.GetJob(f.ctx, f.jobID)
+	if err != nil {
+		t.Fatalf("GetJob after fenced Stop recovery: %v", err)
+	}
+	if len(job.ProviderStopDispatchClaims) != 2 || len(job.ProviderStopDispatchStarts) != 2 ||
+		len(job.ProviderStopDispatchReleases) != 2 {
+		t.Fatalf("fenced recovery facts mismatch: claims=%d starts=%d releases=%d",
+			len(job.ProviderStopDispatchClaims), len(job.ProviderStopDispatchStarts), len(job.ProviderStopDispatchReleases))
+	}
+	release := job.ProviderStopDispatchReleases[0]
+	if release.ClaimID != oldClaim.ID || release.Outcome != domain.ProviderStopDispatchReleasedFencedNotFound ||
+		release.EvidenceSHA256 != strings.Repeat("8", 64) {
+		t.Fatalf("old started claim was not released with verified NOT_FOUND evidence: %#v", release)
+	}
+	newClaim := job.ProviderStopDispatchClaims[1]
+	if newClaim.CreatedRevision <= oldClaim.CreatedRevision {
+		t.Fatalf("replacement claim did not advance fencing token: old=%d new=%d",
+			oldClaim.CreatedRevision, newClaim.CreatedRevision)
+	}
+	if len(f.runtime.stopRequests) != 1 || f.runtime.stopRequests[0].FencingToken != newClaim.CreatedRevision {
+		t.Fatalf("Provider Stop did not receive replacement fencing token: requests=%#v claim=%#v",
+			f.runtime.stopRequests, newClaim)
+	}
+	_, staleErr := f.runtime.Stop(f.ctx, provider.StopRequest{
+		OperationID: intent.OperationID, SessionID: "session_1", FencingToken: oldClaim.CreatedRevision,
+	})
+	if staleErr == nil || f.runtime.stopCalls != 1 {
+		t.Fatalf("stale caller was not fenced after recovery: calls=%d err=%v", f.runtime.stopCalls, staleErr)
 	}
 }
 

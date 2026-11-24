@@ -142,12 +142,21 @@ func (c *ProviderController) StopTaskExecution(
 		// after another controller has released and replaced its claim.
 		if activeClaimFound {
 			if _, started := domain.ProviderStopDispatchStartedForClaim(currentJob, activeClaim.ID); started {
-				return intentReceipt, intent, previous, provider.ErrStopUnconfirmed
-			}
-			if _, _, releaseErr := c.store.ReleaseProviderStopDispatchClaim(
-				ctx, jobID, activeClaim.ID, principal, domain.ProviderStopDispatchReleasedNotDispatched, lookup.EvidenceSHA256,
-			); releaseErr != nil {
-				return intentReceipt, intent, previous, releaseErr
+				if !capabilities.HasEvidenceAtLeast(provider.CapabilityStopDispatchFencing, provider.EvidenceLive) {
+					return intentReceipt, intent, previous, provider.ErrStopUnconfirmed
+				}
+				if _, _, releaseErr := c.store.ReleaseProviderStopDispatchClaim(
+					ctx, jobID, activeClaim.ID, principal,
+					domain.ProviderStopDispatchReleasedFencedNotFound, lookup.EvidenceSHA256,
+				); releaseErr != nil {
+					return intentReceipt, intent, previous, releaseErr
+				}
+			} else {
+				if _, _, releaseErr := c.store.ReleaseProviderStopDispatchClaim(
+					ctx, jobID, activeClaim.ID, principal, domain.ProviderStopDispatchReleasedNotDispatched, lookup.EvidenceSHA256,
+				); releaseErr != nil {
+					return intentReceipt, intent, previous, releaseErr
+				}
 			}
 		}
 	}
@@ -194,8 +203,9 @@ func (c *ProviderController) StopTaskExecution(
 	}
 
 	stopResult, stopErr := c.runtime.Stop(ctx, provider.StopRequest{
-		OperationID: intent.OperationID,
-		SessionID:   sessionID,
+		OperationID:  intent.OperationID,
+		SessionID:    sessionID,
+		FencingToken: claim.CreatedRevision,
 	})
 	if stopErr != nil {
 		if providerOperationMayHaveStarted(stopErr) {

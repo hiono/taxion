@@ -13,6 +13,7 @@ const (
 	ProviderStopDispatchReleasedStopped           = "stopped"
 	ProviderStopDispatchReleasedDefinitiveFailure = "definitive_failure"
 	ProviderStopDispatchReleasedNotDispatched     = "not_dispatched"
+	ProviderStopDispatchReleasedFencedNotFound    = "fenced_not_found"
 )
 
 type ProviderStopDispatchClaim struct {
@@ -262,7 +263,7 @@ func NewProviderStopDispatchRelease(
 		return ProviderStopDispatchRelease{}, errors.New("Provider Stop dispatch release Principal does not match claim owner")
 	}
 	if outcome != ProviderStopDispatchReleasedStopped && outcome != ProviderStopDispatchReleasedDefinitiveFailure &&
-		outcome != ProviderStopDispatchReleasedNotDispatched {
+		outcome != ProviderStopDispatchReleasedNotDispatched && outcome != ProviderStopDispatchReleasedFencedNotFound {
 		return ProviderStopDispatchRelease{}, errors.New("unsupported Provider Stop dispatch release outcome")
 	}
 	if _, active := ActiveProviderStopDispatchClaim(job, claim.OperationID); !active {
@@ -274,6 +275,13 @@ func NewProviderStopDispatchRelease(
 		}
 		if !validSHA256(evidenceSHA256) {
 			return ProviderStopDispatchRelease{}, errors.New("not-dispatched release requires verified lookup evidence")
+		}
+	} else if outcome == ProviderStopDispatchReleasedFencedNotFound {
+		if _, started := ProviderStopDispatchStartedForClaim(job, claim.ID); !started {
+			return ProviderStopDispatchRelease{}, errors.New("fenced NOT_FOUND release requires a started Provider Stop dispatch")
+		}
+		if !validSHA256(evidenceSHA256) {
+			return ProviderStopDispatchRelease{}, errors.New("fenced NOT_FOUND release requires verified lookup evidence")
 		}
 	}
 	release := ProviderStopDispatchRelease{
@@ -294,7 +302,7 @@ func (r ProviderStopDispatchRelease) Validate(job Job) error {
 		!validPlanningIdentity(r.ClaimID) || !validPlanningIdentity(r.OperationID) ||
 		!strings.HasPrefix(r.PrincipalID, "human_") || r.CreatedAt.IsZero() || r.CreatedRevision == 0 ||
 		(r.Outcome != ProviderStopDispatchReleasedStopped && r.Outcome != ProviderStopDispatchReleasedDefinitiveFailure &&
-			r.Outcome != ProviderStopDispatchReleasedNotDispatched) {
+			r.Outcome != ProviderStopDispatchReleasedNotDispatched && r.Outcome != ProviderStopDispatchReleasedFencedNotFound) {
 		return errors.New("Provider Stop dispatch release identity or metadata is invalid")
 	}
 	var claim ProviderStopDispatchClaim
@@ -315,6 +323,10 @@ func (r ProviderStopDispatchRelease) Validate(job Job) error {
 		}
 		if !validSHA256(r.EvidenceSHA256) {
 			return errors.New("not-dispatched release requires verified lookup evidence")
+		}
+	} else if r.Outcome == ProviderStopDispatchReleasedFencedNotFound {
+		if _, started := ProviderStopDispatchStartedForClaim(job, claim.ID); !started || !validSHA256(r.EvidenceSHA256) {
+			return errors.New("fenced NOT_FOUND release requires a started claim and verified lookup evidence")
 		}
 	}
 	if r.Outcome == ProviderStopDispatchReleasedStopped {

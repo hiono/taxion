@@ -89,6 +89,7 @@ CapabilityはProvider ID、account identity、SDK / protocol version、configura
 | Event replay | event cursorの連続性を保った再取得 |
 | Stop proof | Providerが処理を停止し、後続書込みを継続しないことの証拠 |
 | Stop lookup | 同一Stop OperationID / SessionIDの状態を照会し、STOPPED / QuiescentまたはNOT_FOUNDを検証する能力 |
+| Stop dispatch fencing | OperationID / SessionIDごとに単調増加fencing tokenを原子的に適用し、古いtokenを拒否し、同一operationの重複要求を一つへ収束させる能力 |
 | Reviewer read-only snapshot | immutable JobOutput snapshotをProvider execution environmentでread-onlyとして強制する能力 |
 | Final output retrieval | event欠落時を含む最終結果の取得 |
 | Usage identity | 利用量をoperation / turnへ一意に束縛する能力 |
@@ -100,6 +101,7 @@ Capabilityは個別に扱う。未検証のCapabilityを利用可能と推定し
 
 最低水準:
 - Start / Send / Stop / Lookup / Result / Usage: E4
+- Stop Dispatch Fencing: E4
 - Reviewer read-only snapshot: E4（能力証拠がない場合はReviewer Startを拒否）
 - Cross-process reattachment / Event replay: E5
 - fake Adapterによる契約・異常系試験: E2
@@ -124,7 +126,9 @@ Capabilityは個別に扱う。未検証のCapabilityを利用可能と推定し
 - ResumeのUNKNOWNは同じResume OperationIDで照合する。
 - ResumeがATTACHEDと確定する前に新しいturnを開始しない。
 - Stopの成功は単なるcancel通知では認定しない。Stop proof、terminal result、Usageを照合する。
-- Stop intent後のprocess restartではE4 Stop lookupを必須とする。STOPPED / Stopped=true / Quiescent=trueの証拠で既存intentを解消する。NOT_FOUNDの証拠がある場合だけ、同じOperationID / SessionIDでStopを再試行する。
+- Stop intent後のprocess restartではE4 Stop lookupを必須とする。STOPPED / Stopped=true / Quiescent=trueの証拠で既存intentを解消する。
+- DispatchStartのないClaimは、E4 NOT_FOUNDの後に未dispatchとして解放できる。DispatchStart済みClaimは、E4 Stop LookupのNOT_FOUNDとE4 Stop Dispatch Fencingの両方がある場合だけ、fencing tokenを進めて同じOperationID / SessionIDで再試行する。
+- ProviderはOperationID / SessionID単位でfencing tokenを原子的に比較し、古いtokenの遅延要求を拒否し、同一operationの要求を重複実行しない。fencing capabilityがない場合はClaimを保持し、NOT_FOUNDだけで再dispatchしない。
 - Stop lookupが未対応・未検証、応答不整合、UNKNOWNの場合はStopを再実行せず、Worktree ownershipを保持する。
 - Stop状態またはresultが不明な資源は未解決として保持し、再利用・所有権解放を行わない。
 

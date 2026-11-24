@@ -122,6 +122,7 @@ Task-bound Coder Start fixtureはACTIVE Job、最新JobApproval、Task、JobAppr
 | CAP-012 | Declaration mismatch | 未宣言CapabilityにEvidenceあり | 拒否 |
 | CAP-013 | SDK drift | Runtime初期化後にAdapter identity変更 | 次操作前に拒否 |
 | CAP-014 | Stop recovery lookup | Stop Lookup capabilityまたはE4 evidence不足 | 既存Stop intentを保持し、Stopを再実行しない |
+| CAP-015 | Stop dispatch fencing | DispatchStart済みClaimの再取得でStop Dispatch Fencing capabilityまたはE4 evidence不足 | Claimを保持し、Stopを再実行しない |
 
 CAP-007 / CAP-008の拒否ではCredentialBroker.AcquireとAdapter methodの呼出し回数が0であることを検証する。
 
@@ -237,7 +238,10 @@ E2 test-only policyはテストコードからのみ利用可能とし、本番c
 | CTR-043 | Reviewer Start boundary — immutable Worktree snapshot / read-only enforcement evidenceなし | Provider dispatch 0回 |
 | CTR-044 | Task prompt integrity — caller-supplied prompt / context injection、Task immutable fieldsの改変 | 任意promptを受け付けず、deterministic prompt digestのみ使用 |
 | CTR-045 | Stop restart reconciliation — Stop intent commit後、Provider Stop成功・Observation保存前にprocess crash | E4 Stop Lookupで同一OperationID / SessionIDのSTOPPED / Quiescentを確認し、terminal Observationをappend |
-| CTR-046 | Stop restart retry — Stop intent commit後、Provider Stop前にprocess crash | E4 Stop LookupのNOT_FOUNDを確認した場合だけ、同じOperationID / SessionIDでStopを再試行 |
+| CTR-046 | Stop restart retry — Claim commit後、DispatchStart前にprocess crash | E4 Stop LookupのNOT_FOUND後に旧Claimを未dispatchとして解放し、同じOperationID / SessionIDで再dispatch |
+| CTR-047 | Stop restart retry — DispatchStart後、Provider Stop前にprocess crash、fencing capabilityなし | E4 NOT_FOUNDでもClaimを保持し、Stopを再実行しない |
+| CTR-048 | Stop restart retry — DispatchStart後、Provider Stop前にprocess crash、fencing capabilityあり | E4 NOT_FOUNDとE4 Stop Dispatch Fencingで旧Claimを解放し、新Claimのfencing tokenで再dispatch。遅延した旧tokenは拒否 |
+| CTR-049 | Stop dispatch fencing — 同一OperationID / SessionIDへの同一・古いtoken要求 | 同一operationへ収束し、古いtokenによる追加副作用を拒否 |
 
 ## 11. Regression tests
 

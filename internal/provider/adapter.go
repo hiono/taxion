@@ -40,6 +40,7 @@ const (
 	CapabilityEventReplay              Capability = "event.replay"
 	CapabilityStopProof                Capability = "stop.proof"
 	CapabilityStopLookup               Capability = "stop.lookup"
+	CapabilityStopDispatchFencing      Capability = "stop.dispatch_fencing"
 	CapabilityReviewerReadOnlySnapshot Capability = "reviewer.read_only_snapshot"
 	CapabilityFinalOutput              Capability = "result.final_output_retrieval"
 	CapabilityUsageIdentity            Capability = "usage.identity"
@@ -75,6 +76,7 @@ type Capabilities struct {
 	EventReplay                 bool
 	StopProof                   bool
 	StopLookup                  bool
+	StopDispatchFencing         bool
 	ReviewerReadOnlySnapshot    bool
 	FinalOutputRetrieval        bool
 	UsageIdentity               bool
@@ -142,6 +144,8 @@ func (c Capabilities) Has(capability Capability) bool {
 		return c.StopProof
 	case CapabilityStopLookup:
 		return c.StopLookup
+	case CapabilityStopDispatchFencing:
+		return c.StopDispatchFencing
 	case CapabilityReviewerReadOnlySnapshot:
 		return c.ReviewerReadOnlySnapshot
 	case CapabilityFinalOutput:
@@ -240,6 +244,8 @@ func setCapability(capabilities *Capabilities, capability Capability) {
 		capabilities.StopProof = true
 	case CapabilityStopLookup:
 		capabilities.StopLookup = true
+	case CapabilityStopDispatchFencing:
+		capabilities.StopDispatchFencing = true
 	case CapabilityReviewerReadOnlySnapshot:
 		capabilities.ReviewerReadOnlySnapshot = true
 	case CapabilityFinalOutput:
@@ -311,7 +317,7 @@ var allCapabilities = []Capability{
 	CapabilityStartIdempotency, CapabilityStartLookup, CapabilityTaskWorktree,
 	CapabilitySendIdempotency, CapabilitySendLookup,
 	CapabilitySessionReattach, CapabilityEventReplay,
-	CapabilityStopProof, CapabilityStopLookup, CapabilityReviewerReadOnlySnapshot, CapabilityFinalOutput,
+	CapabilityStopProof, CapabilityStopLookup, CapabilityStopDispatchFencing, CapabilityReviewerReadOnlySnapshot, CapabilityFinalOutput,
 	CapabilityUsageIdentity, CapabilityUsageCompleteness,
 }
 
@@ -419,13 +425,14 @@ type TurnResult struct {
 }
 
 type StopRequest struct {
-	OperationID string
-	SessionID   string
+	OperationID  string
+	SessionID    string
+	FencingToken uint64
 }
 
 func (r StopRequest) Validate() error {
-	if !validIdentifier(r.OperationID) || !validIdentifier(r.SessionID) {
-		return errors.New("Provider Stop request identity is invalid")
+	if !validIdentifier(r.OperationID) || !validIdentifier(r.SessionID) || r.FencingToken == 0 {
+		return errors.New("Provider Stop request identity and dispatch fencing token are required")
 	}
 	return nil
 }

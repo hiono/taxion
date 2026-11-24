@@ -71,6 +71,7 @@ type testAdapter struct {
 	startRequest   StartRequest
 	sendCalls      int
 	stopCalls      int
+	stopRequest    StopRequest
 	resumeCalls    int
 	lookupCalls    int
 	resultCalls    int
@@ -131,6 +132,7 @@ func (a *testAdapter) Send(_ context.Context, request TurnRequest, _ CredentialL
 }
 func (a *testAdapter) Stop(_ context.Context, request StopRequest, _ CredentialLease) (StopResult, error) {
 	a.stopCalls++
+	a.stopRequest = request
 	return StopResult{OperationID: request.OperationID, SessionID: request.SessionID, Stopped: true, Quiescent: a.stopQuiescent, EvidenceSHA256: strings.Repeat("c", 64)}, nil
 }
 func (a *testAdapter) Resume(_ context.Context, request ResumeRequest, _ CredentialLease) (ResumeResult, error) {
@@ -233,6 +235,8 @@ func newTestAdapter(capabilities ...Capability) *testAdapter {
 			declaration.StopProof = true
 		case CapabilityStopLookup:
 			declaration.StopLookup = true
+		case CapabilityStopDispatchFencing:
+			declaration.StopDispatchFencing = true
 		case CapabilityReviewerReadOnlySnapshot:
 			declaration.ReviewerReadOnlySnapshot = true
 		case CapabilityFinalOutput:
@@ -269,7 +273,7 @@ func validTurnRequest() TurnRequest {
 }
 
 func validStopRequest() StopRequest {
-	return StopRequest{OperationID: "provider_stop_1", SessionID: "session_1"}
+	return StopRequest{OperationID: "provider_stop_1", SessionID: "session_1", FencingToken: 1}
 }
 
 func validResumeRequest() ResumeRequest {
@@ -763,5 +767,31 @@ func TestRuntimeStopLookupUsesDedicatedCapability(t *testing.T) {
 	}
 	if result.Found || result.Status != LookupStatusNotFound || adapter.lookupCalls != 1 || broker.closed != 1 {
 		t.Fatalf("Stop Lookup result / calls: %#v adapter=%d closed=%d", result, adapter.lookupCalls, broker.closed)
+	}
+}
+
+func TestRuntimeStopPassesDispatchFencingToken(t *testing.T) {
+	adapter := newTestAdapter(CapabilityStopProof)
+	adapter.stopQuiescent = true
+	broker := &testBroker{secret: []byte("runtime-test-secret")}
+	runtime, err := newTestRuntime(adapter, broker)
+	if err != nil {
+		t.Fatalf("NewRuntime: %v", err)
+	}
+	request := validStopRequest()
+	request.FencingToken = 42
+	if _, err := runtime.Stop(context.Background(), request); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+	if adapter.stopRequest.FencingToken != 42 {
+		t.Fatalf("Stop fencing token was not forwarded: got=%d want=42", adapter.stopRequest.FencingToken)
+	}
+}
+
+func TestStopRequestRequiresDispatchFencingToken(t *testing.T) {
+	request := validStopRequest()
+	request.FencingToken = 0
+	if err := request.Validate(); err == nil {
+		t.Fatal("Stop request without a dispatch fencing token was accepted")
 	}
 }
