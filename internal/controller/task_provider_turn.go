@@ -281,6 +281,12 @@ func (c *ProviderController) dispatchTaskTurn(
 		releaseErr := c.releaseTaskTurnDispatchClaimBeforeSend(ctx, latest.ID, turn, claim.ID, principal)
 		return receipt, turn, domain.TaskTurnObservation{}, provider.TurnResult{}, errors.Join(fmt.Errorf("reverify Task Worktree after Send claim acquisition: %w", err), releaseErr)
 	}
+	// ExecutionPermission is operation-scoped and must still be valid after the
+	// final Worktree verification, immediately before the Provider side effect.
+	if err := postPermission.ValidateFor(postClaimJob, postPermission.OperationID, postPermission.RequestSHA256, c.now()); err != nil {
+		releaseErr := c.releaseTaskTurnDispatchClaimBeforeSend(ctx, latest.ID, turn, claim.ID, principal)
+		return receipt, turn, domain.TaskTurnObservation{}, provider.TurnResult{}, errors.Join(err, releaseErr)
+	}
 	for _, stopIntent := range postClaimJob.ProviderStopIntents {
 		if stopIntent.RoleExecutionID == turn.RoleExecutionID && stopIntent.SessionID == turn.ProviderSessionID {
 			releaseErr := c.releaseTaskTurnDispatchClaimBeforeSend(ctx, latest.ID, turn, claim.ID, principal)
