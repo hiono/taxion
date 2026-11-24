@@ -477,7 +477,9 @@ func TestExecutionControllerStartsCoderOnApprovedAdoptedWorktree(t *testing.T) {
 		Role: domain.RoleCoder, Effect: "repository.write", Resource: worktreePath,
 		ProviderID: "provider.test", AccountID: "account.primary",
 		ConfigurationSHA256: revision.Contract.ConfigurationSHA256,
-		ReservedTurns: 1, ReservedTokens: 100, ExpiresAt: now.Add(30 * time.Minute),
+		ReservedTurns:       1,
+		ReservedTokens:     100,
+		ExpiresAt:          now.Add(30 * time.Minute),
 		WorktreePath: worktreePath,
 	}
 	_, permission, err := controller.Authorize(ctx, request)
