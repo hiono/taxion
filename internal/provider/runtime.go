@@ -177,6 +177,9 @@ func (r *Runtime) Stop(ctx context.Context, request StopRequest) (StopResult, er
 	if !capabilities.HasEvidenceAtLeast(CapabilityStopProof, r.minimumEvidence) {
 		return StopResult{}, ErrUnsupportedCapability
 	}
+	if request.RequireFencing && !capabilities.HasEvidenceAtLeast(CapabilityStopDispatchFencing, r.minimumEvidence) {
+		return StopResult{}, ErrUnsupportedCapability
+	}
 	result, err := withCredential(ctx, r.broker, r.identity, func(lease CredentialLease) (StopResult, error) {
 		result, err := r.adapter.Stop(ctx, request, lease)
 		if err != nil {

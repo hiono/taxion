@@ -424,10 +424,14 @@ type TurnResult struct {
 	EvidenceSHA256 string
 }
 
+// StopRequest identifies one Provider Stop operation. When RequireFencing is
+// true, the Adapter must atomically reject stale FencingToken values and
+// deduplicate requests for the same OperationID / SessionID.
 type StopRequest struct {
 	OperationID  string
 	SessionID    string
 	FencingToken uint64
+	RequireFencing bool
 }
 
 func (r StopRequest) Validate() error {

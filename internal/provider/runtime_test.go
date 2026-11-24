@@ -749,6 +749,23 @@ func TestWithCredentialReportsAcquireAndLeaseCleanupFailureWithoutCallingProvide
 	}
 }
 
+func TestRuntimeStopRejectsRequiredFencingWithoutEvidence(t *testing.T) {
+	adapter := newTestAdapter(CapabilityStopProof)
+	broker := &testBroker{secret: []byte("runtime-test-secret")}
+	runtime, err := newTestRuntime(adapter, broker)
+	if err != nil {
+		t.Fatalf("NewRuntime: %v", err)
+	}
+	request := validStopRequest()
+	request.RequireFencing = true
+	if _, err := runtime.Stop(context.Background(), request); !errors.Is(err, ErrUnsupportedCapability) {
+		t.Fatalf("Stop without verified dispatch fencing was accepted: %v", err)
+	}
+	if adapter.stopCalls != 0 || broker.acquires != 0 {
+		t.Fatalf("unverified dispatch fencing caused side effects: adapter=%d broker=%d", adapter.stopCalls, broker.acquires)
+	}
+}
+
 func TestRuntimeStopLookupUsesDedicatedCapability(t *testing.T) {
 	adapter := newTestAdapter(CapabilityStopLookup)
 	adapter.lookupResult = LookupResult{
@@ -771,7 +788,7 @@ func TestRuntimeStopLookupUsesDedicatedCapability(t *testing.T) {
 }
 
 func TestRuntimeStopPassesDispatchFencingToken(t *testing.T) {
-	adapter := newTestAdapter(CapabilityStopProof)
+	adapter := newTestAdapter(CapabilityStopProof, CapabilityStopDispatchFencing)
 	adapter.stopQuiescent = true
 	broker := &testBroker{secret: []byte("runtime-test-secret")}
 	runtime, err := newTestRuntime(adapter, broker)
@@ -780,11 +797,12 @@ func TestRuntimeStopPassesDispatchFencingToken(t *testing.T) {
 	}
 	request := validStopRequest()
 	request.FencingToken = 42
+	request.RequireFencing = true
 	if _, err := runtime.Stop(context.Background(), request); err != nil {
 		t.Fatalf("Stop: %v", err)
 	}
-	if adapter.stopRequest.FencingToken != 42 {
-		t.Fatalf("Stop fencing token was not forwarded: got=%d want=42", adapter.stopRequest.FencingToken)
+	if adapter.stopRequest.FencingToken != 42 || !adapter.stopRequest.RequireFencing {
+		t.Fatalf("Stop fencing contract was not forwarded: request=%#v", adapter.stopRequest)
 	}
 }
 

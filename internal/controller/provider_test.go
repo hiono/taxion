@@ -296,6 +296,9 @@ func (f *fakePlanningProviderRuntime) Resume(ctx context.Context, request provid
 
 func (f *fakePlanningProviderRuntime) Stop(ctx context.Context, request provider.StopRequest) (provider.StopResult, error) {
 	f.stopRequests = append(f.stopRequests, request)
+	if request.RequireFencing && !f.capabilities.HasEvidenceAtLeast(provider.CapabilityStopDispatchFencing, provider.EvidenceLive) {
+		return provider.StopResult{}, provider.ErrUnsupportedCapability
+	}
 	if f.capabilities.Has(provider.CapabilityStopDispatchFencing) {
 		key := request.OperationID + "\x00" + request.SessionID
 		if f.stopFencingTokens == nil {
