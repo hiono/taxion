@@ -1692,7 +1692,12 @@ func (c *ProviderController) recordResumeObservation(
 	jobID, resumeID, status, evidenceSHA256 string,
 	principal auth.AuthenticatedPrincipal,
 ) (domain.PlanningResumeObservation, error) {
-	job, err := c.store.GetJob(ctx, jobID)
+	// Provider side effects may complete after the caller cancels. Persist their
+	// outcome independently so an ATTACHED Session is never left without durable
+	// reconciliation evidence solely because the request context was canceled.
+	persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	job, err := c.store.GetJob(persistCtx, jobID)
 	if err != nil {
 		return domain.PlanningResumeObservation{}, err
 	}
@@ -1711,7 +1716,7 @@ func (c *ProviderController) recordResumeObservation(
 	reconcilesUnknown := found && previous.Status == domain.PlanningResumeUnknown && status != domain.PlanningResumeUnknown
 	commandID := providerResumeObservationCommandID(resumeID, status, evidenceSHA256, reconcilesUnknown)
 	_, observation, err := c.store.AddPlanningResumeObservation(
-		ctx, job.ID, job.Revision, resumeID, commandID, status, evidenceSHA256, reconcilesUnknown, principal,
+		persistCtx, job.ID, job.Revision, resumeID, commandID, status, evidenceSHA256, reconcilesUnknown, principal,
 	)
 	return observation, err
 }
