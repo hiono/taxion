@@ -325,8 +325,16 @@ func (m *Manager) CaptureOutput(ctx context.Context, jobID string, task domain.T
 		return OutputSnapshot{}, errors.New("inspect Task Worktree index flags before output capture")
 	}
 	for _, entry := range strings.Split(indexEntries, "\x00") {
-		if len(entry) > 0 && entry[0] == 'h' {
+		if len(entry) == 0 {
+			continue
+		}
+		switch entry[0] {
+		case 'h':
 			return OutputSnapshot{}, errors.New("Task Worktree index contains assume-unchanged entries")
+		case 'S':
+			return OutputSnapshot{}, errors.New("Task Worktree index contains skip-worktree entries")
+		case 's':
+			return OutputSnapshot{}, errors.New("Task Worktree index contains skip-worktree and assume-unchanged entries")
 		}
 	}
 	status, err := gitOutput(ctx, snapshot.WorktreePath, "--no-optional-locks", "status", "--porcelain", "--untracked-files=all", "--ignore-submodules=none")

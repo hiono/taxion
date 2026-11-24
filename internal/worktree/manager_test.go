@@ -249,6 +249,17 @@ func TestManagerCapturesImmutableOutputSnapshotOnlyForCleanWorktree(t *testing.T
 	gitTestRun(t, snapshot.WorktreePath, "update-index", "--no-assume-unchanged", "output.txt")
 	gitTestRun(t, snapshot.WorktreePath, "checkout", "--", "output.txt")
 
+	if err := os.WriteFile(filepath.Join(snapshot.WorktreePath, "output.txt"), []byte("skip-worktree change\n"), 0o600); err != nil {
+		t.Fatalf("write skip-worktree content: %v", err)
+	}
+	gitTestRun(t, snapshot.WorktreePath, "update-index", "--skip-worktree", "output.txt")
+	if _, err := manager.CaptureOutput(context.Background(), jobID, task, snapshot); err == nil ||
+		!strings.Contains(err.Error(), "skip-worktree") {
+		t.Fatalf("CaptureOutput accepted a skip-worktree modification: %v", err)
+	}
+	gitTestRun(t, snapshot.WorktreePath, "update-index", "--no-skip-worktree", "output.txt")
+	gitTestRun(t, snapshot.WorktreePath, "checkout", "--", "output.txt")
+
 	if err := os.WriteFile(filepath.Join(snapshot.WorktreePath, "uncommitted.txt"), []byte("not committed\\n"), 0o600); err != nil {
 		t.Fatalf("write uncommitted output: %v", err)
 	}
