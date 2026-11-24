@@ -137,6 +137,14 @@ func (s *Store) initialize(ctx context.Context) error {
 			receipt_json TEXT NOT NULL,
 			created_at TEXT NOT NULL
 		)`,
+		`CREATE TABLE IF NOT EXISTS provider_stop_dispatch_claims (
+			operation_id TEXT PRIMARY KEY,
+			job_id TEXT NOT NULL REFERENCES job_aggregates(job_id),
+			role_execution_id TEXT NOT NULL,
+			session_id TEXT NOT NULL,
+			claim_id TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		)`,
 	}
 	for _, statement := range statements {
 		if _, err := tx.ExecContext(ctx, statement); err != nil {
