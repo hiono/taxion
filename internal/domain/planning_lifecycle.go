@@ -124,19 +124,27 @@ type PlanningEffectDecision struct {
 	CreatedRevision         uint64    `json:"created_revision"`
 }
 
+type ProviderResumeResponse struct {
+	OperationID    string `json:"operation_id"`
+	SessionID      string `json:"session_id"`
+	Attached       bool   `json:"attached"`
+	EvidenceSHA256 string `json:"evidence_sha256"`
+}
+
 type PlanningResumeObservation struct {
-	ID                string    `json:"id"`
-	CommandID         string    `json:"command_id"`
-	JobID             string    `json:"job_id"`
-	ResumeID          string    `json:"resume_id"`
-	OperationID       string    `json:"operation_id"`
-	RoleExecutionID   string    `json:"role_execution_id"`
-	ProviderSessionID string    `json:"provider_session_id"`
-	Status            string    `json:"status"`
-	EvidenceSHA256    string    `json:"evidence_sha256,omitempty"`
-	ReconcilesUnknown bool      `json:"reconciles_unknown,omitempty"`
-	CreatedAt         time.Time `json:"created_at"`
-	CreatedRevision   uint64    `json:"created_revision"`
+	ID                string                 `json:"id"`
+	CommandID         string                 `json:"command_id"`
+	JobID             string                 `json:"job_id"`
+	ResumeID          string                 `json:"resume_id"`
+	OperationID       string                 `json:"operation_id"`
+	RoleExecutionID   string                 `json:"role_execution_id"`
+	ProviderSessionID string                 `json:"provider_session_id"`
+	Status            string                 `json:"status"`
+	EvidenceSHA256    string                 `json:"evidence_sha256,omitempty"`
+	ProviderResponse  *ProviderResumeResponse `json:"provider_response,omitempty"`
+	ReconcilesUnknown bool                   `json:"reconciles_unknown,omitempty"`
+	CreatedAt         time.Time              `json:"created_at"`
+	CreatedRevision   uint64                 `json:"created_revision"`
 }
 
 type PlanningResumeIntent struct {
@@ -1012,9 +1020,12 @@ func NewPlanningResumeObservation(job Job, resumeID, principalID, commandID, sta
 	if !found {
 		return PlanningResumeObservation{}, errors.New("PlanningResumeIntent was not found")
 	}
-	authorizedPrincipalID, _, err := providerResultUsageExecution(job, resume.RoleExecutionID)
+	authorizedPrincipalID, execution, err := providerResultUsageExecution(job, resume.RoleExecutionID)
 	if err != nil {
 		return PlanningResumeObservation{}, err
+	}
+	if execution.Role != RolePlanner {
+		return PlanningResumeObservation{}, errors.New("Task Coder Resume observations require the Provider response path")
 	}
 	if authorizedPrincipalID != principalID {
 		return PlanningResumeObservation{}, errors.New("Provider Resume observation Principal does not match its execution authority")
@@ -1070,6 +1081,107 @@ func NewPlanningResumeObservation(job Job, resumeID, principalID, commandID, sta
 	return observation, nil
 }
 
+func NewTaskProviderResumeObservation(
+	job Job,
+	resumeID, commandID, status, evidenceSHA256 string,
+	response ProviderResumeResponse,
+	reconcilesUnknown bool,
+	now time.Time,
+) (PlanningResumeObservation, error) {
+	now = now.UTC().Round(0)
+	if !validCommandID(commandID) || now.IsZero() {
+		return PlanningResumeObservation{}, errors.New("Task Provider Resume observation command and timestamp are required")
+	}
+	if err := job.Validate(); err != nil {
+		return PlanningResumeObservation{}, err
+	}
+	var resume PlanningResumeIntent
+	found := false
+	for _, candidate := range job.PlanningResumeIntents {
+		if candidate.ID == resumeID {
+			resume, found = candidate, true
+			break
+		}
+	}
+	if !found {
+		return PlanningResumeObservation{}, errors.New("PlanningResumeIntent was not found")
+	}
+	var execution RoleExecution
+	foundExecution := false
+	for _, candidate := range job.RoleExecutions {
+		if candidate.ID == resume.RoleExecutionID {
+			execution, foundExecution = candidate, true
+			break
+		}
+	}
+	if !foundExecution || execution.Role != RoleCoder {
+		return PlanningResumeObservation{}, errors.New("Task Provider Resume observation requires a Coder execution")
+	}
+	if status != PlanningResumeUnknown && status != PlanningResumeNotDispatched &&
+		status != PlanningResumeAttached && status != PlanningResumeFailed {
+		return PlanningResumeObservation{}, errors.New("unsupported Task Provider Resume observation status")
+	}
+	var providerResponse *ProviderResumeResponse
+	if status == PlanningResumeUnknown {
+		if evidenceSHA256 != "" || reconcilesUnknown || response != (ProviderResumeResponse{}) {
+			return PlanningResumeObservation{}, errors.New("UNKNOWN Task Resume observation cannot claim terminal Provider response evidence")
+		}
+	} else {
+		if !validSHA256(evidenceSHA256) {
+			return PlanningResumeObservation{}, errors.New("terminal Task Resume observation requires evidence")
+		}
+		if status == PlanningResumeAttached {
+			if response.OperationID != resume.OperationID || response.SessionID != resume.ProviderSessionID ||
+				!response.Attached || !validSHA256(response.EvidenceSHA256) ||
+				response.EvidenceSHA256 != evidenceSHA256 {
+				return PlanningResumeObservation{}, errors.New("ATTACHED Task Resume observation requires the exact Provider response")
+			}
+			providerResponse = &response
+		} else if response != (ProviderResumeResponse{}) {
+			return PlanningResumeObservation{}, errors.New("non-ATTACHED Task Resume observation cannot contain a Provider response")
+		}
+		if status == PlanningResumeNotDispatched && reconcilesUnknown {
+			return PlanningResumeObservation{}, errors.New("NOT_DISPATCHED Task Resume observation cannot reconcile Provider UNKNOWN")
+		}
+	}
+	var previous *PlanningResumeObservation
+	for i := range job.PlanningResumeObservations {
+		candidate := &job.PlanningResumeObservations[i]
+		if candidate.ResumeID == resumeID {
+			previous = candidate
+		}
+	}
+	if previous == nil {
+		if reconcilesUnknown {
+			return PlanningResumeObservation{}, errors.New("first Task Resume observation cannot reconcile UNKNOWN")
+		}
+	} else if previous.Status == PlanningResumeUnknown {
+		if status == PlanningResumeUnknown || !reconcilesUnknown || !validSHA256(evidenceSHA256) {
+			return PlanningResumeObservation{}, errors.New("only UNKNOWN may be reconciled by same-operation Provider evidence")
+		}
+	} else if previous.Status == PlanningResumeNotDispatched {
+		if reconcilesUnknown || status == PlanningResumeNotDispatched {
+			return PlanningResumeObservation{}, errors.New("NOT_DISPATCHED may only be followed by a new Task Provider Resume observation")
+		}
+	} else {
+		return PlanningResumeObservation{}, errors.New("terminal Task Provider Resume observation cannot be replaced")
+	}
+	if job.Revision >= uint64(^uint64(0)>>1) {
+		return PlanningResumeObservation{}, errors.New("Job revision exhausted")
+	}
+	observation := PlanningResumeObservation{
+		ID: PlanningResumeObservationID(commandID), CommandID: commandID,
+		JobID: job.ID, ResumeID: resume.ID, OperationID: resume.OperationID,
+		RoleExecutionID: resume.RoleExecutionID, ProviderSessionID: resume.ProviderSessionID,
+		Status: status, EvidenceSHA256: evidenceSHA256, ProviderResponse: providerResponse,
+		ReconcilesUnknown: reconcilesUnknown, CreatedAt: now, CreatedRevision: job.Revision + 1,
+	}
+	if err := observation.Validate(job, resume); err != nil {
+		return PlanningResumeObservation{}, err
+	}
+	return observation, nil
+}
+
 func (o PlanningResumeObservation) Validate(job Job, resume PlanningResumeIntent) error {
 	if !validPlanningIdentity(o.ID) || !validCommandID(o.CommandID) ||
 		o.ID != PlanningResumeObservationID(o.CommandID) || o.JobID != job.ID ||
@@ -1078,6 +1190,35 @@ func (o PlanningResumeObservation) Validate(job Job, resume PlanningResumeIntent
 		o.CreatedAt.IsZero() || o.CreatedAt.Before(resume.CreatedAt) ||
 		o.CreatedRevision < resume.CreatedRevision+1 {
 		return errors.New("PlanningResumeObservation identity or metadata mismatch")
+	}
+	var execution RoleExecution
+	foundExecution := false
+	for _, candidate := range job.RoleExecutions {
+		if candidate.ID == o.RoleExecutionID {
+			execution, foundExecution = candidate, true
+			break
+		}
+	}
+	if !foundExecution {
+		return errors.New("PlanningResumeObservation RoleExecution was not found")
+	}
+	if execution.Role == RolePlanner {
+		if o.ProviderResponse != nil {
+			return errors.New("Planner Resume observation cannot contain a Task Provider response")
+		}
+	} else if execution.Role == RoleCoder {
+		if o.Status == PlanningResumeAttached {
+			response := o.ProviderResponse
+			if response == nil || response.OperationID != o.OperationID ||
+				response.SessionID != o.ProviderSessionID || !response.Attached ||
+				!validSHA256(response.EvidenceSHA256) || response.EvidenceSHA256 != o.EvidenceSHA256 {
+				return errors.New("Task Coder ATTACHED observation requires a matching Provider Resume response")
+			}
+		} else if o.ProviderResponse != nil {
+			return errors.New("non-ATTACHED Task Coder Resume observation cannot contain a Provider response")
+		}
+	} else {
+		return errors.New("PlanningResumeObservation role is unsupported")
 	}
 	if o.Status == PlanningResumeUnknown {
 		if o.EvidenceSHA256 != "" || o.ReconcilesUnknown {
