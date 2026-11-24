@@ -230,6 +230,8 @@ func newTestAdapter(capabilities ...Capability) *testAdapter {
 			declaration.SendLookup = true
 		case CapabilitySessionReattach:
 			declaration.CrossProcessSessionReattach = true
+		case CapabilityResumeIdempotency:
+			declaration.ResumeIdempotency = true
 		case CapabilityEventReplay:
 			declaration.EventReplay = true
 		case CapabilityStopProof:
@@ -510,6 +512,23 @@ func TestRuntimeRequiresDurableEvidenceForResume(t *testing.T) {
 	}
 	if adapter.resumeCalls != 0 || broker.acquires != 0 {
 		t.Fatalf("non-durable reattachment caused side effects: adapter=%d broker=%d", adapter.resumeCalls, broker.acquires)
+	}
+}
+
+func TestRuntimeResumeRequiresVerifiedIdempotencyForTaskReattachment(t *testing.T) {
+	adapter := newTestAdapter(CapabilitySessionReattach)
+	broker := &testBroker{secret: []byte("runtime-test-secret")}
+	runtime, err := newTestRuntime(adapter, broker)
+	if err != nil {
+		t.Fatalf("NewRuntime: %v", err)
+	}
+	request := validResumeRequest()
+	request.RequireIdempotency = true
+	if _, err := runtime.Resume(context.Background(), request); !errors.Is(err, ErrUnsupportedCapability) {
+		t.Fatalf("Task Resume without idempotency evidence = %v, want ErrUnsupportedCapability", err)
+	}
+	if adapter.resumeCalls != 0 || broker.closed != 0 {
+		t.Fatalf("unsupported Task Resume crossed credential or Adapter boundary: resumes=%d closed=%d", adapter.resumeCalls, broker.closed)
 	}
 }
 
