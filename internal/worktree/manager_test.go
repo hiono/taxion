@@ -43,6 +43,9 @@ func TestManagerPreparesDetachedTaskWorktreeAtImmutableBaseline(t *testing.T) {
 	if !errors.As(err, &exitErr) || exitErr.ExitCode() != 1 {
 		t.Fatalf("detached HEAD check returned unexpected error: %v: %s", err, output)
 	}
+	if !isDetachedHeadProbeError(err) {
+		t.Fatalf("detached HEAD probe did not recognize Git exit status 1: %v", err)
+	}
 	if got := gitTestOutput(t, repository, "rev-parse", "HEAD"); got != before {
 		t.Fatalf("source repository HEAD changed: got %s, want %s", got, before)
 	}
@@ -52,6 +55,25 @@ func TestManagerPreparesDetachedTaskWorktreeAtImmutableBaseline(t *testing.T) {
 	}
 	if replayed != snapshot {
 		t.Fatalf("Prepare replay changed snapshot: got %#v want %#v", replayed, snapshot)
+	}
+}
+
+func TestDetachedHeadProbeRejectsUnexpectedGitErrors(t *testing.T) {
+	missingRepository := filepath.Join(t.TempDir(), "missing-repository")
+	command := exec.Command("git", "-C", missingRepository, "symbolic-ref", "-q", "HEAD")
+	_, err := command.Output()
+	if err == nil {
+		t.Fatal("symbolic-ref unexpectedly succeeded for a missing repository")
+	}
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) || exitErr.ExitCode() == 1 {
+		t.Fatalf("missing repository returned unexpected Git error: %v", err)
+	}
+	if isDetachedHeadProbeError(err) {
+		t.Fatalf("Git exit status %d was incorrectly accepted as detached HEAD", exitErr.ExitCode())
+	}
+	if isDetachedHeadProbeError(errors.New("Git executable is unavailable")) {
+		t.Fatal("non-exit error was incorrectly accepted as detached HEAD")
 	}
 }
 

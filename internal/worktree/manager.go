@@ -191,6 +191,8 @@ func (m *Manager) Verify(ctx context.Context, jobID string, task domain.Task, sn
 	}
 	if _, err := gitOutput(ctx, expectedPath, "symbolic-ref", "-q", "HEAD"); err == nil {
 		return errors.New("Task Worktree must remain detached")
+	} else if !isDetachedHeadProbeError(err) {
+		return fmt.Errorf("verify Task Worktree detached HEAD: %w", err)
 	}
 	gitDir, err := gitOutput(ctx, expectedPath, "rev-parse", "--absolute-git-dir")
 	if err != nil {
@@ -368,4 +370,9 @@ func validCommit(value string) bool {
 	}
 	_, err := hex.DecodeString(value)
 	return err == nil
+}
+
+func isDetachedHeadProbeError(err error) bool {
+	var exitErr *exec.ExitError
+	return errors.As(err, &exitErr) && exitErr.ExitCode() == 1
 }
