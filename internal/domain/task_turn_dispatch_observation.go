@@ -1,45 +1,11 @@
 package domain
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
 	"time"
 )
-
-func TaskTurnDispatchObservationID(commandID string) string {
-	return planningOperationID("task_turn_dispatch_observation", commandID)
-}
-
-func TaskTurnDispatchObservationCommandID(claimID, status string) string {
-	sum := sha256.Sum256([]byte("taxion:task-turn-dispatch-observation:" + claimID + ":" + status))
-	return "cmd_" + hex.EncodeToString(sum[:16])
-}
-
-func taskTurnDispatchClaimByID(job Job, claimID string) (TaskTurnDispatchClaim, bool) {
-	for _, claim := range job.TaskTurnDispatchClaims {
-		if claim.ID == claimID {
-			return claim, true
-		}
-	}
-	return TaskTurnDispatchClaim{}, false
-}
-
-func taskTurnDispatchObservationForClaim(
-	job Job, claimID, status string,
-) (TaskTurnDispatchObservation, bool) {
-	var latest TaskTurnDispatchObservation
-	found := false
-	for _, observation := range job.TaskTurnDispatchObservations {
-		if observation.ClaimID == claimID && observation.Status == status &&
-			(!found || observation.CreatedRevision > latest.CreatedRevision) {
-			latest, found = observation, true
-		}
-	}
-	return latest, found
-}
 
 func NewTaskTurnDispatchObservation(
 	job Job, claimID, principalID, commandID, status, evidenceSHA256 string, now time.Time,
