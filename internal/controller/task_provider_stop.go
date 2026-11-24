@@ -324,4 +324,3 @@ func providerStopDispatchRequiresFencing(job domain.Job, operationID string) boo
 	}
 	return false
 }
-
