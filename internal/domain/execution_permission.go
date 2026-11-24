@@ -155,8 +155,9 @@ func ValidateExecutionPermissionRequest(job Job, request ExecutionPermissionRequ
 	}
 	if request.WorktreePath != "" {
 		if !filepath.IsAbs(request.WorktreePath) || filepath.Clean(request.WorktreePath) != request.WorktreePath ||
-			!containsExact(task.Workspaces, request.WorktreePath) {
-			return errors.New("adopted Worktree path must be a canonical path explicitly included in the approved Task workspace scope")
+			request.Resource != request.WorktreePath ||
+			!containsExact(task.TargetResources, request.WorktreePath) {
+			return errors.New("adopted Worktree path must be canonical and explicitly approved as the exact Task resource")
 		}
 	}
 	now = now.UTC().Round(0)
