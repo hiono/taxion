@@ -37,6 +37,23 @@ func (c *ProviderController) SendTaskExecution(
 		identity.ConfigurationSHA256 != permission.ConfigurationSHA256 {
 		return store.CommandReceipt{}, domain.TaskTurnIntent{}, domain.TaskTurnObservation{}, provider.TurnResult{}, errors.New("Provider Runtime identity differs from ExecutionPermission")
 	}
+	var capabilities provider.Capabilities
+	existingTurn := false
+	for _, existing := range job.TaskTurnIntents {
+		if existing.CommandID == commandID && existing.RoleExecutionID == execution.ID {
+			existingTurn = true
+			break
+		}
+	}
+	if !existingTurn {
+		capabilities, err = c.runtime.Capabilities(ctx)
+		if err != nil {
+			return store.CommandReceipt{}, domain.TaskTurnIntent{}, domain.TaskTurnObservation{}, provider.TurnResult{}, err
+		}
+		if capabilities.Identity != identity || !taskTurnCapabilitiesVerified(capabilities) {
+			return store.CommandReceipt{}, domain.TaskTurnIntent{}, domain.TaskTurnObservation{}, provider.TurnResult{}, provider.ErrUnsupportedCapability
+		}
+	}
 	promptSHA := sha256String(prompt)
 	request := provider.TurnRequest{
 		OperationID: domain.TaskTurnOperationID(commandID), TurnID: domain.TaskTurnIntentID(commandID),
@@ -72,11 +89,13 @@ func (c *ProviderController) SendTaskExecution(
 		}
 		return receipt, turn, previous, taskTurnResultFromObservation(previous), nil
 	}
-	capabilities, err := c.runtime.Capabilities(ctx)
-	if err != nil {
-		return receipt, turn, domain.TaskTurnObservation{}, provider.TurnResult{}, err
+	if existingTurn {
+		capabilities, err = c.runtime.Capabilities(ctx)
+		if err != nil {
+			return receipt, turn, domain.TaskTurnObservation{}, provider.TurnResult{}, err
+		}
 	}
-	if capabilities.Identity != identity || !capabilities.SupportsSafeSend() {
+	if capabilities.Identity != identity || !taskTurnCapabilitiesVerified(capabilities) {
 		return receipt, turn, domain.TaskTurnObservation{}, provider.TurnResult{}, provider.ErrUnsupportedCapability
 	}
 	// No claim or observation means no call could have crossed the dispatch
@@ -90,6 +109,13 @@ func (c *ProviderController) SendTaskExecution(
 		return c.reconcileTaskTurn(ctx, receipt, current, turn, request, permissionRequest, principal, capabilities)
 	}
 	return c.dispatchTaskTurn(ctx, receipt, current, turn, request, permissionRequest, principal, capabilities)
+}
+
+func taskTurnCapabilitiesVerified(capabilities provider.Capabilities) bool {
+	return capabilities.SupportsSafeSend() &&
+		capabilities.HasEvidenceAtLeast(provider.CapabilityFinalOutput, provider.EvidenceLive) &&
+		capabilities.HasEvidenceAtLeast(provider.CapabilityUsageIdentity, provider.EvidenceLive) &&
+		capabilities.HasEvidenceAtLeast(provider.CapabilityUsageCompleteness, provider.EvidenceLive)
 }
 
 func taskTurnNeverDispatched(job domain.Job, turnID string) bool {
@@ -265,6 +291,9 @@ func (c *ProviderController) dispatchTaskTurn(
 		latestPermission.ID != permission.ID || latestAssignment != assignment || latestTask.ID != task.ID {
 		return receipt, turn, domain.TaskTurnObservation{}, provider.TurnResult{}, errors.Join(errors.New("Task authority or Worktree changed before Provider Send"), err)
 	}
+	if !request.RequireIdempotency && !taskTurnNeverDispatched(latest, turn.ID) {
+		return c.reconcileTaskTurn(ctx, receipt, latest, turn, request, permissionRequest, principal, capabilities)
+	}
 	if err := latestPermission.ValidateFor(latest, latestPermission.OperationID, latestPermission.RequestSHA256, c.now()); err != nil {
 		return receipt, turn, domain.TaskTurnObservation{}, provider.TurnResult{}, err
 	}
@@ -321,6 +350,13 @@ func (c *ProviderController) dispatchTaskTurn(
 			releaseErr := c.releaseTaskTurnDispatchClaimBeforeSend(ctx, latest.ID, turn, claim.ID, principal)
 			return receipt, turn, domain.TaskTurnObservation{}, provider.TurnResult{}, errors.Join(errors.New("Task Provider Send is blocked by a Stop intent saved after claim acquisition"), releaseErr)
 		}
+	}
+	if !request.RequireIdempotency && taskTurnHasObservation(postClaimJob, turn.ID) {
+		releaseErr := c.releaseTaskTurnDispatchClaimBeforeSend(ctx, latest.ID, turn, claim.ID, principal)
+		if releaseErr != nil {
+			return receipt, turn, domain.TaskTurnObservation{}, provider.TurnResult{}, releaseErr
+		}
+		return c.reconcileTaskTurn(ctx, receipt, postClaimJob, turn, request, permissionRequest, principal, capabilities)
 	}
 	activeClaim, active := domain.ActiveTaskTurnDispatchClaim(postClaimJob, turn.OperationID)
 	if !active || activeClaim.ID != claim.ID {
@@ -421,7 +457,7 @@ func (c *ProviderController) reconcileTaskTurn(
 			return receipt, turn, observation, provider.TurnResult{}, errors.New("Provider Send lookup has not confirmed a terminal Turn")
 		}
 	}
-	if !canRetry {
+	if !canLookup || !canRetry {
 		observation, persistErr := c.recordTaskTurnObservation(ctx, job.ID, turn.ID, domain.TaskTurnUnknown, 0, "", false)
 		if persistErr != nil {
 			return receipt, turn, observation, provider.TurnResult{}, persistErr
@@ -759,6 +795,15 @@ func (c *ProviderController) recordTaskTurnObservation(
 
 func taskTurnObservationCommandID(turnID, status string, tokensUsed uint64, evidenceSHA256 string, reconcilesUnknown bool) string {
 	return "cmd_" + sha256String(fmt.Sprintf("taxion:task-turn-observation:%s:%s:%d:%s:%t", turnID, status, tokensUsed, evidenceSHA256, reconcilesUnknown))[:32]
+}
+
+func taskTurnHasObservation(job domain.Job, turnID string) bool {
+	for _, observation := range job.TaskTurnObservations {
+		if observation.TurnID == turnID {
+			return true
+		}
+	}
+	return false
 }
 
 func latestTaskTurnObservation(job domain.Job, turnID string) (domain.TaskTurnObservation, bool) {

@@ -531,6 +531,7 @@ func TestTaskProviderStopCapabilityAndWorktreeGatesHaveNoProviderSideEffect(t *t
 		mutate func(*taskProviderStopFixture)
 	}{
 		{name: "missing StopProof", mutate: func(f *taskProviderStopFixture) { f.runtime.capabilities.StopProof = false }},
+		{name: "missing StopLookup", mutate: func(f *taskProviderStopFixture) { f.runtime.capabilities.StopLookup = false }},
 		{name: "Provider identity mismatch", mutate: func(f *taskProviderStopFixture) {
 			f.runtime.capabilities.Identity.ProviderID = "provider.other"
 		}},

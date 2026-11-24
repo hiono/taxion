@@ -105,6 +105,33 @@ func TestProviderControllerSendTaskExecutionPersistsResultAndCompleteUsage(t *te
 	if err != nil {
 		t.Fatalf("NewProviderControllerWithExecutionAndWorktree: %v", err)
 	}
+
+	completeCapabilities := runtime.capabilities
+	runtime.capabilities.SendLookup = false
+	runtime.capabilities.SendIdempotency = false
+	if _, _, _, _, err := providerController.SendTaskExecution(
+		ctx, jobID, execution.ID, permission.ID, "cmd_c1010101010101010101010101010101",
+		"Capability preflight must precede intent persistence.", permissionRequest, 100, principal,
+	); !errors.Is(err, provider.ErrUnsupportedCapability) {
+		t.Fatalf("Send without E4 Lookup or Idempotency was not rejected: %v", err)
+	}
+	job, err := database.GetJob(ctx, jobID)
+	if err != nil || len(job.TaskTurnIntents) != 0 {
+		t.Fatalf("missing Send capability persisted a Turn intent: intents=%d err=%v", len(job.TaskTurnIntents), err)
+	}
+	runtime.capabilities = completeCapabilities
+	runtime.capabilities.FinalOutputRetrieval = false
+	if _, _, _, _, err := providerController.SendTaskExecution(
+		ctx, jobID, execution.ID, permission.ID, "cmd_c2020202020202020202020202020202",
+		"Final Result capability preflight must precede intent persistence.", permissionRequest, 100, principal,
+	); !errors.Is(err, provider.ErrUnsupportedCapability) {
+		t.Fatalf("Send without FinalOutput capability was not rejected: %v", err)
+	}
+	job, err = database.GetJob(ctx, jobID)
+	if err != nil || len(job.TaskTurnIntents) != 0 {
+		t.Fatalf("missing FinalOutput capability persisted a Turn intent: intents=%d err=%v", len(job.TaskTurnIntents), err)
+	}
+	runtime.capabilities = completeCapabilities
 	if _, _, err := providerController.DispatchTaskExecution(
 		ctx, jobID, execution.ID, permission.ID, permissionRequest,
 	); err != nil {

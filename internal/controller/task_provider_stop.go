@@ -56,7 +56,9 @@ func (c *ProviderController) StopTaskExecution(
 			break
 		}
 	}
-	if !existingStopIntent && !capabilities.HasEvidenceAtLeast(provider.CapabilityStopProof, provider.EvidenceLive) {
+	if !existingStopIntent &&
+		(!capabilities.HasEvidenceAtLeast(provider.CapabilityStopProof, provider.EvidenceLive) ||
+			!capabilities.HasEvidenceAtLeast(provider.CapabilityStopLookup, provider.EvidenceLive)) {
 		return store.CommandReceipt{}, domain.ProviderStopIntent{}, domain.ProviderStopObservation{}, provider.ErrUnsupportedCapability
 	}
 	intentReceipt, intent, created, err := c.store.AddProviderStopIntentWithStatus(
@@ -76,7 +78,8 @@ func (c *ProviderController) StopTaskExecution(
 	fencingRequired := providerStopDispatchRequiresFencing(currentJob, intent.OperationID)
 	if activeClaimFound && hasPrevious && !previous.Stopped && !previous.Quiescent &&
 		validProviderEvidenceSHA256(previous.EvidenceSHA256) {
-		if _, started := domain.ProviderStopDispatchStartedForClaim(currentJob, activeClaim.ID); started {
+		if start, started := domain.ProviderStopDispatchStartedForClaim(currentJob, activeClaim.ID); started &&
+			previous.CreatedRevision > start.CreatedRevision {
 			if _, _, releaseErr := c.store.ReleaseProviderStopDispatchClaim(
 				ctx, jobID, activeClaim.ID, principal, domain.ProviderStopDispatchReleasedDefinitiveFailure, previous.EvidenceSHA256,
 			); releaseErr != nil {
