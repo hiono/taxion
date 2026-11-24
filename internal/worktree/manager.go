@@ -498,7 +498,7 @@ func (m *Manager) CaptureOutput(ctx context.Context, jobID string, task domain.T
 	}
 	statusHead, dirty, err := parseWorktreeStatusHead(status)
 	if err != nil || statusHead != commit || dirty {
-		return OutputSnapshot{}, errors.New("Task Worktree clean-state observation does not match the captured commit")
+		return OutputSnapshot{}, errors.New("Task Worktree must be clean for the captured commit; status HEAD or dirty state differs")
 	}
 	headAfterStatus, err := gitOutput(ctx, snapshot.WorktreePath, "rev-parse", "--verify", "HEAD^{commit}")
 	if err != nil || headAfterStatus != commit {
