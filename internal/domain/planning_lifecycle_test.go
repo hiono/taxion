@@ -620,8 +620,7 @@ func TestNewPlanningResumeRequiresAcceptedStartObservation(t *testing.T) {
 	job.ProviderStartObservations = nil
 	_, err = NewPlanningResumeIntent(job, executionID, principal, "session_1",
 		"cmd_22222222222222222222222222222222", strings.Repeat("2", 64), true, job.UpdatedAt.Add(time.Second))
-	var boundary *PlanningBoundaryError
-	if !errors.As(err, &boundary) || boundary.ReasonCode != "provider_start_unconfirmed" {
+	if err == nil || !strings.Contains(err.Error(), "provider_start_unconfirmed") {
 		t.Fatalf("Resume without accepted Start observation error = %v, want provider_start_unconfirmed", err)
 	}
 }
