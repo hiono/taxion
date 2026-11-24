@@ -137,9 +137,8 @@ func (c *ProviderController) StopTaskExecution(
 			}
 			return intentReceipt, intent, observation, provider.ErrStopUnconfirmed
 		}
-		// A NOT_FOUND result can reclaim a claim only if the durable dispatch-start
-		// fact is absent. The start fact fences a paused caller from dispatching
-		// after another controller has released and replaced its claim.
+		// A pre-start claim can be reclaimed directly. A started claim requires
+		// Provider-enforced fencing so a paused caller's older token is rejected.
 		if activeClaimFound {
 			if _, started := domain.ProviderStopDispatchStartedForClaim(currentJob, activeClaim.ID); started {
 				if !capabilities.HasEvidenceAtLeast(provider.CapabilityStopDispatchFencing, provider.EvidenceLive) {

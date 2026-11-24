@@ -208,7 +208,6 @@ type fakePlanningProviderRuntime struct {
 	stopHook         func(context.Context, provider.StopRequest) error
 	startHook        func(context.Context, provider.StartRequest) error
 }
-}
 
 func (f *fakePlanningProviderRuntime) Identity() provider.Identity { return f.identity }
 
