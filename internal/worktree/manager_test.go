@@ -434,6 +434,7 @@ func TestManagerCaptureOutputRejectsReplacedCreatedWorktreeGitDir(t *testing.T) 
 		t.Fatalf("Prepare: %v", err)
 	}
 	gitTestRun(t, repository, "worktree", "remove", "--force", snapshot.WorktreePath)
+	gitTestRun(t, repository, "worktree", "prune")
 	gitTestRun(t, repository, "worktree", "add", "--detach", snapshot.WorktreePath, snapshot.BaselineCommit)
 	if _, err := manager.CaptureOutput(context.Background(), jobID, task, snapshot); err == nil ||
 		!strings.Contains(err.Error(), "reservation identity") {
@@ -736,7 +737,7 @@ func TestManagerRequiresPersistentReservationForAdoptedWorktree(t *testing.T) {
 	}
 	reservationDirectory := filepath.Join(manager.root, ".adoptions")
 	entries, err := os.ReadDir(reservationDirectory)
-	if err != nil || len(entries) != 2 {
+	if err != nil || len(entries) != 3 {
 		t.Fatalf("read adoption reservation: entries=%v err=%v", entries, err)
 	}
 	if err := os.Remove(filepath.Join(reservationDirectory, entries[0].Name())); err != nil {
@@ -788,7 +789,7 @@ func TestManagerAdoptionReservationsAreUniqueByTaskAndGitAdminDirectory(t *testi
 	}
 	reservationDirectory := filepath.Join(manager.root, ".adoptions")
 	entries, err := os.ReadDir(reservationDirectory)
-	if err != nil || len(entries) != 2 {
+	if err != nil || len(entries) != 3 {
 		t.Fatalf("losing Task reservation was not cleaned up: entries=%d err=%v", len(entries), err)
 	}
 	movedPath := filepath.Join(canonicalTempDir(t), "adoption-moved")
@@ -798,7 +799,7 @@ func TestManagerAdoptionReservationsAreUniqueByTaskAndGitAdminDirectory(t *testi
 		t.Fatal("the same Git admin directory was adopted after its Worktree path changed")
 	}
 	entries, err = os.ReadDir(reservationDirectory)
-	if err != nil || len(entries) != 2 {
+	if err != nil || len(entries) != 3 {
 		t.Fatalf("losing Git admin directory reservation was not cleaned up: entries=%d err=%v", len(entries), err)
 	}
 }
