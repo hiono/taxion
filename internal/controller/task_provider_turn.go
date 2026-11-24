@@ -364,7 +364,7 @@ func (c *ProviderController) reconcileTaskTurn(
 func providerCapabilityEvidenceSHA256(capabilities provider.Capabilities, capability provider.Capability) string {
 	for _, evidence := range capabilities.Evidence {
 		if evidence.Capability == capability &&
-			evidence.EvidenceLevel == provider.EvidenceLive &&
+			capabilities.HasEvidenceAtLeast(capability, provider.EvidenceLive) &&
 			validProviderEvidenceSHA256(evidence.EvidenceSHA256) {
 			return evidence.EvidenceSHA256
 		}

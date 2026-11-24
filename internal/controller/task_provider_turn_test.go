@@ -336,3 +336,36 @@ func TestProviderControllerSendTaskExecutionPersistsResultAndCompleteUsage(t *te
 		t.Fatal("Task Turn was accepted after Provider Stop intent")
 	}
 }
+
+
+func TestProviderCapabilityEvidenceSHA256AcceptsEvidenceAtLeastLive(t *testing.T) {
+	identity := provider.Identity{
+		ProviderID: "provider.test", AccountID: "account.primary",
+		SDKVersion: "sdk1", ConfigurationSHA256: strings.Repeat("f", 64),
+	}
+	digest := strings.Repeat("a", 64)
+	for _, test := range []struct {
+		name  string
+		level provider.EvidenceLevel
+		want  string
+	}{
+		{name: "live", level: provider.EvidenceLive, want: digest},
+		{name: "durable", level: provider.EvidenceDurable, want: digest},
+		{name: "sdk", level: provider.EvidenceSDK},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			capabilities := provider.Capabilities{
+				Identity: identity, StopDispatchFencing: true,
+				Evidence: []provider.CapabilityEvidence{{
+					Capability: provider.CapabilityStopDispatchFencing,
+					Identity: identity, TestID: "stop-fencing-evidence",
+					EvidenceSHA256: digest, EvidenceLevel: test.level,
+					VerifiedAt: time.Now().UTC(),
+				}},
+			}
+			if got := providerCapabilityEvidenceSHA256(capabilities, provider.CapabilityStopDispatchFencing); got != test.want {
+				t.Fatalf("evidence digest = %q, want %q for level %s", got, test.want, test.level)
+			}
+		})
+	}
+}
