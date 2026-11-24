@@ -83,6 +83,13 @@ func NewProviderStopDispatchClaim(
 	if _, active := ActiveProviderStopDispatchClaim(job, intent.OperationID); active {
 		return ProviderStopDispatchClaim{}, errors.New("Provider Stop operation already has an active dispatch claim")
 	}
+	for _, turn := range job.TaskTurnIntents {
+		if turn.RoleExecutionID == intent.RoleExecutionID && turn.ProviderSessionID == intent.SessionID {
+			if _, active := ActiveTaskTurnDispatchClaim(job, turn.OperationID); active {
+				return ProviderStopDispatchClaim{}, errors.New("Provider Stop dispatch is blocked by an active Task Turn claim")
+			}
+		}
+	}
 	for _, observation := range job.ProviderStopObservations {
 		if observation.OperationID == intent.OperationID && observation.Quiescent {
 			return ProviderStopDispatchClaim{}, errors.New("Provider Stop operation is already confirmed quiescent")
