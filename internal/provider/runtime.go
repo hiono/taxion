@@ -118,35 +118,35 @@ func (r *Runtime) Start(ctx context.Context, request StartRequest) (StartResult,
 
 func (r *Runtime) Send(ctx context.Context, request TurnRequest) (TurnResult, error) {
 	if err := request.Validate(); err != nil {
-		return TurnResult{}, ErrProviderInvalidRequest
+		return TurnResult{}, NewPreDispatchError(request.OperationID, ErrProviderInvalidRequest)
 	}
 	boundedContext, cancel, err := withRequestDeadline(ctx, request.Deadline)
 	if err != nil {
-		return TurnResult{}, err
+		return TurnResult{}, NewPreDispatchError(request.OperationID, err)
 	}
 	defer cancel()
 	ctx = boundedContext
 	capabilities, err := r.verifiedCapabilities(ctx)
 	if err != nil {
-		return TurnResult{}, err
+		return TurnResult{}, NewPreDispatchError(request.OperationID, err)
 	}
 	if request.RequireIdempotency {
 		if !capabilities.HasEvidenceAtLeast(CapabilitySendIdempotency, EvidenceLive) {
-			return TurnResult{}, ErrUnsupportedCapability
+			return TurnResult{}, NewPreDispatchError(request.OperationID, ErrUnsupportedCapability)
 		}
 	} else if !capabilities.HasEvidenceAtLeast(CapabilitySendIdempotency, r.minimumEvidence) &&
 		!capabilities.HasEvidenceAtLeast(CapabilitySendLookup, r.minimumEvidence) {
-		return TurnResult{}, ErrUnsupportedCapability
+		return TurnResult{}, NewPreDispatchError(request.OperationID, ErrUnsupportedCapability)
 	}
 	result, err := withCredential(ctx, r.broker, r.identity, func(lease CredentialLease) (TurnResult, error) {
 		result, err := r.adapter.Send(ctx, request, lease)
 		if err != nil {
-			return TurnResult{}, err
+			return TurnResult{}, safeAdapterError(err)
 		}
 		leaked, err := containsCredential(lease, result.OperationID, result.TurnID, result.SessionID,
 			result.ReceiptID, result.Output, result.EvidenceSHA256)
 		if err != nil {
-			return TurnResult{}, err
+			return TurnResult{}, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown}
 		}
 		if leaked {
 			return TurnResult{}, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown}
@@ -154,7 +154,11 @@ func (r *Runtime) Send(ctx context.Context, request TurnRequest) (TurnResult, er
 		return result, nil
 	})
 	if err != nil {
-		return TurnResult{}, safeAdapterError(err)
+		var operationError *OperationError
+		if errors.As(err, &operationError) {
+			return TurnResult{}, err
+		}
+		return TurnResult{}, NewPreDispatchError(request.OperationID, err)
 	}
 	if result.OperationID != request.OperationID || result.TurnID != request.TurnID ||
 		result.SessionID != request.SessionID ||
@@ -523,7 +527,7 @@ func safeAdapterError(err error) error {
 		if errors.Is(err, ErrCredentialLeaseCleanupFailed) {
 			return errors.Join(ErrCredentialUnavailable, ErrCredentialLeaseCleanupFailed)
 		}
-		return ErrCredentialUnavailable
+		return errors.Join(ErrCredentialUnavailable, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown})
 	}
 	var operationError *OperationError
 	if errors.As(err, &operationError) && operationError != nil &&
