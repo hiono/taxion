@@ -568,6 +568,73 @@ func TestReleaseTaskTurnDispatchClaimBeforeSendDoesNotReleaseReplacementClaim(t 
 	}
 }
 
+func TestDefinitivePreSendReleaseDoesNotResolveEarlierUnknownClaim(t *testing.T) {
+	f := newTaskProviderStopFixture(t)
+	job, err := f.database.GetJob(f.ctx, f.jobID)
+	if err != nil {
+		t.Fatalf("GetJob before creating Turn: %v", err)
+	}
+	prompt := "Keep earlier ambiguous dispatch unresolved."
+	_, turn, err := f.database.AddTaskTurnIntent(
+		f.ctx, f.jobID, job.Revision, f.execution.ID, f.permission.ID, "session_1",
+		"cmd_87878787878787878787878787878787", sha256String(prompt), 100,
+	)
+	if err != nil {
+		t.Fatalf("Add Task Turn intent: %v", err)
+	}
+	job, err = f.database.GetJob(f.ctx, f.jobID)
+	if err != nil {
+		t.Fatalf("GetJob before first claim: %v", err)
+	}
+	_, firstClaim, _, err := f.database.AddTaskTurnDispatchClaim(
+		f.ctx, f.jobID, job.Revision, turn.ID,
+		"cmd_88888888888888888888888888888888", f.principal,
+	)
+	if err != nil {
+		t.Fatalf("Add first dispatch claim: %v", err)
+	}
+	if _, err := f.controller.recordTaskTurnObservation(
+		f.ctx, f.jobID, turn.ID, domain.TaskTurnUnknown, 0, "", false,
+	); err != nil {
+		t.Fatalf("persist first attempt UNKNOWN: %v", err)
+	}
+	if _, _, err := f.database.ReleaseTaskTurnDispatchClaim(
+		f.ctx, f.jobID, firstClaim.ID, f.principal,
+		domain.TaskTurnDispatchReleasedIdempotentRetry, strings.Repeat("a", 64),
+	); err != nil {
+		t.Fatalf("release first claim for idempotent retry: %v", err)
+	}
+	job, err = f.database.GetJob(f.ctx, f.jobID)
+	if err != nil {
+		t.Fatalf("GetJob before replacement claim: %v", err)
+	}
+	_, replacement, _, err := f.database.AddTaskTurnDispatchClaim(
+		f.ctx, f.jobID, job.Revision, turn.ID,
+		"cmd_89898989898989898989898989898989", f.principal,
+	)
+	if err != nil {
+		t.Fatalf("Add replacement claim: %v", err)
+	}
+	if err := f.controller.releaseTaskTurnDispatchClaimBeforeSend(
+		f.ctx, f.jobID, turn, replacement.ID, f.principal,
+	); err != nil {
+		t.Fatalf("release replacement claim before Send: %v", err)
+	}
+	job, err = f.database.GetJob(f.ctx, f.jobID)
+	if err != nil {
+		t.Fatalf("GetJob after replacement release: %v", err)
+	}
+	if len(job.TaskTurnObservations) != 1 || job.TaskTurnObservations[0].Status != domain.TaskTurnUnknown ||
+		len(job.TaskTurnDispatchReleases) != 2 ||
+		job.TaskTurnDispatchReleases[0].Outcome != domain.TaskTurnDispatchReleasedIdempotentRetry ||
+		job.TaskTurnDispatchReleases[1].ClaimID != replacement.ID ||
+		job.TaskTurnDispatchReleases[1].Outcome != domain.TaskTurnDispatchReleasedDefinitiveFailure ||
+		taskTurnNeverDispatched(job, turn.ID) {
+		t.Fatalf("replacement pre-send release changed the earlier ambiguous dispatch: observations=%#v releases=%#v neverDispatched=%v",
+			job.TaskTurnObservations, job.TaskTurnDispatchReleases, taskTurnNeverDispatched(job, turn.ID))
+	}
+}
+
 func TestReleaseTaskTurnDispatchClaimForIdempotentRetryDoesNotReleaseReplacementClaim(t *testing.T) {
 	f := newTaskProviderStopFixture(t)
 	job, err := f.database.GetJob(f.ctx, f.jobID)
