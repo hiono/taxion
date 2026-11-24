@@ -17,9 +17,10 @@ const (
 	PlanningBoundaryTurn   = "turn"
 	PlanningBoundaryEffect = "effect"
 	PlanningBoundaryResume = "resume"
-	PlanningResumeUnknown  = "UNKNOWN"
-	PlanningResumeAttached = "ATTACHED"
-	PlanningResumeFailed   = "FAILED"
+	PlanningResumeUnknown       = "UNKNOWN"
+	PlanningResumeNotDispatched = "NOT_DISPATCHED"
+	PlanningResumeAttached      = "ATTACHED"
+	PlanningResumeFailed        = "FAILED"
 )
 
 type PlanningBoundaryError struct {
@@ -1030,7 +1031,8 @@ func NewPlanningResumeObservation(job Job, resumeID, principalID, commandID, sta
 	if authorizedPrincipalID != principalID {
 		return PlanningResumeObservation{}, errors.New("Provider Resume observation Principal does not match its execution authority")
 	}
-	if status != PlanningResumeUnknown && status != PlanningResumeAttached && status != PlanningResumeFailed {
+	if status != PlanningResumeUnknown && status != PlanningResumeNotDispatched &&
+		status != PlanningResumeAttached && status != PlanningResumeFailed {
 		return PlanningResumeObservation{}, errors.New("unsupported Provider resume observation status")
 	}
 	if status == PlanningResumeUnknown {
@@ -1039,6 +1041,8 @@ func NewPlanningResumeObservation(job Job, resumeID, principalID, commandID, sta
 		}
 	} else if !validSHA256(evidenceSHA256) {
 		return PlanningResumeObservation{}, errors.New("terminal resume observation requires evidence")
+	} else if status == PlanningResumeNotDispatched && reconcilesUnknown {
+		return PlanningResumeObservation{}, errors.New("NOT_DISPATCHED resume observation cannot reconcile Provider UNKNOWN")
 	}
 	var previous *PlanningResumeObservation
 	for i := range job.PlanningResumeObservations {
@@ -1051,9 +1055,16 @@ func NewPlanningResumeObservation(job Job, resumeID, principalID, commandID, sta
 		if reconcilesUnknown {
 			return PlanningResumeObservation{}, errors.New("first resume observation cannot reconcile UNKNOWN")
 		}
-	} else if previous.Status != PlanningResumeUnknown || status == PlanningResumeUnknown ||
-		!reconcilesUnknown || !validSHA256(evidenceSHA256) {
-		return PlanningResumeObservation{}, errors.New("only UNKNOWN may be reconciled by same-operation evidence; blind replay is prohibited")
+	} else if previous.Status == PlanningResumeUnknown {
+		if status == PlanningResumeUnknown || !reconcilesUnknown || !validSHA256(evidenceSHA256) {
+			return PlanningResumeObservation{}, errors.New("only UNKNOWN may be reconciled by same-operation evidence; blind replay is prohibited")
+		}
+	} else if previous.Status == PlanningResumeNotDispatched {
+		if reconcilesUnknown || status == PlanningResumeNotDispatched {
+			return PlanningResumeObservation{}, errors.New("NOT_DISPATCHED may only be followed by a new dispatch observation")
+		}
+	} else {
+		return PlanningResumeObservation{}, errors.New("terminal Provider Resume observation cannot be replaced")
 	}
 	if job.Revision >= uint64(^uint64(0)>>1) {
 		return PlanningResumeObservation{}, errors.New("Job revision exhausted")
@@ -1086,7 +1097,8 @@ func (o PlanningResumeObservation) Validate(job Job, resume PlanningResumeIntent
 		}
 		return nil
 	}
-	if (o.Status != PlanningResumeAttached && o.Status != PlanningResumeFailed) || !validSHA256(o.EvidenceSHA256) {
+	if (o.Status != PlanningResumeNotDispatched && o.Status != PlanningResumeAttached &&
+		o.Status != PlanningResumeFailed) || !validSHA256(o.EvidenceSHA256) {
 		return errors.New("terminal PlanningResumeObservation evidence or status is invalid")
 	}
 	return nil
