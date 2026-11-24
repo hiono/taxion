@@ -1216,7 +1216,7 @@ func TestProviderStopFencedRecoveryRequiresFencingOnSubsequentDispatchAndRecords
 	}
 	_, intent, err := f.database.AddProviderStopIntent(
 		f.ctx, f.jobID, job.Revision, f.execution.ID, "session_1",
-		"cmd_81818181818181818181818181818181", domain.ProviderStopReasonTaskComplete, f.principal,
+		"cmd_84848484848484848484848484848484", domain.ProviderStopReasonTaskComplete, f.principal,
 	)
 	if err != nil {
 		t.Fatalf("persist Stop intent: %v", err)
@@ -1300,12 +1300,13 @@ func TestTaskProviderStopRetriesDefinitiveFailureClaimRelease(t *testing.T) {
 			len(job.ProviderStopDispatchClaims), len(job.ProviderStopDispatchStarts),
 			len(job.ProviderStopDispatchReleases), len(job.ProviderStopObservations))
 	}
+	lookupCallsBeforeRetry := f.runtime.lookupCalls
 	_, retryIntent, retryObservation, retryErr := f.controller.StopTaskExecution(
 		f.ctx, f.jobID, f.execution.ID, f.permission.ID, commandID,
 		f.permissionRequest, domain.ProviderStopReasonTaskComplete, f.principal,
 	)
 	if !errors.Is(retryErr, provider.ErrStopUnconfirmed) || retryIntent.ID != intent.ID ||
-		retryObservation.ID != observation.ID || f.runtime.stopCalls != 1 || f.runtime.lookupCalls != 0 {
+		retryObservation.ID != observation.ID || f.runtime.stopCalls != 1 || f.runtime.lookupCalls != lookupCallsBeforeRetry {
 		t.Fatalf("retry did not release persisted definitive-failure claim without redispatch: intent=%#v observation=%#v stopCalls=%d lookupCalls=%d err=%v",
 			retryIntent, retryObservation, f.runtime.stopCalls, f.runtime.lookupCalls, retryErr)
 	}
@@ -1335,7 +1336,7 @@ func TestTaskProviderStopDispatchStartUsesVerifiedJobRevision(t *testing.T) {
 		}
 		intent := job.ProviderStopIntents[len(job.ProviderStopIntents)-1]
 		if _, _, err := f.database.AddProviderStopObservation(
-			f.ctx, f.jobID, job.Revision, intent.OperationID, "cmd_86868686868686868686868686868686",
+			f.ctx, f.jobID, job.Revision, intent.ID, "cmd_86868686868686868686868686868686",
 			false, false, "", false, f.principal,
 		); err != nil {
 			t.Fatalf("persist concurrent Stop observation: %v", err)
