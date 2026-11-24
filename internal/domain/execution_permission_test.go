@@ -370,4 +370,21 @@ func TestExecutionPermissionBindsAdoptedWorktreeToApprovedTaskResource(t *testin
 	if _, err := NewExecutionPermission(job, changed, changedSHA, changedAssessment, task.CreatedAt); err == nil {
 		t.Fatal("Worktree path outside the exact approved resource was accepted")
 	}
+
+	snapshot := WorktreeSnapshot{
+		RepositoryID: task.TargetRepositories[0], RepositoryPath: "/tmp/taxion-source",
+		WorktreePath: worktreePath + "-mismatch", BaselineCommit: strings.Repeat("a", 40),
+	}
+	commandID := "cmd_d1010101010101010101010101010101"
+	if _, err := NewTaskRoleExecutionStart(
+		job, task.ID, permission.ID, commandID, requestSHA, snapshot, task.CreatedAt.Add(time.Minute),
+	); err == nil {
+		t.Fatal("Task execution accepted a Worktree path outside the approved ExecutionPermission")
+	}
+	snapshot.WorktreePath = worktreePath
+	if _, err := NewTaskRoleExecutionStart(
+		job, task.ID, permission.ID, commandID, requestSHA, snapshot, task.CreatedAt.Add(time.Minute),
+	); err != nil {
+		t.Fatalf("Task execution rejected the approved Worktree path: %v", err)
+	}
 }
