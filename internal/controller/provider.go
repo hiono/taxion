@@ -32,6 +32,8 @@ type ProviderExecutionStore interface {
 	AddProviderUsageObservation(context.Context, string, uint64, string, string, string, string, string, uint64, bool, string, auth.AuthenticatedPrincipal) (store.CommandReceipt, domain.ProviderUsageObservation, error)
 	AddTaskProviderStartObservation(context.Context, string, uint64, string, string, string, string, string, string, bool) (store.CommandReceipt, domain.ProviderStartObservation, error)
 	AddTaskProviderResumeObservation(context.Context, string, uint64, string, string, string, string, domain.ProviderResumeResponse, bool) (store.CommandReceipt, domain.PlanningResumeObservation, error)
+	AddPlanningResumeDispatchClaim(context.Context, string, uint64, string, string, auth.AuthenticatedPrincipal) (store.CommandReceipt, domain.PlanningResumeDispatchClaim, bool, error)
+	ReleasePlanningResumeDispatchClaim(context.Context, string, string, auth.AuthenticatedPrincipal, string) (store.CommandReceipt, domain.PlanningResumeDispatchRelease, error)
 	AddTaskTurnIntent(context.Context, string, uint64, string, string, string, string, string, uint64) (store.CommandReceipt, domain.TaskTurnIntent, error)
 	AddTaskTurnIntentWithStatus(context.Context, string, uint64, string, string, string, string, string, uint64) (store.CommandReceipt, domain.TaskTurnIntent, bool, error)
 	AddTaskTurnObservation(context.Context, string, uint64, string, string, string, uint64, string, bool) (store.CommandReceipt, domain.TaskTurnObservation, error)
