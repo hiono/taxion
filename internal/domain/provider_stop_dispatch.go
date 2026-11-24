@@ -132,6 +132,13 @@ func (c ProviderStopDispatchClaim) Validate(job Job) error {
 	if err != nil || expectedPrincipal != c.PrincipalID {
 		return errors.New("Provider Stop dispatch claim Principal does not match execution authority")
 	}
+	for _, turn := range job.TaskTurnIntents {
+		if turn.RoleExecutionID == c.RoleExecutionID && turn.ProviderSessionID == c.SessionID {
+			if _, active := ActiveTaskTurnDispatchClaim(job, turn.OperationID); active {
+				return errors.New("Provider Stop dispatch claim overlaps an active Task Turn dispatch")
+			}
+		}
+	}
 	return nil
 }
 
