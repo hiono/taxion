@@ -1416,7 +1416,7 @@ func TestTaskProviderStopRecoversAfterRuntimeCapabilityRecheckRejectsBeforeAdapt
 	}
 	job, err := f.database.GetJob(f.ctx, f.jobID)
 	if err != nil || len(job.ProviderStopObservations) != 2 || job.ProviderStopObservations[0].ID != firstObservation.ID ||
-		job.ProviderStopObservations[1].Status != domain.ProviderStopStopped {
+		!job.ProviderStopObservations[1].Stopped || !job.ProviderStopObservations[1].Quiescent {
 		t.Fatalf("Stop recovery did not preserve definitive failure and final proof: observations=%#v err=%v",
 			job.ProviderStopObservations, err)
 	}
