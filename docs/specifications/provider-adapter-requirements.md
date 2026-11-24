@@ -83,7 +83,7 @@ CapabilityはProvider ID、account identity、SDK / protocol version、configura
 
 | Capability | 意味 |
 |---|---|
-| Start idempotency / lookup | Startの重複実行防止または同一OperationIDによる照合 |
+| Start idempotency / lookup | Start Idempotencyは同一OperationIDの重複実行を防止する。Task-bound StartのdispatchにはE4 Start Idempotencyを必須とし、Start Lookup単独は既存operationの照合にのみ使用する |
 | Send idempotency / lookup | Sendの重複実行防止または同一TurnIDによる照合 |
 | Cross-process reattachment | 保存済みの同一Sessionへのprocess restart後の再接続 |
 | Event replay | event cursorの連続性を保った再取得 |
