@@ -281,3 +281,99 @@ func gitTestOutput(t *testing.T, directory string, args ...string) string {
 	}
 	return strings.TrimSpace(string(output))
 }
+
+func TestManagerAdoptsExistingLinkedWorktreeWithoutChangingItsState(t *testing.T) {
+	repository := initRepository(t)
+	worktreePath := filepath.Join(t.TempDir(), "existing-worktree")
+	gitTestRun(t, repository, "worktree", "add", "--detach", worktreePath, "HEAD")
+	if err := os.WriteFile(filepath.Join(worktreePath, "README.md"), []byte("staged change\n"), 0o600); err != nil {
+		t.Fatalf("write staged change: %v", err)
+	}
+	gitTestRun(t, worktreePath, "add", "README.md")
+	if err := os.WriteFile(filepath.Join(worktreePath, "README.md"), []byte("unstaged change\n"), 0o600); err != nil {
+		t.Fatalf("write unstaged change: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(worktreePath, "new-file.txt"), []byte("untracked content\n"), 0o600); err != nil {
+		t.Fatalf("write untracked file: %v", err)
+	}
+	beforeHEAD := gitTestOutput(t, worktreePath, "rev-parse", "HEAD")
+	beforeStatus := gitTestOutput(t, worktreePath, "status", "--porcelain=v2", "--untracked-files=all")
+	beforeStaged := gitTestOutput(t, worktreePath, "diff", "--cached", "--stat", "HEAD")
+	beforeTracked, err := os.ReadFile(filepath.Join(worktreePath, "README.md"))
+	if err != nil {
+		t.Fatalf("read tracked file before adoption: %v", err)
+	}
+	beforeUntracked, err := os.ReadFile(filepath.Join(worktreePath, "new-file.txt"))
+	if err != nil {
+		t.Fatalf("read untracked file before adoption: %v", err)
+	}
+
+	manager, err := NewManager(filepath.Join(t.TempDir(), "managed-worktrees"), []Repository{{ID: "repo.primary", Path: repository}})
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	task := domain.Task{ID: "task_0123456789abcdef", TargetRepositories: []string{"repo.primary"}}
+	jobID := "job_0123456789abcdef"
+	snapshot, err := manager.Adopt(context.Background(), jobID, task, worktreePath)
+	if err != nil {
+		t.Fatalf("Adopt: %v", err)
+	}
+	if snapshot.Origin != domain.WorktreeOriginAdopted ||
+		snapshot.InitialStateSHA256 == "" ||
+		snapshot.WorktreePath != worktreePath ||
+		snapshot.BaselineCommit != beforeHEAD {
+		t.Fatalf("adoption identity is incomplete: %#v", snapshot)
+	}
+	if got := gitTestOutput(t, worktreePath, "rev-parse", "HEAD"); got != beforeHEAD {
+		t.Fatalf("adoption changed HEAD: got %s, want %s", got, beforeHEAD)
+	}
+	if got := gitTestOutput(t, worktreePath, "status", "--porcelain=v2", "--untracked-files=all"); got != beforeStatus {
+		t.Fatalf("adoption changed Worktree status: got %q, want %q", got, beforeStatus)
+	}
+	if got := gitTestOutput(t, worktreePath, "diff", "--cached", "--stat", "HEAD"); got != beforeStaged {
+		t.Fatalf("adoption changed index: got %q, want %q", got, beforeStaged)
+	}
+	afterTracked, err := os.ReadFile(filepath.Join(worktreePath, "README.md"))
+	if err != nil || string(afterTracked) != string(beforeTracked) {
+		t.Fatalf("adoption changed tracked file: content=%q err=%v", afterTracked, err)
+	}
+	afterUntracked, err := os.ReadFile(filepath.Join(worktreePath, "new-file.txt"))
+	if err != nil || string(afterUntracked) != string(beforeUntracked) {
+		t.Fatalf("adoption changed untracked file: content=%q err=%v", afterUntracked, err)
+	}
+	if err := manager.Verify(context.Background(), jobID, task, snapshot); err != nil {
+		t.Fatalf("Verify adopted Worktree: %v", err)
+	}
+	replayed, err := manager.Adopt(context.Background(), jobID, task, worktreePath)
+	if err != nil || replayed != snapshot {
+		t.Fatalf("exact adoption replay changed identity: got=%#v want=%#v err=%v", replayed, snapshot, err)
+	}
+	if _, err := manager.Adopt(context.Background(), "job_abcdef0123456789", task, worktreePath); err == nil {
+		t.Fatal("the same physical Worktree was adopted by a second Job")
+	}
+}
+
+func TestManagerAdoptsBranchAttachedWorktreeAndPreservesBranchIdentity(t *testing.T) {
+	repository := initRepository(t)
+	worktreePath := filepath.Join(t.TempDir(), "branch-worktree")
+	gitTestRun(t, repository, "worktree", "add", worktreePath, "-b", "adopted-feature")
+	manager, err := NewManager(filepath.Join(t.TempDir(), "managed-worktrees"), []Repository{{ID: "repo.primary", Path: repository}})
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	task := domain.Task{ID: "task_abcdef0123456789", TargetRepositories: []string{"repo.primary"}}
+	snapshot, err := manager.Adopt(context.Background(), "job_abcdef0123456789", task, worktreePath)
+	if err != nil {
+		t.Fatalf("Adopt branch-attached Worktree: %v", err)
+	}
+	if snapshot.HeadMode != domain.WorktreeHeadBranchAttached || snapshot.HeadRef != "refs/heads/adopted-feature" {
+		t.Fatalf("branch identity was not recorded: %#v", snapshot)
+	}
+	if err := manager.Verify(context.Background(), "job_abcdef0123456789", task, snapshot); err != nil {
+		t.Fatalf("Verify branch-attached Worktree: %v", err)
+	}
+	gitTestRun(t, worktreePath, "checkout", "--detach", "HEAD")
+	if err := manager.Verify(context.Background(), "job_abcdef0123456789", task, snapshot); err == nil {
+		t.Fatal("Worktree HEAD mode change was accepted")
+	}
+}
