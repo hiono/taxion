@@ -52,6 +52,7 @@ type Job struct {
 	ProviderStopIntents                   []ProviderStopIntent          `json:"provider_stop_intents,omitempty"`
 	ProviderStopObservations              []ProviderStopObservation     `json:"provider_stop_observations,omitempty"`
 	ProviderStopDispatchClaims            []ProviderStopDispatchClaim   `json:"provider_stop_dispatch_claims,omitempty"`
+	ProviderStopDispatchStarts            []ProviderStopDispatchStart   `json:"provider_stop_dispatch_starts,omitempty"`
 	ProviderStopDispatchReleases          []ProviderStopDispatchRelease `json:"provider_stop_dispatch_releases,omitempty"`
 	ProviderResultObservations            []ProviderResultObservation   `json:"provider_result_observations,omitempty"`
 	ProviderUsageObservations             []ProviderUsageObservation    `json:"provider_usage_observations,omitempty"`

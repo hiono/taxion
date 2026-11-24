@@ -12,6 +12,7 @@ import (
 
 const (
 	addProviderStopDispatchClaimCommandType   = "AddProviderStopDispatchClaim"
+	addProviderStopDispatchStartCommandType   = "AddProviderStopDispatchStart"
 	addProviderStopDispatchReleaseCommandType = "AddProviderStopDispatchRelease"
 )
 
@@ -45,6 +46,54 @@ func (s *Store) AddProviderStopDispatchClaim(
 			return domain.ProviderStopDispatchClaim{}, false
 		},
 	)
+}
+
+func (s *Store) AddProviderStopDispatchStart(
+	ctx context.Context,
+	jobID string,
+	expectedRevision uint64,
+	claimID, commandID string,
+	principal auth.AuthenticatedPrincipal,
+) (CommandReceipt, domain.ProviderStopDispatchStart, bool, error) {
+	if err := principal.Validate(); err != nil {
+		return CommandReceipt{}, domain.ProviderStopDispatchStart{}, false, fmt.Errorf("validate authenticated HUMAN Principal: %w", err)
+	}
+	request := struct {
+		JobID, ClaimID, CommandID, PrincipalID string
+	}{jobID, claimID, commandID, principal.PrincipalID()}
+	return persistPlanningFactWithStatus(
+		ctx, s, jobID, expectedRevision, commandID, addProviderStopDispatchStartCommandType, request,
+		func(job domain.Job, now time.Time) (domain.ProviderStopDispatchStart, error) {
+			return domain.NewProviderStopDispatchStart(job, claimID, principal.PrincipalID(), commandID, now)
+		},
+		func(job *domain.Job, start domain.ProviderStopDispatchStart) {
+			job.ProviderStopDispatchStarts = append(job.ProviderStopDispatchStarts, start)
+		},
+		func(job domain.Job) (domain.ProviderStopDispatchStart, bool) {
+			for _, start := range job.ProviderStopDispatchStarts {
+				if start.CommandID == commandID {
+					return start, true
+				}
+			}
+			return domain.ProviderStopDispatchStart{}, false
+		},
+	)
+}
+
+func (s *Store) StartProviderStopDispatchClaim(
+	ctx context.Context,
+	jobID, claimID string,
+	principal auth.AuthenticatedPrincipal,
+) (CommandReceipt, domain.ProviderStopDispatchStart, bool, error) {
+	if claimID == "" {
+		return CommandReceipt{}, domain.ProviderStopDispatchStart{}, false, errors.New("Provider Stop dispatch claim is required")
+	}
+	job, err := s.GetJob(ctx, jobID)
+	if err != nil {
+		return CommandReceipt{}, domain.ProviderStopDispatchStart{}, false, err
+	}
+	commandID := domain.ProviderStopDispatchStartCommandID(claimID)
+	return s.AddProviderStopDispatchStart(ctx, jobID, job.Revision, claimID, commandID, principal)
 }
 
 func (s *Store) AddProviderStopDispatchRelease(

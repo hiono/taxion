@@ -643,3 +643,139 @@ func TestTaskProviderStopLookupRecoveryDoesNotRequireStopProof(t *testing.T) {
 			replayedIntent, stopped, f.runtime.stopCalls, err)
 	}
 }
+
+
+func TestTaskProviderStopRecoversClaimCommittedBeforeDispatchAfterRestart(t *testing.T) {
+	f := newTaskProviderStopFixture(t)
+	enableTaskStopLookup(&f)
+	commandID := "cmd_13131313131313131313131313131313"
+	job, err := f.database.GetJob(f.ctx, f.jobID)
+	if err != nil {
+		t.Fatalf("GetJob before Stop intent: %v", err)
+	}
+	_, intent, err := f.database.AddProviderStopIntent(
+		f.ctx, f.jobID, job.Revision, f.execution.ID, "session_1",
+		commandID, domain.ProviderStopReasonTaskComplete, f.principal,
+	)
+	if err != nil {
+		t.Fatalf("persist Stop intent before simulated crash: %v", err)
+	}
+	job, err = f.database.GetJob(f.ctx, f.jobID)
+	if err != nil {
+		t.Fatalf("GetJob before dispatch claim: %v", err)
+	}
+	_, claim, created, err := f.database.AddProviderStopDispatchClaim(
+		f.ctx, f.jobID, job.Revision, intent.ID,
+		"cmd_14141414141414141414141414141414", f.principal,
+	)
+	if err != nil || !created {
+		t.Fatalf("persist pre-dispatch claim: claim=%#v created=%v err=%v", claim, created, err)
+	}
+	job, err = f.database.GetJob(f.ctx, f.jobID)
+	if err != nil {
+		t.Fatalf("GetJob after pre-dispatch claim: %v", err)
+	}
+	if _, active := domain.ActiveProviderStopDispatchClaim(job, intent.OperationID); !active {
+		t.Fatal("pre-dispatch claim is not active")
+	}
+	if _, started := domain.ProviderStopDispatchStartedForClaim(job, claim.ID); started {
+		t.Fatal("pre-dispatch claim unexpectedly has a dispatch-start fact")
+	}
+	f.runtime.lookupResult = provider.LookupResult{
+		Found: false, OperationID: intent.OperationID, SessionID: "session_1",
+		Status: provider.LookupStatusNotFound, EvidenceSHA256: strings.Repeat("8", 64),
+	}
+
+	restarted := restartTaskProviderController(t, f)
+	_, replayedIntent, observation, err := restarted.StopTaskExecution(
+		f.ctx, f.jobID, f.execution.ID, f.permission.ID, commandID,
+		f.permissionRequest, domain.ProviderStopReasonTaskComplete, f.principal,
+	)
+	if err != nil || replayedIntent.ID != intent.ID || !observation.Stopped ||
+		!observation.Quiescent || f.runtime.stopCalls != 1 || f.runtime.lookupCalls != 2 {
+		t.Fatalf("restart did not reclaim a claim committed before dispatch: intent=%#v observation=%#v stopCalls=%d lookupCalls=%d err=%v",
+			replayedIntent, observation, f.runtime.stopCalls, f.runtime.lookupCalls, err)
+	}
+	job, err = f.database.GetJob(f.ctx, f.jobID)
+	if err != nil {
+		t.Fatalf("GetJob after recovered Stop: %v", err)
+	}
+	if len(job.ProviderStopDispatchClaims) != 2 || len(job.ProviderStopDispatchStarts) != 1 ||
+		len(job.ProviderStopDispatchReleases) != 2 {
+		t.Fatalf("recovered dispatch facts mismatch: claims=%d starts=%d releases=%d",
+			len(job.ProviderStopDispatchClaims), len(job.ProviderStopDispatchStarts), len(job.ProviderStopDispatchReleases))
+	}
+	if job.ProviderStopDispatchReleases[0].ClaimID != claim.ID ||
+		job.ProviderStopDispatchReleases[0].Outcome != domain.ProviderStopDispatchReleasedNotDispatched {
+		t.Fatalf("old claim was not released as not dispatched: %#v", job.ProviderStopDispatchReleases[0])
+	}
+	if _, started := domain.ProviderStopDispatchStartedForClaim(job, job.ProviderStopDispatchClaims[1].ID); !started {
+		t.Fatal("replacement claim has no durable dispatch-start fact")
+	}
+	if _, _, _, err := f.database.StartProviderStopDispatchClaim(f.ctx, f.jobID, claim.ID, f.principal); err == nil {
+		t.Fatal("released stale claim was allowed to cross the dispatch-start fence")
+	}
+}
+
+func TestTaskProviderStopDoesNotReclaimClaimAfterDispatchStart(t *testing.T) {
+	f := newTaskProviderStopFixture(t)
+	enableTaskStopLookup(&f)
+	commandID := "cmd_15151515151515151515151515151515"
+	job, err := f.database.GetJob(f.ctx, f.jobID)
+	if err != nil {
+		t.Fatalf("GetJob before Stop intent: %v", err)
+	}
+	_, intent, err := f.database.AddProviderStopIntent(
+		f.ctx, f.jobID, job.Revision, f.execution.ID, "session_1",
+		commandID, domain.ProviderStopReasonTaskComplete, f.principal,
+	)
+	if err != nil {
+		t.Fatalf("persist Stop intent: %v", err)
+	}
+	job, err = f.database.GetJob(f.ctx, f.jobID)
+	if err != nil {
+		t.Fatalf("GetJob before dispatch claim: %v", err)
+	}
+	_, claim, created, err := f.database.AddProviderStopDispatchClaim(
+		f.ctx, f.jobID, job.Revision, intent.ID,
+		"cmd_16161616161616161616161616161616", f.principal,
+	)
+	if err != nil || !created {
+		t.Fatalf("persist dispatch claim: claim=%#v created=%v err=%v", claim, created, err)
+	}
+	if _, _, started, err := f.database.StartProviderStopDispatchClaim(f.ctx, f.jobID, claim.ID, f.principal); err != nil || !started {
+		t.Fatalf("persist dispatch-start fact: started=%v err=%v", started, err)
+	}
+	if _, _, err := f.database.ReleaseProviderStopDispatchClaim(
+		f.ctx, f.jobID, claim.ID, f.principal, domain.ProviderStopDispatchReleasedNotDispatched,
+	); err == nil {
+		t.Fatal("started claim was released as not dispatched")
+	}
+	f.runtime.lookupResult = provider.LookupResult{
+		Found: false, OperationID: intent.OperationID, SessionID: "session_1",
+		Status: provider.LookupStatusNotFound, EvidenceSHA256: strings.Repeat("8", 64),
+	}
+
+	restarted := restartTaskProviderController(t, f)
+	_, replayedIntent, _, err := restarted.StopTaskExecution(
+		f.ctx, f.jobID, f.execution.ID, f.permission.ID, commandID,
+		f.permissionRequest, domain.ProviderStopReasonTaskComplete, f.principal,
+	)
+	if !errors.Is(err, provider.ErrStopUnconfirmed) || replayedIntent.ID != intent.ID ||
+		f.runtime.stopCalls != 0 {
+		t.Fatalf("started claim was incorrectly reclaimed or redispatched: intent=%#v stopCalls=%d err=%v",
+			replayedIntent, f.runtime.stopCalls, err)
+	}
+	job, err = f.database.GetJob(f.ctx, f.jobID)
+	if err != nil {
+		t.Fatalf("GetJob after conservative recovery: %v", err)
+	}
+	if len(job.ProviderStopDispatchClaims) != 1 || len(job.ProviderStopDispatchStarts) != 1 ||
+		len(job.ProviderStopDispatchReleases) != 0 {
+		t.Fatalf("started claim was changed during recovery: claims=%d starts=%d releases=%d",
+			len(job.ProviderStopDispatchClaims), len(job.ProviderStopDispatchStarts), len(job.ProviderStopDispatchReleases))
+	}
+	if _, active := domain.ActiveProviderStopDispatchClaim(job, intent.OperationID); !active {
+		t.Fatal("started claim was released after NOT_FOUND")
+	}
+}

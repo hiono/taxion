@@ -12,6 +12,7 @@ import (
 const (
 	ProviderStopDispatchReleasedStopped           = "stopped"
 	ProviderStopDispatchReleasedDefinitiveFailure = "definitive_failure"
+	ProviderStopDispatchReleasedNotDispatched      = "not_dispatched"
 )
 
 type ProviderStopDispatchClaim struct {
@@ -22,6 +23,17 @@ type ProviderStopDispatchClaim struct {
 	RoleExecutionID string    `json:"role_execution_id"`
 	OperationID     string    `json:"operation_id"`
 	SessionID       string    `json:"session_id"`
+	PrincipalID     string    `json:"principal_id"`
+	CreatedAt       time.Time `json:"created_at"`
+	CreatedRevision uint64    `json:"created_revision"`
+}
+
+type ProviderStopDispatchStart struct {
+	ID              string    `json:"id"`
+	CommandID       string    `json:"command_id"`
+	JobID           string    `json:"job_id"`
+	ClaimID         string    `json:"claim_id"`
+	OperationID     string    `json:"operation_id"`
 	PrincipalID     string    `json:"principal_id"`
 	CreatedAt       time.Time `json:"created_at"`
 	CreatedRevision uint64    `json:"created_revision"`
@@ -41,6 +53,15 @@ type ProviderStopDispatchRelease struct {
 
 func ProviderStopDispatchClaimID(commandID string) string {
 	return planningOperationID("provider_stop_dispatch_claim", commandID)
+}
+
+func ProviderStopDispatchStartID(commandID string) string {
+	return planningOperationID("provider_stop_dispatch_start", commandID)
+}
+
+func ProviderStopDispatchStartCommandID(claimID string) string {
+	sum := sha256.Sum256([]byte("taxion:provider-stop-dispatch-start:" + claimID))
+	return "cmd_" + hex.EncodeToString(sum[:16])
 }
 
 func ProviderStopDispatchReleaseID(commandID string) string {
@@ -142,6 +163,79 @@ func (c ProviderStopDispatchClaim) Validate(job Job) error {
 	return nil
 }
 
+func NewProviderStopDispatchStart(
+	job Job, claimID, principalID, commandID string, now time.Time,
+) (ProviderStopDispatchStart, error) {
+	now = now.UTC().Round(0)
+	if err := job.Validate(); err != nil {
+		return ProviderStopDispatchStart{}, fmt.Errorf("validate Job before Provider Stop dispatch start: %w", err)
+	}
+	if !validCommandID(commandID) || commandID != ProviderStopDispatchStartCommandID(claimID) ||
+		now.IsZero() || job.Revision >= uint64(^uint64(0)>>1) {
+		return ProviderStopDispatchStart{}, errors.New("Provider Stop dispatch start command and timestamp are invalid")
+	}
+	var claim ProviderStopDispatchClaim
+	found := false
+	for _, candidate := range job.ProviderStopDispatchClaims {
+		if candidate.ID == claimID {
+			claim, found = candidate, true
+			break
+		}
+	}
+	if !found || claim.PrincipalID != principalID {
+		return ProviderStopDispatchStart{}, errors.New("Provider Stop dispatch start requires the active claim owner")
+	}
+	active, activeFound := ActiveProviderStopDispatchClaim(job, claim.OperationID)
+	if !activeFound || active.ID != claim.ID {
+		return ProviderStopDispatchStart{}, errors.New("Provider Stop dispatch start claim is no longer active")
+	}
+	if _, started := ProviderStopDispatchStartedForClaim(job, claim.ID); started {
+		return ProviderStopDispatchStart{}, errors.New("Provider Stop dispatch claim has already started")
+	}
+	start := ProviderStopDispatchStart{
+		ID: ProviderStopDispatchStartID(commandID), CommandID: commandID,
+		JobID: job.ID, ClaimID: claim.ID, OperationID: claim.OperationID,
+		PrincipalID: principalID, CreatedAt: now, CreatedRevision: job.Revision + 1,
+	}
+	if err := start.Validate(job); err != nil {
+		return ProviderStopDispatchStart{}, err
+	}
+	return start, nil
+}
+
+func (s ProviderStopDispatchStart) Validate(job Job) error {
+	if !validPlanningIdentity(s.ID) || !validCommandID(s.CommandID) ||
+		s.ID != ProviderStopDispatchStartID(s.CommandID) ||
+		s.CommandID != ProviderStopDispatchStartCommandID(s.ClaimID) ||
+		s.JobID != job.ID || !validPlanningIdentity(s.ClaimID) ||
+		!validPlanningIdentity(s.OperationID) || !strings.HasPrefix(s.PrincipalID, "human_") ||
+		s.CreatedAt.IsZero() || s.CreatedRevision == 0 {
+		return errors.New("Provider Stop dispatch start identity or metadata is invalid")
+	}
+	var claim ProviderStopDispatchClaim
+	found := false
+	for _, candidate := range job.ProviderStopDispatchClaims {
+		if candidate.ID == s.ClaimID {
+			claim, found = candidate, true
+			break
+		}
+	}
+	if !found || claim.OperationID != s.OperationID || claim.PrincipalID != s.PrincipalID ||
+		s.CreatedRevision <= claim.CreatedRevision || s.CreatedAt.Before(claim.CreatedAt) {
+		return errors.New("Provider Stop dispatch start does not match its claim")
+	}
+	return nil
+}
+
+func ProviderStopDispatchStartedForClaim(job Job, claimID string) (ProviderStopDispatchStart, bool) {
+	for _, start := range job.ProviderStopDispatchStarts {
+		if start.ClaimID == claimID {
+			return start, true
+		}
+	}
+	return ProviderStopDispatchStart{}, false
+}
+
 func NewProviderStopDispatchRelease(
 	job Job, claimID, principalID, commandID, outcome string, now time.Time,
 ) (ProviderStopDispatchRelease, error) {
@@ -166,11 +260,17 @@ func NewProviderStopDispatchRelease(
 	if claim.PrincipalID != principalID {
 		return ProviderStopDispatchRelease{}, errors.New("Provider Stop dispatch release Principal does not match claim owner")
 	}
-	if outcome != ProviderStopDispatchReleasedStopped && outcome != ProviderStopDispatchReleasedDefinitiveFailure {
+	if outcome != ProviderStopDispatchReleasedStopped && outcome != ProviderStopDispatchReleasedDefinitiveFailure &&
+		outcome != ProviderStopDispatchReleasedNotDispatched {
 		return ProviderStopDispatchRelease{}, errors.New("unsupported Provider Stop dispatch release outcome")
 	}
 	if _, active := ActiveProviderStopDispatchClaim(job, claim.OperationID); !active {
 		return ProviderStopDispatchRelease{}, errors.New("Provider Stop dispatch claim is already released")
+	}
+	if outcome == ProviderStopDispatchReleasedNotDispatched {
+		if _, started := ProviderStopDispatchStartedForClaim(job, claim.ID); started {
+			return ProviderStopDispatchRelease{}, errors.New("started Provider Stop dispatch cannot be released as not dispatched")
+		}
 	}
 	release := ProviderStopDispatchRelease{
 		ID: ProviderStopDispatchReleaseID(commandID), CommandID: commandID,
@@ -189,7 +289,8 @@ func (r ProviderStopDispatchRelease) Validate(job Job) error {
 		r.ID != ProviderStopDispatchReleaseID(r.CommandID) || r.JobID != job.ID ||
 		!validPlanningIdentity(r.ClaimID) || !validPlanningIdentity(r.OperationID) ||
 		!strings.HasPrefix(r.PrincipalID, "human_") || r.CreatedAt.IsZero() || r.CreatedRevision == 0 ||
-		(r.Outcome != ProviderStopDispatchReleasedStopped && r.Outcome != ProviderStopDispatchReleasedDefinitiveFailure) {
+		(r.Outcome != ProviderStopDispatchReleasedStopped && r.Outcome != ProviderStopDispatchReleasedDefinitiveFailure &&
+			r.Outcome != ProviderStopDispatchReleasedNotDispatched) {
 		return errors.New("Provider Stop dispatch release identity or metadata is invalid")
 	}
 	var claim ProviderStopDispatchClaim
@@ -203,6 +304,11 @@ func (r ProviderStopDispatchRelease) Validate(job Job) error {
 	if !found || claim.OperationID != r.OperationID || claim.PrincipalID != r.PrincipalID ||
 		r.CreatedRevision <= claim.CreatedRevision || r.CreatedAt.Before(claim.CreatedAt) {
 		return errors.New("Provider Stop dispatch release does not match its claim")
+	}
+	if r.Outcome == ProviderStopDispatchReleasedNotDispatched {
+		if _, started := ProviderStopDispatchStartedForClaim(job, claim.ID); started {
+			return errors.New("not-dispatched release conflicts with a Provider Stop dispatch start")
+		}
 	}
 	if r.Outcome == ProviderStopDispatchReleasedStopped {
 		var latest *ProviderStopObservation
@@ -290,6 +396,38 @@ func validateProviderStopDispatchFacts(job Job) error {
 		seenReleaseIDs[release.ID] = struct{}{}
 		seenReleaseCommands[release.CommandID] = struct{}{}
 		releasesByClaim[release.ClaimID] = release
+	}
+	seenStartIDs := make(map[string]struct{}, len(job.ProviderStopDispatchStarts))
+	seenStartCommands := make(map[string]struct{}, len(job.ProviderStopDispatchStarts))
+	startedByClaim := make(map[string]ProviderStopDispatchStart, len(job.ProviderStopDispatchStarts))
+	var previousStartRevision uint64
+	var previousStartAt time.Time
+	for _, start := range job.ProviderStopDispatchStarts {
+		if err := start.Validate(job); err != nil {
+			return fmt.Errorf("%w: invalid ProviderStopDispatchStart: %v", ErrInvalidJob, err)
+		}
+		if start.CreatedAt.After(job.UpdatedAt) || start.CreatedRevision > job.Revision ||
+			start.CreatedRevision <= previousStartRevision || start.CreatedAt.Before(previousStartAt) {
+			return fmt.Errorf("%w: ProviderStopDispatchStart append order is invalid", ErrInvalidJob)
+		}
+		previousStartRevision, previousStartAt = start.CreatedRevision, start.CreatedAt
+		if _, exists := seenStartIDs[start.ID]; exists {
+			return fmt.Errorf("%w: duplicate ProviderStopDispatchStart ID", ErrInvalidJob)
+		}
+		if _, exists := seenStartCommands[start.CommandID]; exists {
+			return fmt.Errorf("%w: duplicate ProviderStopDispatchStart command", ErrInvalidJob)
+		}
+		if _, exists := startedByClaim[start.ClaimID]; exists {
+			return fmt.Errorf("%w: ProviderStopDispatchClaim has multiple start facts", ErrInvalidJob)
+		}
+		seenStartIDs[start.ID] = struct{}{}
+		seenStartCommands[start.CommandID] = struct{}{}
+		startedByClaim[start.ClaimID] = start
+	}
+	for claimID, start := range startedByClaim {
+		if release, exists := releasesByClaim[claimID]; exists && release.CreatedRevision <= start.CreatedRevision {
+			return fmt.Errorf("%w: ProviderStopDispatchStart follows its claim release", ErrInvalidJob)
+		}
 	}
 	for operationID, claims := range claimsByOperation {
 		for index, claim := range claims {

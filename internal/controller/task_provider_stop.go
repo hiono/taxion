@@ -137,11 +137,18 @@ func (c *ProviderController) StopTaskExecution(
 			}
 			return intentReceipt, intent, observation, provider.ErrStopUnconfirmed
 		}
-		// A trusted NOT_FOUND result permits retry only when no dispatch claim
-		// is already held. An existing claim may belong to a call still in flight;
-		// never replace it based on a lookup that can race that call.
+		// A NOT_FOUND result can reclaim a claim only if the durable dispatch-start
+		// fact is absent. The start fact fences a paused caller from dispatching
+		// after another controller has released and replaced its claim.
 		if activeClaimFound {
-			return intentReceipt, intent, previous, provider.ErrStopUnconfirmed
+			if _, started := domain.ProviderStopDispatchStartedForClaim(currentJob, activeClaim.ID); started {
+				return intentReceipt, intent, previous, provider.ErrStopUnconfirmed
+			}
+			if _, _, releaseErr := c.store.ReleaseProviderStopDispatchClaim(
+				ctx, jobID, activeClaim.ID, principal, domain.ProviderStopDispatchReleasedNotDispatched,
+			); releaseErr != nil {
+				return intentReceipt, intent, previous, releaseErr
+			}
 		}
 	}
 
@@ -172,6 +179,13 @@ func (c *ProviderController) StopTaskExecution(
 		return intentReceipt, intent, domain.ProviderStopObservation{}, err
 	}
 	if !createdClaim {
+		return intentReceipt, intent, domain.ProviderStopObservation{}, provider.ErrStopUnconfirmed
+	}
+	_, _, started, err := c.store.StartProviderStopDispatchClaim(ctx, jobID, claim.ID, principal)
+	if err != nil {
+		return intentReceipt, intent, domain.ProviderStopObservation{}, err
+	}
+	if !started {
 		return intentReceipt, intent, domain.ProviderStopObservation{}, provider.ErrStopUnconfirmed
 	}
 	latest, err = c.store.GetJob(ctx, jobID)
