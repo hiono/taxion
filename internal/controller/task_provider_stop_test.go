@@ -794,6 +794,12 @@ func TestTaskProviderStopReclaimsStartedClaimWithProviderFencing(t *testing.T) {
 		t.Fatalf("Provider Stop did not receive replacement fencing token: requests=%#v claim=%#v",
 			f.runtime.stopRequests, newClaim)
 	}
+	duplicate, duplicateErr := f.runtime.Stop(f.ctx, provider.StopRequest{
+		OperationID: intent.OperationID, SessionID: "session_1", FencingToken: newClaim.CreatedRevision,
+	})
+	if duplicateErr != nil || duplicate.OperationID != intent.OperationID || f.runtime.stopCalls != 1 {
+		t.Fatalf("same operation was not deduplicated: result=%#v calls=%d err=%v", duplicate, f.runtime.stopCalls, duplicateErr)
+	}
 	_, staleErr := f.runtime.Stop(f.ctx, provider.StopRequest{
 		OperationID: intent.OperationID, SessionID: "session_1", FencingToken: oldClaim.CreatedRevision,
 	})

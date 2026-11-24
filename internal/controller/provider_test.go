@@ -193,7 +193,7 @@ type fakePlanningProviderRuntime struct {
 	stopErr          error
 	stopCalls        int
 	stopRequests     []provider.StopRequest
-	stopFencingToken uint64
+	stopFencingTokens map[string]uint64
 	stopOperations   map[string]provider.StopResult
 	resultResult     provider.Result
 	resultErr        error
@@ -297,15 +297,18 @@ func (f *fakePlanningProviderRuntime) Resume(ctx context.Context, request provid
 func (f *fakePlanningProviderRuntime) Stop(ctx context.Context, request provider.StopRequest) (provider.StopResult, error) {
 	f.stopRequests = append(f.stopRequests, request)
 	if f.capabilities.Has(provider.CapabilityStopDispatchFencing) {
-		if request.FencingToken < f.stopFencingToken {
+		key := request.OperationID + "\x00" + request.SessionID
+		if f.stopFencingTokens == nil {
+			f.stopFencingTokens = make(map[string]uint64)
+		}
+		if request.FencingToken < f.stopFencingTokens[key] {
 			return provider.StopResult{}, errors.New("stale Provider Stop dispatch fencing token")
 		}
 		if f.stopOperations == nil {
 			f.stopOperations = make(map[string]provider.StopResult)
 		}
-		key := request.OperationID + "\x00" + request.SessionID
-		if request.FencingToken > f.stopFencingToken {
-			f.stopFencingToken = request.FencingToken
+		if request.FencingToken > f.stopFencingTokens[key] {
+			f.stopFencingTokens[key] = request.FencingToken
 		}
 		if result, ok := f.stopOperations[key]; ok {
 			return result, nil
