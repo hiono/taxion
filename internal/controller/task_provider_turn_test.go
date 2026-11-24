@@ -448,14 +448,14 @@ func TestTaskProviderTurnReleasesDefinitiveSendFailureAndRetriesSameIntent(t *te
 	if err != nil {
 		t.Fatalf("GetJob after definitive Send rejection: %v", err)
 	}
+	_, activeClaim := domain.ActiveTaskTurnDispatchClaim(job, turn.OperationID)
 	if len(job.TaskTurnDispatchClaims) != 1 || len(job.TaskTurnDispatchReleases) != 1 ||
 		len(job.TaskTurnObservations) != 0 ||
 		job.TaskTurnDispatchReleases[0].Outcome != domain.TaskTurnDispatchReleasedDefinitiveFailure ||
 		!validProviderEvidenceSHA256(job.TaskTurnDispatchReleases[0].EvidenceSHA256) ||
-		domain.ActiveTaskTurnDispatchClaim(job, turn.OperationID) != (domain.TaskTurnDispatchClaim{}, false) ||
-		!taskTurnNeverDispatched(job, turn.ID) {
-		t.Fatalf("definitive Send rejection did not release its exact claim with evidence: claims=%#v releases=%#v observations=%#v",
-			job.TaskTurnDispatchClaims, job.TaskTurnDispatchReleases, job.TaskTurnObservations)
+		activeClaim || !taskTurnNeverDispatched(job, turn.ID) {
+		t.Fatalf("definitive Send rejection did not release its exact claim with evidence: claims=%#v releases=%#v observations=%#v active=%v",
+			job.TaskTurnDispatchClaims, job.TaskTurnDispatchReleases, job.TaskTurnObservations, activeClaim)
 	}
 
 	f.runtime.sendErr = nil
