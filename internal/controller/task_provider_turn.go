@@ -359,7 +359,6 @@ func (c *ProviderController) reconcileTaskTurn(
 	return c.dispatchTaskTurn(ctx, receipt, job, turn, request, permissionRequest, principal, capabilities)
 }
 
-
 func (c *ProviderController) releaseTaskTurnDispatchClaim(
 	ctx context.Context,
 	jobID string,
