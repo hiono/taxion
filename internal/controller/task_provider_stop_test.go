@@ -1399,7 +1399,7 @@ func TestTaskProviderStopLookupDoesNotReleaseClaimStartedDuringLookup(t *testing
 	}
 	_, claim, _, err := f.database.AddProviderStopDispatchClaim(
 		f.ctx, f.jobID, job.Revision, intent.ID,
-		"cmd_81818181818181818181818181818181", f.principal,
+		"cmd_83838383838383838383838383838383", f.principal,
 	)
 	if err != nil {
 		t.Fatalf("AddProviderStopDispatchClaim: %v", err)
