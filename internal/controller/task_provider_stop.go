@@ -318,7 +318,7 @@ func (c *ProviderController) StopTaskExecution(
 			}
 			return intentReceipt, intent, observation, stopErr
 		}
-		if evidence, definitive := providerStopDefinitiveFailureEvidence(intent.OperationID, stopErr); definitive {
+		if evidence, definitive := providerStopDefinitiveFailureEvidenceForClaim(intent.OperationID, claim.ID, stopErr); definitive {
 			observation, persistErr := c.persistProviderStopObservation(
 				ctx, latest, intent, principal, false, false, evidence, latestPreviousUnknown,
 			)
