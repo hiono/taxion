@@ -1241,3 +1241,78 @@ func TestAcquireWorktreeIndexLockPreservesForeignLock(t *testing.T) {
 		t.Fatalf("foreign Git index lock was modified: %q %v", actual, err)
 	}
 }
+
+func TestCaptureOutputSupportsBracketInGitMetadataParentPath(t *testing.T) {
+	repository := initRepository(t)
+	bracketParent := filepath.Join(canonicalTempDir(t), "client[west")
+	if err := os.MkdirAll(bracketParent, 0o700); err != nil {
+		t.Fatalf("create bracket parent: %v", err)
+	}
+	movedRepository := filepath.Join(bracketParent, "repository")
+	if err := os.Rename(repository, movedRepository); err != nil {
+		t.Fatalf("move repository beneath bracket parent: %v", err)
+	}
+	gitTestRun(t, movedRepository, "config", "core.excludesFile", filepath.Join(movedRepository, "empty-global-excludes"))
+	workspace := filepath.Join(canonicalTempDir(t), "managed-worktrees")
+	manager, err := NewManager(workspace, []Repository{{ID: "repo.primary", Path: movedRepository}})
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	task := domain.Task{ID: "task_0123456789abcdef", TargetRepositories: []string{"repo.primary"}}
+	snapshot, err := manager.Prepare(context.Background(), "job_0123456789abcdef", task)
+	if err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(snapshot.WorktreePath, "output.txt"), []byte("captured\n"), 0o600); err != nil {
+		t.Fatalf("write output: %v", err)
+	}
+	gitTestRun(t, snapshot.WorktreePath, "add", "output.txt")
+	gitTestRun(t, snapshot.WorktreePath, "commit", "-m", "capture output under bracket path")
+	if _, err := manager.CaptureOutput(context.Background(), "job_0123456789abcdef", task, snapshot); err != nil {
+		t.Fatalf("CaptureOutput with literal bracket parent path: %v", err)
+	}
+}
+
+func TestOrphanAdoptionRecoveryUsesCurrentRegistryAndIgnoresAdjacentBaseline(t *testing.T) {
+	repository := initRepository(t)
+	workspaceA := filepath.Join(canonicalTempDir(t), "workspace-a")
+	workspaceB := filepath.Join(canonicalTempDir(t), "workspace-b")
+	if _, err := NewManager(workspaceA, []Repository{{ID: "repo.primary", Path: repository}}); err != nil {
+		t.Fatalf("NewManager A: %v", err)
+	}
+	managerB, err := NewManager(workspaceB, []Repository{{ID: "repo.alias", Path: repository}})
+	if err != nil {
+		t.Fatalf("NewManager B: %v", err)
+	}
+	external := filepath.Join(canonicalTempDir(t), "external-worktree")
+	gitTestRun(t, repository, "worktree", "add", "--detach", external, "HEAD")
+	gitDir := gitTestOutput(t, external, "rev-parse", "--absolute-git-dir")
+	gitDir, err = filepath.EvalSymlinks(gitDir)
+	if err != nil {
+		t.Fatalf("resolve external Git admin directory: %v", err)
+	}
+	reservation := adoptionReservation{
+		JobID: "job_0123456789abcdef", TaskID: "task_0123456789abcdef",
+		RepositoryID: "repo.primary", WorktreePath: external, GitDir: gitDir, WorkspaceRoot: workspaceA,
+	}
+	directory, err := managerB.adoptionReservationDirectory("repo.alias", true)
+	if err != nil {
+		t.Fatalf("resolve alias reservation registry: %v", err)
+	}
+	for _, path := range adoptionReservationPaths(directory, reservation) {
+		if _, err := writeAdoptionReservation(path, reservation); err != nil {
+			t.Fatalf("write orphan reservation: %v", err)
+		}
+	}
+	if err := os.WriteFile(external+".baseline.json", []byte("not a Taxion baseline"), 0o600); err != nil {
+		t.Fatalf("write unrelated adjacent baseline: %v", err)
+	}
+	if err := managerB.recoverOrphanedAdoptionReservations(reservation, directory); err != nil {
+		t.Fatalf("recover reservation using current trusted registry alias: %v", err)
+	}
+	for _, path := range adoptionReservationPaths(directory, reservation) {
+		if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("orphan reservation remains: %s (%v)", path, err)
+		}
+	}
+}

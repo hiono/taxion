@@ -156,9 +156,13 @@ func (m *Manager) Prepare(ctx context.Context, jobID string, task domain.Task) (
 		return Snapshot{}, err
 	}
 	defer unlockRepository()
+	reservationDirectory, err := m.adoptionReservationDirectory(repositoryID, false)
+	if err != nil {
+		return Snapshot{}, err
+	}
 	if err := m.recoverOrphanedAdoptionReservations(adoptionReservation{
 		JobID: jobID, TaskID: task.ID, RepositoryID: repositoryID, WorkspaceRoot: m.root,
-	}); err != nil {
+	}, reservationDirectory); err != nil {
 		return Snapshot{}, fmt.Errorf("recover interrupted Task Worktree ownership reservation: %w", err)
 	}
 	key := sha256.Sum256([]byte(jobID + "\x00" + task.ID))
@@ -572,11 +576,15 @@ func acquireWorktreeIndexLock(ctx context.Context, worktreePath string) (string,
 		captureLock.release()
 		return "", nil, cause
 	}
-	staleTemps, err := filepath.Glob(filepath.Join(directory, ".taxion-index-lock-*"))
+	entries, err := os.ReadDir(directory)
 	if err != nil {
 		return fail(fmt.Errorf("list stale Task Worktree index lock temporaries: %w", err))
 	}
-	for _, path := range staleTemps {
+	for _, entry := range entries {
+		if !strings.HasPrefix(entry.Name(), ".taxion-index-lock-") {
+			continue
+		}
+		path := filepath.Join(directory, entry.Name())
 		info, statErr := os.Lstat(path)
 		if statErr != nil {
 			return fail(fmt.Errorf("inspect stale Task Worktree index lock temporary: %w", statErr))
@@ -647,7 +655,7 @@ func acquireWorktreeIndexLock(ctx context.Context, worktreePath string) (string,
 		_ = os.Remove(lockPath)
 		return fail(fmt.Errorf("sync Task Worktree Git index lock: %w", err))
 	}
-	lockFile, err := os.Open(lockPath)
+	lockFile, err := openWorktreeIndexLockFile(lockPath)
 	if err != nil {
 		_ = os.Remove(lockPath)
 		return fail(fmt.Errorf("open Task Worktree Git index lock: %w", err))

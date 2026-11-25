@@ -40,6 +40,10 @@ func (m *Manager) Adopt(ctx context.Context, jobID string, task domain.Task, wor
 		return Snapshot{}, err
 	}
 	defer unlockRepository()
+	reservationDirectory, err := m.adoptionReservationDirectory(repositoryID, false)
+	if err != nil {
+		return Snapshot{}, err
+	}
 	if !filepath.IsAbs(worktreePath) || filepath.Clean(worktreePath) != worktreePath {
 		return Snapshot{}, errors.New("adopted Worktree path must be absolute and canonical")
 	}
@@ -125,7 +129,7 @@ func (m *Manager) Adopt(ctx context.Context, jobID string, task domain.Task, wor
 			return Snapshot{}, err
 		}
 	} else if errors.Is(readErr, os.ErrNotExist) {
-		if err := m.recoverOrphanedAdoptionReservations(reservation); err != nil {
+		if err := m.recoverOrphanedAdoptionReservations(reservation, reservationDirectory); err != nil {
 			return Snapshot{}, fmt.Errorf("recover interrupted Worktree adoption reservation: %w", err)
 		}
 		if err := m.reserveAdoption(jobID, task.ID, repositoryID, worktreePath, resolvedGitDir); err != nil {
@@ -147,13 +151,13 @@ func (m *Manager) Adopt(ctx context.Context, jobID string, task domain.Task, wor
 					existing.HeadRef == headRef {
 					record = existing
 				} else {
-					cleanupErr := m.removeOrphanedAdoptionReservation(reservation)
+					cleanupErr := m.removeOrphanedAdoptionReservation(reservation, reservationDirectory)
 					return Snapshot{}, errors.Join(
 						errors.New("concurrent Worktree adoption registered a different identity"), cleanupErr,
 					)
 				}
 			} else {
-				cleanupErr := m.removeOrphanedAdoptionReservation(reservation)
+				cleanupErr := m.removeOrphanedAdoptionReservation(reservation, reservationDirectory)
 				return Snapshot{}, errors.Join(
 					fmt.Errorf("persist adopted Worktree registration: %w", err), cleanupErr,
 				)
@@ -180,7 +184,7 @@ func (m *Manager) Adopt(ctx context.Context, jobID string, task domain.Task, wor
 			if removeErr == nil {
 				removeErr = syncDirectory(filepath.Dir(baselinePath))
 			}
-			cleanupErr := m.removeOrphanedAdoptionReservation(reservation)
+			cleanupErr := m.removeOrphanedAdoptionReservation(reservation, reservationDirectory)
 			return Snapshot{}, errors.Join(verifyErr, removeErr, cleanupErr)
 		}
 		return Snapshot{}, verifyErr
@@ -204,10 +208,9 @@ func adoptionReservationPaths(directory string, reservation adoptionReservation)
 	}
 }
 
-func (m *Manager) recoverOrphanedAdoptionReservations(reservation adoptionReservation) error {
-	directory, err := m.adoptionReservationDirectory(reservation.RepositoryID, false)
-	if err != nil {
-		return err
+func (m *Manager) recoverOrphanedAdoptionReservations(reservation adoptionReservation, directory string) error {
+	if strings.TrimSpace(directory) == "" {
+		return errors.New("Worktree reservation registry directory is required")
 	}
 	paths := adoptionReservationPaths(directory, reservation)
 	for _, path := range paths {
@@ -222,14 +225,14 @@ func (m *Manager) recoverOrphanedAdoptionReservations(reservation adoptionReserv
 		if err := json.Unmarshal(data, &existing); err != nil {
 			return errors.New("existing Worktree adoption reservation is invalid")
 		}
-		if err := m.removeOrphanedAdoptionReservation(existing); err != nil {
+		if err := m.removeOrphanedAdoptionReservation(existing, directory); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (m *Manager) removeOrphanedAdoptionReservation(reservation adoptionReservation) error {
+func (m *Manager) removeOrphanedAdoptionReservation(reservation adoptionReservation, directory string) error {
 	workspaceRoot := reservation.WorkspaceRoot
 	if workspaceRoot == "" {
 		workspaceRoot = m.root
@@ -238,18 +241,9 @@ func (m *Manager) removeOrphanedAdoptionReservation(reservation adoptionReservat
 	if err != nil || resolvedWorkspaceRoot != workspaceRoot {
 		return errors.New("Worktree reservation workspace root cannot be resolved safely")
 	}
-	baselinePaths := []string{
-		reservation.WorktreePath + ".baseline.json",
-		adoptionRegistrationPath(workspaceRoot, reservation.JobID, reservation.TaskID) + ".baseline.json",
-	}
-	for _, baselinePath := range baselinePaths {
-		record, readErr := readBaselineRecord(baselinePath)
-		if errors.Is(readErr, os.ErrNotExist) {
-			continue
-		}
-		if readErr != nil {
-			return fmt.Errorf("inspect Worktree adoption baseline before reservation cleanup: %w", readErr)
-		}
+	baselinePath := adoptionRegistrationPath(workspaceRoot, reservation.JobID, reservation.TaskID) + ".baseline.json"
+	record, readErr := readBaselineRecord(baselinePath)
+	if readErr == nil {
 		if record.JobID == reservation.JobID && record.TaskID == reservation.TaskID &&
 			record.RepositoryID == reservation.RepositoryID && record.WorktreePath == reservation.WorktreePath &&
 			(record.Origin == domain.WorktreeOriginAdopted || record.Origin == domain.WorktreeOriginTaxionCreated) {
@@ -257,9 +251,11 @@ func (m *Manager) removeOrphanedAdoptionReservation(reservation adoptionReservat
 		}
 		return errors.New("existing Worktree baseline does not match its ownership reservation; refusing cleanup")
 	}
-	directory, err := m.adoptionReservationDirectory(reservation.RepositoryID, false)
-	if err != nil {
-		return err
+	if !errors.Is(readErr, os.ErrNotExist) {
+		return fmt.Errorf("inspect Worktree adoption baseline before reservation cleanup: %w", readErr)
+	}
+	if strings.TrimSpace(directory) == "" {
+		return errors.New("Worktree reservation registry directory is required")
 	}
 	paths := adoptionReservationPaths(directory, reservation)
 	removed := false

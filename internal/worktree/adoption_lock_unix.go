@@ -41,6 +41,10 @@ func acquireAdoptionFileLock(ctx context.Context, path string) (*adoptionFileLoc
 	}
 }
 
+func openWorktreeIndexLockFile(path string) (*os.File, error) {
+	return os.Open(path)
+}
+
 func openRegularWorktreeFile(path string, expected os.FileInfo) (*os.File, error) {
 	fd, err := unix.Open(path, unix.O_RDONLY|unix.O_CLOEXEC|unix.O_NOFOLLOW|unix.O_NONBLOCK, 0)
 	if err != nil {

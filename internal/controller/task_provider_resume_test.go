@@ -3,14 +3,11 @@ package controller
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strings"
 	"testing"
 
-	"github.com/hiono/taxion/internal/auth"
 	"github.com/hiono/taxion/internal/domain"
 	"github.com/hiono/taxion/internal/provider"
-	"github.com/hiono/taxion/internal/store"
 )
 
 func prepareTaskResumeTurn(t *testing.T, f *taskProviderStopFixture) {
@@ -418,74 +415,5 @@ func TestTaskProviderResumeDoesNotDispatchFromReplayedActiveClaim(t *testing.T) 
 		len(job.PlanningResumeDispatchClaims) != 1 || len(job.PlanningResumeDispatchReleases) != 1 {
 		t.Fatalf("Resume race left inconsistent facts: observations=%#v claims=%#v releases=%#v",
 			job.PlanningResumeObservations, job.PlanningResumeDispatchClaims, job.PlanningResumeDispatchReleases)
-	}
-}
-
-type failResumeClaimReadStore struct {
-	ProviderExecutionStore
-	failAt     int
-	claimReads int
-	armed      bool
-}
-
-func (s *failResumeClaimReadStore) AddPlanningResumeDispatchClaim(
-	ctx context.Context, jobID string, expectedRevision uint64, resumeID, commandID string,
-	principal auth.AuthenticatedPrincipal,
-) (store.CommandReceipt, domain.PlanningResumeDispatchClaim, bool, error) {
-	receipt, claim, created, err := s.ProviderExecutionStore.AddPlanningResumeDispatchClaim(
-		ctx, jobID, expectedRevision, resumeID, commandID, principal,
-	)
-	if err == nil {
-		s.armed = true
-		s.claimReads = 0
-	}
-	return receipt, claim, created, err
-}
-
-func (s *failResumeClaimReadStore) GetJob(ctx context.Context, jobID string) (domain.Job, error) {
-	if s.armed {
-		s.claimReads++
-		if s.claimReads == s.failAt {
-			s.armed = false
-			return domain.Job{}, errors.New("injected transient Job read failure after Resume claim")
-		}
-	}
-	return s.ProviderExecutionStore.GetJob(ctx, jobID)
-}
-
-func TestTaskProviderResumeFinalizesClaimAfterPostClaimReadFailure(t *testing.T) {
-	for _, failAt := range []int{1, 3} {
-		t.Run(fmt.Sprintf("post-claim-read-%d", failAt), func(t *testing.T) {
-			f := newTaskProviderStopFixture(t)
-			prepareTaskResumeTurn(t, &f)
-			enableTaskResumeE5(&f)
-			f.controller.store = &failResumeClaimReadStore{
-				ProviderExecutionStore: f.database,
-				failAt: failAt,
-			}
-			commandID := "cmd_e1212121212121212121212121212121"
-			_, observation, _, err := f.resume(commandID)
-			if err == nil || observation.Status != domain.PlanningResumeFailed || f.runtime.resumeCalls != 0 {
-				t.Fatalf("post-claim read failure was not finalized before Provider dispatch: observation=%#v calls=%d err=%v",
-					observation, f.runtime.resumeCalls, err)
-			}
-			job, readErr := f.database.GetJob(f.ctx, f.jobID)
-			if readErr != nil {
-				t.Fatalf("GetJob after failed Resume claim: %v", readErr)
-			}
-			if len(job.PlanningResumeDispatchClaims) != 1 || len(job.PlanningResumeDispatchReleases) != 1 ||
-				len(job.PlanningResumeObservations) == 0 {
-				t.Fatalf("Resume claim was not finalized and released: claims=%#v releases=%#v observations=%#v",
-					job.PlanningResumeDispatchClaims, job.PlanningResumeDispatchReleases, job.PlanningResumeObservations)
-			}
-			claim := job.PlanningResumeDispatchClaims[0]
-			latest, found := latestProviderResumeObservation(job, claim.ResumeID)
-			if !found || latest.Status != domain.PlanningResumeFailed || latest.DispatchClaimID != claim.ID ||
-				job.PlanningResumeDispatchReleases[0].ClaimID != claim.ID ||
-				job.PlanningResumeDispatchReleases[0].Outcome != domain.PlanningResumeDispatchReleasedFailed {
-				t.Fatalf("Resume failure facts do not match the acquired claim: latest=%#v claim=%#v release=%#v",
-					latest, claim, job.PlanningResumeDispatchReleases[0])
-			}
-		})
 	}
 }

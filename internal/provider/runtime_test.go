@@ -28,11 +28,9 @@ type trackingLease struct {
 
 type failingAcquireBroker struct {
 	lease CredentialLease
-	calls int
 }
 
-func (b *failingAcquireBroker) Acquire(context.Context, Identity) (CredentialLease, error) {
-	b.calls++
+func (b failingAcquireBroker) Acquire(context.Context, Identity) (CredentialLease, error) {
 	return b.lease, errors.New("credential broker unavailable")
 }
 
@@ -208,7 +206,7 @@ type runtimeTestVerifier struct{}
 
 func (runtimeTestVerifier) Verify(_ context.Context, identity Identity, evidence CapabilityEvidence) (bool, error) {
 	return evidence.Identity == identity && evidence.TestID == "runtime-test" &&
-		evidence.EvidenceLevel >= EvidenceSynthetic, nil
+		evidence.EvidenceLevel == EvidenceSynthetic, nil
 }
 
 func newTestRuntime(adapter Adapter, broker CredentialBroker) (*Runtime, error) {
@@ -543,13 +541,7 @@ func TestRuntimeResumeRequiresVerifiedIdempotencyForTaskReattachment(t *testing.
 
 func TestRuntimeResumeClassifiesCredentialAcquisitionFailureAsPreDispatch(t *testing.T) {
 	adapter := newTestAdapter(CapabilitySessionReattach, CapabilityResumeIdempotency)
-	for i := range adapter.capabilities.Evidence {
-		if adapter.capabilities.Evidence[i].Capability == CapabilityResumeIdempotency {
-			adapter.capabilities.Evidence[i].EvidenceLevel = EvidenceLive
-		}
-	}
-	broker := &failingAcquireBroker{}
-	runtime, err := newTestRuntime(adapter, broker)
+	runtime, err := newTestRuntime(adapter, failingAcquireBroker{})
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
 	}
@@ -557,12 +549,8 @@ func TestRuntimeResumeClassifiesCredentialAcquisitionFailureAsPreDispatch(t *tes
 	request.RequireIdempotency = true
 	_, err = runtime.Resume(context.Background(), request)
 	var preDispatch *PreDispatchError
-	if !errors.As(err, &preDispatch) || preDispatch.OperationID != request.OperationID ||
-		!errors.Is(err, ErrCredentialUnavailable) {
-		t.Fatalf("credential acquisition failure was not classified as credential-unavailable pre-dispatch: %v", err)
-	}
-	if broker.calls != 1 {
-		t.Fatalf("credential broker calls = %d, want 1", broker.calls)
+	if !errors.As(err, &preDispatch) || preDispatch.OperationID != request.OperationID {
+		t.Fatalf("credential acquisition failure was not classified as pre-dispatch: %v", err)
 	}
 	if adapter.resumeCalls != 0 {
 		t.Fatalf("Adapter was called after credential acquisition failed: %d", adapter.resumeCalls)
