@@ -134,9 +134,9 @@ func TestCommunicationControllerPersistsCoderPlannerQuestionAndAnswer(t *testing
 		result: QuestionReadOnlyContext{
 			RepositoryID: revision.Contract.TargetRepositories[0],
 			Boundary: domain.PlanningReadOnlyBoundary{
-				Mode: domain.PlanningReadOnlyBoundarySnapshot,
+				Mode:      domain.PlanningReadOnlyBoundarySnapshot,
 				Reference: "question_snapshot_controller",
-				SHA256: strings.Repeat("c", 64),
+				SHA256:    strings.Repeat("c", 64),
 			},
 		},
 	}
