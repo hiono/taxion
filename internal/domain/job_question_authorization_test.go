@@ -94,7 +94,6 @@ func TestJobQuestionAuthorizationBindsOneApprovedQuestionAndPlannerSession(t *te
 	if !found || startObservation.Status != ProviderStartAccepted {
 		t.Fatal("Planner does not have an accepted Provider Session")
 	}
-	contract := job.JobContractRevisions[len(job.JobContractRevisions)-1].Contract
 	authorizationTime := now.Add(3 * time.Minute)
 	request := JobQuestionAuthorizationRequest{
 		JobID: job.ID, CommandID: "cmd_73737373737373737373737373737373",
