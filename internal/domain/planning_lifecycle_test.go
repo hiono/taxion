@@ -760,7 +760,6 @@ func TestProviderStartUnknownEvidenceIsAppendOnlyUntilTerminalResolution(t *test
 	}
 }
 
-
 func TestPlanningResumeDispatchClaimRejectsPlannerExecution(t *testing.T) {
 	job, principal, executionID := planningLifecycleJob(t)
 	now := job.UpdatedAt.Add(time.Second)

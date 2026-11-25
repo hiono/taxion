@@ -827,6 +827,58 @@ func TestManagerRequiresPersistentReservationForAdoptedWorktree(t *testing.T) {
 	}
 }
 
+
+func TestManagerAdoptionReservationsRejectNestedWorktreePaths(t *testing.T) {
+	repository := initRepository(t)
+	workspace := filepath.Join(canonicalTempDir(t), "managed-worktrees")
+	manager, err := NewManager(workspace, []Repository{{ID: "repo.primary", Path: repository}})
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	parent := filepath.Join(canonicalTempDir(t), "nested-worktree")
+	child := filepath.Join(parent, "child")
+	if err := os.MkdirAll(child, 0o700); err != nil {
+		t.Fatalf("create nested Worktree paths: %v", err)
+	}
+	gitDir, err := gitOutput(context.Background(), repository, "rev-parse", "--absolute-git-dir")
+	if err != nil {
+		t.Fatalf("resolve repository Git directory: %v", err)
+	}
+	unlock, err := manager.lockRepository(context.Background(), "repo.primary")
+	if err != nil {
+		t.Fatalf("lock repository reservations: %v", err)
+	}
+	defer unlock()
+	if err := manager.reserveAdoption("job_1111111111111111", "task_1111111111111111",
+		"repo.primary", parent, gitDir); err != nil {
+		t.Fatalf("reserve parent Worktree: %v", err)
+	}
+	if err := manager.reserveAdoption("job_2222222222222222", "task_2222222222222222",
+		"repo.primary", child, filepath.Join(gitDir, "worktrees", "child")); err == nil {
+		t.Fatal("nested child Worktree reservation was accepted")
+	}
+
+	directory, err := manager.adoptionReservationDirectory("repo.primary", false)
+	if err != nil {
+		t.Fatalf("resolve reservation directory: %v", err)
+	}
+	conflict := adoptionReservation{
+		JobID: "job_3333333333333333", TaskID: "task_3333333333333333",
+		RepositoryID: "repo.primary", WorktreePath: child,
+		GitDir: gitDir, WorkspaceRoot: workspace,
+	}
+	for _, path := range adoptionReservationPaths(directory, conflict) {
+		if _, err := writeAdoptionReservation(path, conflict); err != nil {
+			t.Fatalf("inject overlapping reservation for final verification: %v", err)
+		}
+	}
+	if err := manager.verifyAdoptionReservation(
+		"job_1111111111111111", "task_1111111111111111", "repo.primary", parent, gitDir,
+	); err == nil {
+		t.Fatal("final Worktree reservation verification accepted an overlapping child reservation")
+	}
+}
+
 func TestManagerAdoptionReservationsAreUniqueByTaskAndGitAdminDirectory(t *testing.T) {
 	repository := initRepository(t)
 	worktreeA := filepath.Join(canonicalTempDir(t), "adoption-a")

@@ -296,6 +296,58 @@ type adoptionReservation struct {
 	WorkspaceRoot string `json:"workspace_root"`
 }
 
+func adoptionWorktreePathsOverlap(first, second string) bool {
+	first = filepath.Clean(first)
+	second = filepath.Clean(second)
+	return first == second || pathWithin(first, second) || pathWithin(second, first)
+}
+
+func validateAdoptionReservationPath(directory string, reservation adoptionReservation) error {
+	entries, err := os.ReadDir(directory)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("list Worktree adoption reservations: %w", err)
+	}
+	seen := make(map[string]struct{})
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
+			continue
+		}
+		path := filepath.Join(directory, entry.Name())
+		data, err := os.ReadFile(path)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("read Worktree adoption reservation %q: %w", entry.Name(), err)
+		}
+		var existing adoptionReservation
+		if err := json.Unmarshal(data, &existing); err != nil ||
+			existing.JobID == "" || existing.TaskID == "" || existing.RepositoryID == "" ||
+			existing.GitDir != reservation.GitDir || !filepath.IsAbs(existing.WorktreePath) ||
+			filepath.Clean(existing.WorktreePath) != existing.WorktreePath {
+			return errors.New("Worktree adoption reservation registry contains an invalid identity")
+		}
+		key := existing.JobID + "\x00" + existing.TaskID
+		if _, duplicate := seen[key]; duplicate {
+			continue
+		}
+		seen[key] = struct{}{}
+		if existing.JobID == reservation.JobID && existing.TaskID == reservation.TaskID {
+			if existing != reservation {
+				return errors.New("Task already has a different Worktree adoption reservation")
+			}
+			continue
+		}
+		if adoptionWorktreePathsOverlap(existing.WorktreePath, reservation.WorktreePath) {
+			return errors.New("Worktree path overlaps another Task's reserved Worktree")
+		}
+	}
+	return nil
+}
+
 func (m *Manager) reserveAdoption(jobID, taskID, repositoryID, worktreePath, gitDir string) error {
 	directory, err := m.adoptionReservationDirectory(repositoryID, true)
 	if err != nil {
@@ -304,6 +356,9 @@ func (m *Manager) reserveAdoption(jobID, taskID, repositoryID, worktreePath, git
 	reservation := adoptionReservation{
 		JobID: jobID, TaskID: taskID, RepositoryID: repositoryID,
 		WorktreePath: worktreePath, GitDir: gitDir, WorkspaceRoot: m.root,
+	}
+	if err := validateAdoptionReservationPath(directory, reservation); err != nil {
+		return err
 	}
 	createdPaths := make([]string, 0, 3)
 	for _, path := range adoptionReservationPaths(directory, reservation) {
@@ -671,5 +726,5 @@ func (m *Manager) verifyAdoptionReservation(jobID, taskID, repositoryID, worktre
 			return errors.New("Worktree adoption reservation identity is invalid")
 		}
 	}
-	return nil
+	return validateAdoptionReservationPath(directory, reservation)
 }
