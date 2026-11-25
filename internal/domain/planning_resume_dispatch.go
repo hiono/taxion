@@ -137,6 +137,9 @@ func NewPlanningResumeDispatchClaim(
 		return PlanningResumeDispatchClaim{}, errors.New("Provider Resume Session already has an active dispatch claim")
 	}
 	execution := roleExecutionByID(job, resume.RoleExecutionID)
+	if execution.Role != RoleCoder {
+		return PlanningResumeDispatchClaim{}, errors.New("Resume dispatch claim requires a Coder execution")
+	}
 	principalIDFromAuthority, _, _, _, err := providerStopExecutionAuthority(job, execution)
 	if err != nil || principalIDFromAuthority != principalID {
 		return PlanningResumeDispatchClaim{}, errors.New("Resume dispatch claim Principal does not match execution authority")
@@ -224,6 +227,9 @@ func (c PlanningResumeDispatchClaim) Validate(job Job) error {
 		return errors.New("PlanningResumeDispatchClaim was not acquired for the latest Resume intent")
 	}
 	execution := roleExecutionByID(job, c.RoleExecutionID)
+	if execution.Role != RoleCoder {
+		return errors.New("PlanningResumeDispatchClaim requires a Coder execution")
+	}
 	principalIDFromAuthority, _, _, _, err := providerStopExecutionAuthority(job, execution)
 	if err != nil || principalIDFromAuthority != c.PrincipalID {
 		return errors.New("PlanningResumeDispatchClaim Principal does not match execution authority")

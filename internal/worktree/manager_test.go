@@ -570,7 +570,7 @@ func TestManagerAdoptionDigestIgnoresSubmoduleTagLabels(t *testing.T) {
 	submodulePath := filepath.Join(worktreePath, "modules", "example")
 	gitTestRun(t, submodulePath, "config", "user.name", "Taxion Test")
 	gitTestRun(t, submodulePath, "config", "user.email", "taxion-test@example.invalid")
-	gitTestRun(t, submodulePath, "tag", "-a", "state-label", "-m", "state label")
+	gitTestRun(t, submodulePath, "tag", "--no-sign", "-a", "state-label", "-m", "state label")
 	replayed, err := manager.Adopt(context.Background(), jobID, task, worktreePath)
 	if err != nil || replayed != first {
 		t.Fatalf("submodule tag label changed the adoption digest: first=%#v replayed=%#v err=%v", first, replayed, err)

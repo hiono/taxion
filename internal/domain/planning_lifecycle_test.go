@@ -760,6 +760,47 @@ func TestProviderStartUnknownEvidenceIsAppendOnlyUntilTerminalResolution(t *test
 	}
 }
 
+
+func TestPlanningResumeDispatchClaimRejectsPlannerExecution(t *testing.T) {
+	job, principal, executionID := planningLifecycleJob(t)
+	now := job.UpdatedAt.Add(time.Second)
+	turn, err := NewPlanningTurnIntent(
+		job, executionID, principal, "session_1",
+		"cmd_51515151515151515151515151515151", strings.Repeat("a", 64), 100, now,
+	)
+	if err != nil {
+		t.Fatalf("Planning Turn intent: %v", err)
+	}
+	job.PlanningTurnIntents = append(job.PlanningTurnIntents, turn)
+	job.Revision++
+	job.UpdatedAt = turn.CreatedAt
+	turnObservation, err := NewPlanningTurnObservation(
+		job, turn.ID, principal, "cmd_52525252525252525252525252525252",
+		PlanningTurnCompleted, 10, strings.Repeat("b", 64), false, now.Add(time.Second),
+	)
+	if err != nil {
+		t.Fatalf("Planning Turn observation: %v", err)
+	}
+	job.PlanningTurnObservations = append(job.PlanningTurnObservations, turnObservation)
+	job.Revision++
+	job.UpdatedAt = turnObservation.CreatedAt
+	resume, err := NewPlanningResumeIntent(
+		job, executionID, principal, "session_1",
+		"cmd_53535353535353535353535353535353", strings.Repeat("c", 64), true, now.Add(2*time.Second),
+	)
+	if err != nil {
+		t.Fatalf("Planning Resume intent: %v", err)
+	}
+	job.PlanningResumeIntents = append(job.PlanningResumeIntents, resume)
+	job.Revision++
+	job.UpdatedAt = resume.CreatedAt
+	if _, err := NewPlanningResumeDispatchClaim(
+		job, resume.ID, principal, "cmd_54545454545454545454545454545454", now.Add(3*time.Second),
+	); err == nil {
+		t.Fatal("Planner execution acquired a Coder-only Resume dispatch claim")
+	}
+}
+
 func TestPlanningResumeAfterStopRecordsBoundaryDenial(t *testing.T) {
 	job, principal, executionID := planningLifecycleJob(t)
 	now := job.UpdatedAt.Add(time.Second)
