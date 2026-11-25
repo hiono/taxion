@@ -694,7 +694,7 @@ func NewPlanningResumeIntent(job Job, roleExecutionID, principalID, providerSess
 		if turn.RoleExecutionID != execution.ID || turn.ProviderSessionID != providerSessionID {
 			continue
 		}
-		claim, active := ActiveTaskTurnDispatchClaim(job, turn.OperationID)
+		_, active := ActiveTaskTurnDispatchClaim(job, turn.OperationID)
 		if active {
 			return PlanningResumeIntent{}, &PlanningBoundaryError{
 				Boundary: PlanningBoundaryResume, ReasonCode: "task_turn_dispatch_in_progress",
