@@ -429,6 +429,11 @@ func (c *ProviderController) dispatchTaskTurn(
 		}
 		return receipt, turn, domain.TaskTurnObservation{}, provider.TurnResult{}, err
 	}
+	// A replay may replace this claim after an earlier Send has crossed the
+	// dispatch boundary. Require Provider-side deduplication whenever verified
+	// E4 Send idempotency is available, including on the older in-flight call.
+	request.RequireIdempotency = request.RequireIdempotency ||
+		capabilities.HasEvidenceAtLeast(provider.CapabilitySendIdempotency, provider.EvidenceLive)
 	current = postClaimJob
 	result, err := c.runtime.Send(ctx, request)
 	if err != nil {
