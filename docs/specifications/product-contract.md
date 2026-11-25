@@ -157,7 +157,7 @@ MessageKindは次の意味を持つ。
 | NOTIFICATION | 通知 | なし |
 | HANDOFF | 責任移転intent | 明示的Commandと停止・結果・Usage・Worktree gateを要求 |
 
-基本単位は1 Message・1 Recipientとする。Fan-outは不変BatchIDで相関する。Delivery状態はMessage本体と分離し、REQUESTED / ACCEPTED / FAILED / UNKNOWNを区別する。Exactly-once deliveryを保証せず、MessageIDによる重複排除と追跡可能性を提供する。
+基本単位は1 Message・1 Recipientとする。Fan-outは不変BatchIDで相関する。Delivery状態はMessage本体と分離し、REQUESTED / ACCEPTED / FAILED / UNKNOWNを区別する。最初のREQUESTED observationは自身のObservationIDをRequestObservationIDとして持ち、後続の結果observationは対象attemptを開始したREQUESTED observationのIDを必須参照とする。結果は最新attemptのRequestObservationIDと一致しなければ拒否し、遅延した旧attemptの結果を新attemptへ帰属させない。UNKNOWNの明示的なreconciliationでも同じRequestObservationIDを維持する。Exactly-once deliveryを保証せず、MessageIDによる重複排除と追跡可能性を提供する。
 
 ### 5.2 External Agent A2A
 
