@@ -128,7 +128,7 @@ func (c *JobQuestionAuthorizationController) Authorize(
 		JobID: job.ID, CommandID: commandID, QuestionMessageID: question.ID,
 		PlannerRoleExecutionID: planner.ID, ProviderSessionID: accepted.ProviderSessionID,
 		RepositoryID: planningGrant.RepositoryID,
-		ProviderID: start.ProviderID, AccountID: start.AccountID,
+		ProviderID:   start.ProviderID, AccountID: start.AccountID,
 		ConfigurationSHA256: start.ConfigurationSHA256, ReadOnlyBoundary: boundary,
 		Budget: budget, Deadline: deadline.UTC().Round(0),
 	}
