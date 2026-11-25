@@ -49,6 +49,51 @@ func newTestJob(t *testing.T, id, request string) domain.Job {
 	return job
 }
 
+func TestOpenUpgradesOlderSchemaVersionAndPreservesJob(t *testing.T) {
+	database, path := newTestStore(t)
+	ctx := context.Background()
+	job := newTestJob(t, "job_schema_upgrade", "Preserve the aggregate during schema upgrade.")
+	if _, err := database.createJob(ctx, job, "cmd_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", createLocalDraftJobCommandType); err != nil {
+		t.Fatalf("create Job before schema upgrade: %v", err)
+	}
+	if _, err := database.db.ExecContext(ctx, "PRAGMA user_version = 1"); err != nil {
+		t.Fatalf("set prior schema version: %v", err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatalf("close prior database: %v", err)
+	}
+
+	reopened, err := Open(ctx, path)
+	if err != nil {
+		t.Fatalf("Open() did not upgrade the supported prior schema: %v", err)
+	}
+	defer reopened.Close()
+	var version int
+	if err := reopened.db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil {
+		t.Fatalf("read upgraded schema version: %v", err)
+	}
+	if version != schemaVersion {
+		t.Fatalf("schema version = %d, want %d", version, schemaVersion)
+	}
+	got, err := reopened.GetJob(ctx, job.ID)
+	if err != nil || !reflect.DeepEqual(got, job) {
+		t.Fatalf("GetJob after schema upgrade = %#v, %v; want %#v", got, err, job)
+	}
+}
+
+func TestOpenRejectsFutureSchemaVersion(t *testing.T) {
+	database, path := newTestStore(t)
+	if _, err := database.db.ExecContext(context.Background(), "PRAGMA user_version = 99"); err != nil {
+		t.Fatalf("set future schema version: %v", err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatalf("close future-version database: %v", err)
+	}
+	if _, err := Open(context.Background(), path); !errors.Is(err, ErrUnsupportedSchema) {
+		t.Fatalf("Open() error = %v, want ErrUnsupportedSchema", err)
+	}
+}
+
 func TestCreateJobPersistsAggregateAndCommandReceipt(t *testing.T) {
 	database, path := newTestStore(t)
 	ctx := context.Background()
