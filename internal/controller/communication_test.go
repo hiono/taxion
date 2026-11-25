@@ -162,3 +162,72 @@ func TestCommunicationControllerRejectsUnboundRoleSession(t *testing.T) {
 		t.Fatal("CommunicationController accepted an unbound Provider Session")
 	}
 }
+
+func TestCommunicationControllerRecordsAndReconcilesDeliveryObservation(t *testing.T) {
+	runtime := &fakePlanningProviderRuntime{}
+	providerController, database, principal, jobID, grantID, documents := newProviderControllerFixture(t, runtime)
+	_, plannerExecution, _, _, err := providerController.StartPlanning(
+		context.Background(), jobID, grantID, "cmd_81818181818181818181818181818181", documents, principal,
+	)
+	if err != nil {
+		t.Fatalf("StartPlanning: %v", err)
+	}
+
+	communication, err := NewCommunicationController(database)
+	if err != nil {
+		t.Fatalf("NewCommunicationController: %v", err)
+	}
+	message, err := communication.SendFromHuman(context.Background(), HumanMessageRequest{
+		JobID: jobID, CommandID: "cmd_82828282828282828282828282828282",
+		Recipient: domain.ActorRef{Kind: domain.ActorPlanner, ID: plannerExecution.ID},
+		Kind: domain.MessageKindQuestion, Body: "追加の読み取り情報を確認してください。",
+	}, principal)
+	if err != nil {
+		t.Fatalf("SendFromHuman: %v", err)
+	}
+	if message.Delivery == nil || message.Delivery.Status != domain.DeliveryRequested {
+		t.Fatalf("initial delivery observation = %#v, want REQUESTED", message.Delivery)
+	}
+
+	_, unknown, err := communication.RecordDeliveryObservation(
+		context.Background(), jobID, message.Message.ID,
+		"cmd_83838383838383838383838383838383",
+		domain.DeliveryUnknown, "", false,
+	)
+	if err != nil {
+		t.Fatalf("RecordDeliveryObservation UNKNOWN: %v", err)
+	}
+	if unknown.Status != domain.DeliveryUnknown || unknown.Attempt != 1 {
+		t.Fatalf("UNKNOWN delivery observation = %#v, want attempt 1", unknown)
+	}
+
+	_, err = communication.RecordDeliveryObservation(
+		context.Background(), jobID, message.Message.ID,
+		"cmd_84848484848484848484848484848484",
+		domain.DeliveryAccepted, strings.Repeat("a", 64), false,
+	)
+	if err == nil {
+		t.Fatal("UNKNOWN delivery was accepted without explicit reconciliation")
+	}
+
+	_, accepted, err := communication.RecordDeliveryObservation(
+		context.Background(), jobID, message.Message.ID,
+		"cmd_85858585858585858585858585858585",
+		domain.DeliveryAccepted, strings.Repeat("b", 64), true,
+	)
+	if err != nil {
+		t.Fatalf("RecordDeliveryObservation reconciliation: %v", err)
+	}
+	if accepted.Status != domain.DeliveryAccepted || !accepted.ReconcilesUnknown || accepted.Attempt != 1 {
+		t.Fatalf("reconciled delivery observation = %#v", accepted)
+	}
+
+	persisted, err := database.GetJob(context.Background(), jobID)
+	if err != nil {
+		t.Fatalf("GetJob after delivery reconciliation: %v", err)
+	}
+	latest, found := latestDeliveryObservation(persisted, message.Message.ID)
+	if !found || latest.ID != accepted.ID || latest.ObservedBy.Kind != domain.ActorOrchestrator {
+		t.Fatalf("persisted latest delivery observation = %#v, found=%v", latest, found)
+	}
+}

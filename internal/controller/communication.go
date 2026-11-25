@@ -194,6 +194,18 @@ func (c *CommunicationController) ensureRequestedDelivery(
 	return nil, nil, store.ErrIdempotencyConflict
 }
 
+// RecordDeliveryObservation appends an Orchestrator-owned delivery outcome for a persisted JobMessage.
+// It records delivery evidence only; it does not dispatch or retry the message.
+func (c *CommunicationController) RecordDeliveryObservation(
+	ctx context.Context,
+	jobID, messageID, commandID string,
+	status domain.DeliveryStatus,
+	evidenceSHA256 string,
+	reconcilesUnknown bool,
+) (store.CommandReceipt, domain.DeliveryObservation, error) {
+	return c.recordDeliveryObservation(ctx, jobID, messageID, commandID, status, evidenceSHA256, reconcilesUnknown)
+}
+
 func (c *CommunicationController) recordDeliveryObservation(
 	ctx context.Context,
 	jobID, messageID, commandID string,
