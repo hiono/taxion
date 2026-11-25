@@ -967,6 +967,11 @@ func (c *ProviderController) reconcileStart(
 	grant domain.PlanningAuthorization,
 	principal auth.AuthenticatedPrincipal,
 ) (store.CommandReceipt, domain.RoleExecution, domain.ProviderStartIntent, provider.StartResult, error) {
+	initialJob, err := c.store.GetJob(ctx, intent.JobID)
+	if err != nil {
+		return receipt, execution, intent, provider.StartResult{}, err
+	}
+	_, hasPriorDispatchBoundary := latestStartObservation(initialJob, intent.ID)
 	capabilities, err := c.runtime.Capabilities(ctx)
 	if err != nil {
 		return receipt, execution, intent, provider.StartResult{}, err
@@ -1003,13 +1008,15 @@ func (c *ProviderController) reconcileStart(
 			}
 			lookupNotFound = true
 			lookupNotFoundEvidenceSHA256 = lookup.EvidenceSHA256
-			if !canRetry {
+			if hasPriorDispatchBoundary || !canRetry {
 				persistErr := c.recordStartObservation(
 					ctx, intent.JobID, intent.ID, domain.ProviderStartFailed, "", "", lookup.EvidenceSHA256, false, principal,
 				)
-				return receipt, execution, intent, provider.StartResult{}, errors.Join(
-					errors.New("Provider Start lookup confirmed NOT_FOUND without verified idempotency"), persistErr,
-				)
+				reason := "Provider Start lookup confirmed NOT_FOUND after an earlier dispatch boundary"
+				if !hasPriorDispatchBoundary {
+					reason = "Provider Start lookup confirmed NOT_FOUND without verified idempotency"
+				}
+				return receipt, execution, intent, provider.StartResult{}, errors.Join(errors.New(reason), persistErr)
 			}
 		}
 		if lookup.Found {
