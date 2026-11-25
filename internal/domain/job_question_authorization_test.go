@@ -78,7 +78,7 @@ func TestJobQuestionAuthorizationBindsOneApprovedQuestionAndPlannerSession(t *te
 		JobID: job.ID, CommandID: "cmd_73737373737373737373737373737373",
 		QuestionMessageID: message.ID, PlannerRoleExecutionID: planner.ID,
 		ProviderSessionID: startObservation.ProviderSessionID,
-		RepositoryID:      planningGrant.RepositoryID,
+		RepositoryID: contract.TargetRepositories[0], PlanningRepositoryID: planningGrant.RepositoryID,
 		ProviderID:        planningGrant.ProviderID, AccountID: planningGrant.AccountID,
 		ConfigurationSHA256: planningGrant.ConfigurationSHA256,
 		ReadOnlyBoundary: PlanningReadOnlyBoundary{

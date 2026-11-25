@@ -130,7 +130,6 @@ func (c *JobQuestionAuthorizationController) Authorize(
 	request := domain.JobQuestionAuthorizationRequest{
 		JobID: job.ID, CommandID: commandID, QuestionMessageID: question.ID,
 		PlannerRoleExecutionID: planner.ID, ProviderSessionID: accepted.ProviderSessionID,
-		RepositoryID: planningGrant.RepositoryID,
 		ProviderID:   start.ProviderID, AccountID: start.AccountID,
 		ConfigurationSHA256: start.ConfigurationSHA256, RepositoryID: readOnlyContext.RepositoryID,
 		PlanningRepositoryID: planningGrant.RepositoryID,
