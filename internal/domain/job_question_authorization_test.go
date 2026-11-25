@@ -118,7 +118,8 @@ func TestJobQuestionAuthorizationBindsOneApprovedQuestionAndPlannerSession(t *te
 	if err != nil {
 		t.Fatalf("NewJobQuestionAuthorization: %v", err)
 	}
-	if authorization.JobApprovalID != job.JobApprovals[len(job.JobApprovals)-1].ID ||
+	if authorization.RepositoryID != pinnedRepository ||
+		authorization.JobApprovalID != job.JobApprovals[len(job.JobApprovals)-1].ID ||
 		authorization.QuestionMessageID != message.ID ||
 		authorization.PlannerRoleExecutionID != planner.ID ||
 		authorization.ProviderSessionID != startObservation.ProviderSessionID {
