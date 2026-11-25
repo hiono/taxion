@@ -545,18 +545,11 @@ func (c *ProviderController) reconcileTaskTurn(
 		}
 		lookup, err := c.runtime.Lookup(ctx, lookupRequest)
 		if err != nil {
-			observation, persistErr := c.recordTaskTurnObservation(ctx, job.ID, turn.ID, claimID, domain.TaskTurnUnknown, 0, "", false)
-			if persistErr != nil {
-				return receipt, turn, observation, provider.TurnResult{}, errors.Join(err, persistErr)
-			}
-			return receipt, turn, observation, provider.TurnResult{}, err
+			return receipt, turn, taskTurnUnknownObservationOrEmpty(job, turn.ID), provider.TurnResult{}, err
 		}
 		if validationErr := lookup.Validate(lookupRequest); validationErr != nil {
-			observation, persistErr := c.recordTaskTurnObservation(ctx, job.ID, turn.ID, claimID, domain.TaskTurnUnknown, 0, "", false)
-			if persistErr != nil {
-				return receipt, turn, observation, provider.TurnResult{}, errors.Join(provider.ErrProviderInvalidResult, validationErr, persistErr)
-			}
-			return receipt, turn, observation, provider.TurnResult{}, errors.Join(provider.ErrProviderInvalidResult, validationErr)
+			return receipt, turn, taskTurnUnknownObservationOrEmpty(job, turn.ID), provider.TurnResult{},
+				errors.Join(provider.ErrProviderInvalidResult, validationErr)
 		}
 		if lookup.Found {
 			if lookup.Status == domain.TaskTurnCompleted || lookup.Status == domain.TaskTurnFailed {
@@ -572,11 +565,8 @@ func (c *ProviderController) reconcileTaskTurn(
 				}
 				return receipt, turn, observation, result, finalizeErr
 			}
-			observation, persistErr := c.recordTaskTurnObservation(ctx, job.ID, turn.ID, claimID, domain.TaskTurnUnknown, 0, "", false)
-			if persistErr != nil {
-				return receipt, turn, observation, provider.TurnResult{}, persistErr
-			}
-			return receipt, turn, observation, provider.TurnResult{}, errors.New("Provider Send lookup has not confirmed a terminal Turn")
+			return receipt, turn, taskTurnUnknownObservationOrEmpty(job, turn.ID), provider.TurnResult{},
+				errors.New("Provider Send lookup has not confirmed a terminal Turn")
 		}
 		lookupEvidence = lookup.EvidenceSHA256
 	}
@@ -587,11 +577,7 @@ func (c *ProviderController) reconcileTaskTurn(
 		}
 	}
 	if !canLookup || !canRetry {
-		observation, persistErr := c.recordTaskTurnObservation(ctx, job.ID, turn.ID, claimID, domain.TaskTurnUnknown, 0, "", false)
-		if persistErr != nil {
-			return receipt, turn, observation, provider.TurnResult{}, persistErr
-		}
-		return receipt, turn, observation, provider.TurnResult{}, provider.ErrUnsupportedCapability
+		return receipt, turn, taskTurnUnknownObservationOrEmpty(job, turn.ID), provider.TurnResult{}, provider.ErrUnsupportedCapability
 	}
 	idempotencyEvidence := providerCapabilityEvidenceSHA256(capabilities, provider.CapabilitySendIdempotency)
 	if !validProviderEvidenceSHA256(idempotencyEvidence) || !validProviderEvidenceSHA256(lookupEvidence) {
@@ -1023,4 +1009,12 @@ func taskTurnResultFromObservation(observation domain.TaskTurnObservation) provi
 		OperationID: observation.OperationID, TurnID: observation.TurnID, SessionID: observation.ProviderSessionID,
 		Status: observation.Status, TokensUsed: observation.TokensUsed, EvidenceSHA256: observation.EvidenceSHA256,
 	}
+}
+
+func taskTurnUnknownObservationOrEmpty(job domain.Job, turnID string) domain.TaskTurnObservation {
+	if observation, found := latestTaskTurnObservation(job, turnID); found &&
+		observation.Status == domain.TaskTurnUnknown {
+		return observation
+	}
+	return domain.TaskTurnObservation{}
 }

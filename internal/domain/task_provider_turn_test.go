@@ -878,27 +878,16 @@ func TestTaskCoderResumeObservationRequiresProviderResponsePath(t *testing.T) {
 
 func TestProviderStartHasDispatchBoundaryDistinguishesLookupUnknown(t *testing.T) {
 	job, execution, _, _ := taskTurnFixture(t)
-	if !providerStartHasDispatchBoundary(job, execution.ProviderStartOperationID) {
-		t.Fatal("accepted Task Start history lost its persisted dispatch boundary")
-	}
-	for i := range job.ProviderStartObservations {
-		observation := &job.ProviderStartObservations[i]
-		if observation.OperationID != execution.ProviderStartOperationID {
-			continue
-		}
-		observation.Status = ProviderStartUnknown
-		observation.ProviderSessionID = ""
-		observation.ReceiptID = ""
-		observation.EvidenceSHA256 = ""
-		observation.ReconcilesUnknown = false
+	job.ProviderStartObservations = []ProviderStartObservation{
+		{OperationID: execution.ProviderStartOperationID, Status: ProviderStartDispatching},
+		{OperationID: execution.ProviderStartOperationID, Status: ProviderStartUnknown},
 	}
 	if !providerStartHasDispatchBoundary(job, execution.ProviderStartOperationID) {
 		t.Fatal("UNKNOWN after a persisted dispatch boundary was treated as known-not-dispatched")
 	}
-	job.ProviderStartObservations = nil
-	job.ProviderStartObservations = append(job.ProviderStartObservations, ProviderStartObservation{
-		OperationID: execution.ProviderStartOperationID, Status: ProviderStartUnknown,
-	})
+	job.ProviderStartObservations = []ProviderStartObservation{
+		{OperationID: execution.ProviderStartOperationID, Status: ProviderStartUnknown},
+	}
 	if providerStartHasDispatchBoundary(job, execution.ProviderStartOperationID) {
 		t.Fatal("lookup UNKNOWN without a dispatch boundary was treated as an issued Start")
 	}
