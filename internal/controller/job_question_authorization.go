@@ -18,6 +18,9 @@ type JobQuestionAuthorizationStore interface {
 		uint64,
 		domain.JobQuestionAuthorizationRequest,
 	) (store.CommandReceipt, domain.JobQuestionAuthorization, error)
+	GetJobQuestionAuthorizationCommand(
+		context.Context, string, string,
+	) (store.CommandReceipt, domain.JobQuestionAuthorization, bool, error)
 }
 
 type QuestionReadOnlyContext struct {
@@ -60,6 +63,16 @@ func (c *JobQuestionAuthorizationController) Authorize(
 ) (store.CommandReceipt, domain.JobQuestionAuthorization, error) {
 	if ctx == nil || jobID == "" || questionMessageID == "" || commandID == "" {
 		return store.CommandReceipt{}, domain.JobQuestionAuthorization{}, errors.New("JobQuestionAuthorization requires Job, Question, and Command identities")
+	}
+	if receipt, authorization, found, err := c.store.GetJobQuestionAuthorizationCommand(ctx, jobID, commandID); err != nil {
+		return store.CommandReceipt{}, domain.JobQuestionAuthorization{}, err
+	} else if found {
+		if authorization.QuestionMessageID != questionMessageID ||
+			authorization.Budget != budget ||
+			!authorization.Deadline.Equal(deadline.UTC().Round(0)) {
+			return store.CommandReceipt{}, domain.JobQuestionAuthorization{}, store.ErrIdempotencyConflict
+		}
+		return receipt, authorization, nil
 	}
 	job, err := c.store.GetJob(ctx, jobID)
 	if err != nil {
