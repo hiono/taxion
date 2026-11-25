@@ -111,7 +111,9 @@ type fakeTaskWorktreeAdopter struct {
 	snapshot     domain.WorktreeSnapshot
 	expectedPath string
 	adoptErr     error
+	releaseErr   error
 	adoptCalls   int
+	releaseCalls int
 }
 
 func (a *fakeTaskWorktreeAdopter) Adopt(
@@ -129,6 +131,30 @@ func (a *fakeTaskWorktreeAdopter) Adopt(
 		return domain.WorktreeSnapshot{}, errors.New("unexpected adopted Worktree path")
 	}
 	return a.snapshot, nil
+}
+
+func (a *fakeTaskWorktreeAdopter) ReleaseAdoptionReservation(
+	_ context.Context, _ string, _ domain.Task, path string,
+) error {
+	a.releaseCalls++
+	if a.releaseErr != nil {
+		return a.releaseErr
+	}
+	if path != a.expectedPath {
+		return errors.New("unexpected released Worktree path")
+	}
+	return nil
+}
+
+type failingTaskExecutionStore struct {
+	ExecutionPermissionStore
+	startErr error
+}
+
+func (s *failingTaskExecutionStore) StartTaskExecution(
+	context.Context, uint64, string, string, string, string, string, domain.WorktreeSnapshot,
+) (store.CommandReceipt, domain.TaskExecutionStart, error) {
+	return store.CommandReceipt{}, domain.TaskExecutionStart{}, s.startErr
 }
 
 func (v *fakeTaskWorktreeVerifier) Prepare(_ context.Context, jobID string, task domain.Task) (domain.WorktreeSnapshot, error) {
@@ -584,12 +610,27 @@ func TestExecutionControllerStartsCoderOnApprovedAdoptedWorktree(t *testing.T) {
 		t.Fatal("mismatched Worktree snapshot mutated Job state")
 	}
 	adopter.snapshot.WorktreePath = worktreePath
+	failingController, err := NewExecutionControllerWithWorktree(
+		&failingTaskExecutionStore{ExecutionPermissionStore: database, startErr: errors.New("forced Task Start persistence failure")},
+		assessor, adopter,
+	)
+	if err != nil {
+		t.Fatalf("NewExecutionControllerWithWorktree for failed Start: %v", err)
+	}
+	failingController.now = func() time.Time { return now }
+	if _, _, _, err := failingController.StartTaskExecution(ctx, permission.ID, startCommand, request); err == nil {
+		t.Fatal("Task Start succeeded despite forced persistence failure")
+	}
+	if adopter.releaseCalls != 1 || adopter.adoptCalls != 2 {
+		t.Fatalf("uncommitted adopted Worktree reservation was not released: adopt=%d release=%d",
+			adopter.adoptCalls, adopter.releaseCalls)
+	}
 	receipt, execution, intent, err := controller.StartTaskExecution(ctx, permission.ID, startCommand, request)
 	if err != nil {
 		t.Fatalf("StartTaskExecution with adopted Worktree: %v", err)
 	}
 	if receipt.Revision == 0 || execution.TaskID != task.ID || intent.WorktreeID != execution.WorktreeID ||
-		adopter.adoptCalls != 2 || adopter.verifyCalls != 0 || adopter.prepareCalls != 0 {
+		adopter.adoptCalls != 3 || adopter.releaseCalls != 1 || adopter.verifyCalls != 0 || adopter.prepareCalls != 0 {
 		t.Fatalf("adopted Worktree was not used for the exact Task start: receipt=%#v execution=%#v intent=%#v adopter=%#v",
 			receipt, execution, intent, adopter)
 	}
@@ -617,7 +658,8 @@ func TestExecutionControllerStartsCoderOnApprovedAdoptedWorktree(t *testing.T) {
 	if _, _, _, err := controller.StartTaskExecution(ctx, permission.ID, startCommand, request); err != nil {
 		t.Fatalf("exact adopted Worktree Start replay: %v", err)
 	}
-	if adopter.adoptCalls != 2 || adopter.verifyCalls != 1 {
-		t.Fatalf("exact replay re-adopted Worktree: adopt=%d verify=%d", adopter.adoptCalls, adopter.verifyCalls)
+	if adopter.adoptCalls != 3 || adopter.releaseCalls != 1 || adopter.verifyCalls != 1 {
+		t.Fatalf("exact replay re-adopted Worktree: adopt=%d release=%d verify=%d",
+			adopter.adoptCalls, adopter.releaseCalls, adopter.verifyCalls)
 	}
 }

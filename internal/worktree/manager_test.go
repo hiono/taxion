@@ -914,6 +914,48 @@ func TestManagerAdoptionReservationsRejectNestedWorktreePaths(t *testing.T) {
 	}
 }
 
+
+func TestManagerReleaseAdoptionReservationAllowsAnotherTaskAfterUncommittedStart(t *testing.T) {
+	repository := initRepository(t)
+	workspace := filepath.Join(canonicalTempDir(t), "managed-worktrees")
+	external := filepath.Join(canonicalTempDir(t), "external-worktree")
+	manager, err := NewManager(workspace, []Repository{{ID: "repo.primary", Path: repository}})
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	gitTestRun(t, repository, "worktree", "add", "--detach", external, "HEAD")
+	taskA := domain.Task{ID: "task_1111111111111111", TargetRepositories: []string{"repo.primary"}}
+	taskB := domain.Task{ID: "task_2222222222222222", TargetRepositories: []string{"repo.primary"}}
+	snapshotA, err := manager.Adopt(context.Background(), "job_1111111111111111", taskA, external)
+	if err != nil {
+		t.Fatalf("Adopt Task A: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(external, "after-failed-start.txt"), []byte("preserve this state\n"), 0o600); err != nil {
+		t.Fatalf("change adopted Worktree after failed Start: %v", err)
+	}
+	if err := manager.ReleaseAdoptionReservation(context.Background(), "job_1111111111111111", taskA, external); err != nil {
+		t.Fatalf("ReleaseAdoptionReservation after uncommitted Start: %v", err)
+	}
+	if err := manager.ReleaseAdoptionReservation(context.Background(), "job_1111111111111111", taskA, external); err != nil {
+		t.Fatalf("idempotent ReleaseAdoptionReservation: %v", err)
+	}
+	baselineA, err := readBaselineRecord(adoptionRegistrationPath(workspace, "job_1111111111111111", taskA.ID) + ".baseline.json")
+	if err != nil || baselineA.InitialStateSHA256 != snapshotA.InitialStateSHA256 {
+		t.Fatalf("release discarded the immutable retry baseline: %#v %v", baselineA, err)
+	}
+	snapshotB, err := manager.Adopt(context.Background(), "job_2222222222222222", taskB, external)
+	if err != nil {
+		t.Fatalf("Adopt Task B after Task A Start did not commit: %v", err)
+	}
+	if snapshotB.InitialStateSHA256 == snapshotA.InitialStateSHA256 {
+		t.Fatal("Task B did not capture the Worktree state left after Task A's failed Start")
+	}
+	if _, err := manager.Adopt(context.Background(), "job_1111111111111111", taskA, external); err == nil {
+		t.Fatal("Task A reclaimed a Worktree whose state changed after its failed Start")
+	}
+}
+
+
 func TestManagerAdoptionReservationsAreUniqueByTaskAndGitAdminDirectory(t *testing.T) {
 	repository := initRepository(t)
 	worktreeA := filepath.Join(canonicalTempDir(t), "adoption-a")
