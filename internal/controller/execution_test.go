@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -89,9 +90,10 @@ func approvedExecutionPermissionControllerFixture(t *testing.T) (*store.Store, s
 }
 
 func testWorktreeSnapshot(jobID string, task domain.Task) domain.WorktreeSnapshot {
+	temporaryRoot := os.TempDir()
 	return domain.WorktreeSnapshot{
-		RepositoryID: task.TargetRepositories[0], RepositoryPath: "/tmp/taxion-test-repository",
-		WorktreePath:   "/tmp/taxion-test-worktrees/" + domain.WorktreeID(jobID, task.ID),
+		RepositoryID: task.TargetRepositories[0], RepositoryPath: filepath.Join(temporaryRoot, "taxion-test-repository"),
+		WorktreePath:   filepath.Join(temporaryRoot, "taxion-test-worktrees", domain.WorktreeID(jobID, task.ID)),
 		BaselineCommit: strings.Repeat("a", 40),
 	}
 }
