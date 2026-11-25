@@ -197,7 +197,7 @@ func (c *ProviderController) ResumeTaskExecution(
 		// Before that observation exists, the original claimant may still be
 		// validating pre-dispatch conditions and must retain exclusive ownership.
 		previous, found := latestProviderResumeObservation(claimedJob, intent.ID)
-		if !found || previous.Status != domain.PlanningResumeUnknown {
+		if !found || previous.Status != domain.PlanningResumeUnknown || previous.DispatchClaimID != claim.ID {
 			return receipt, intent, domain.PlanningResumeObservation{}, provider.ResumeResult{}, provider.ErrResumeUnconfirmed
 		}
 	}
@@ -271,6 +271,16 @@ func (c *ProviderController) ResumeTaskExecution(
 	result, err := c.runtime.Resume(ctx, request)
 	if err != nil {
 		if evidence, rejected := providerResumePreDispatchEvidence(intent.OperationID, err); rejected {
+			if !createdClaim {
+				latestJob, readErr := c.store.GetJob(ctx, jobID)
+				if readErr != nil {
+					return receipt, intent, domain.PlanningResumeObservation{}, provider.ResumeResult{}, errors.Join(err, readErr)
+				}
+				if previous, found := latestProviderResumeObservation(latestJob, intent.ID); found &&
+					previous.Status == domain.PlanningResumeUnknown && previous.DispatchClaimID == claim.ID {
+					return receipt, intent, previous, provider.ResumeResult{}, errors.Join(provider.ErrResumeUnconfirmed, err)
+				}
+			}
 			observation, persistErr := c.recordResumeObservation(
 				ctx, jobID, intent.ID, domain.PlanningResumeFailed, evidence, provider.ResumeResult{}, principal,
 			)
