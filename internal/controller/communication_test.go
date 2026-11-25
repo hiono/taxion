@@ -180,7 +180,7 @@ func TestCommunicationControllerRecordsAndReconcilesDeliveryObservation(t *testi
 	message, err := communication.SendFromHuman(context.Background(), HumanMessageRequest{
 		JobID: jobID, CommandID: "cmd_82828282828282828282828282828282",
 		Recipient: domain.ActorRef{Kind: domain.ActorPlanner, ID: plannerExecution.ID},
-		Kind: domain.MessageKindQuestion, Body: "追加の読み取り情報を確認してください。",
+		Kind:      domain.MessageKindQuestion, Body: "追加の読み取り情報を確認してください。",
 	}, principal)
 	if err != nil {
 		t.Fatalf("SendFromHuman: %v", err)
