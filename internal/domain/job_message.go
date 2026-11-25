@@ -81,6 +81,7 @@ type DeliveryObservation struct {
 	CommandID         string         `json:"command_id"`
 	JobID             string         `json:"job_id"`
 	MessageID         string         `json:"message_id"`
+	RequestObservationID string      `json:"request_observation_id"`
 	Recipient         ActorRef       `json:"recipient"`
 	ObservedBy        ActorRef       `json:"observed_by"`
 	Status            DeliveryStatus `json:"status"`
@@ -248,8 +249,7 @@ func (a ActorRef) Validate(job Job) error {
 
 func NewDeliveryObservation(
 	job Job,
-	messageID, commandID string,
-	attempt uint32,
+	messageID, requestObservationID, commandID string,
 	status DeliveryStatus,
 	evidenceSHA256 string,
 	reconcilesUnknown bool,
@@ -271,43 +271,60 @@ func NewDeliveryObservation(
 	if !validDeliveryStatus(status) {
 		return DeliveryObservation{}, errors.New("DeliveryObservation status is invalid")
 	}
+
 	history := deliveryHistoryForMessage(job, messageID)
-	if attempt == 0 {
-		return DeliveryObservation{}, errors.New("DeliveryObservation attempt is required")
-	}
+	attempt := uint32(1)
+	currentRequestID := ""
 	if len(history) == 0 {
-		if status != DeliveryRequested || attempt != 1 || evidenceSHA256 != "" || reconcilesUnknown {
+		if status != DeliveryRequested || requestObservationID != "" || evidenceSHA256 != "" || reconcilesUnknown {
 			return DeliveryObservation{}, errors.New("first DeliveryObservation must be REQUESTED")
 		}
 	} else {
 		previous := history[len(history)-1]
+		attempt = previous.Attempt
 		switch previous.Status {
 		case DeliveryRequested:
-			if status == DeliveryRequested || attempt != previous.Attempt || reconcilesUnknown {
+			if status == DeliveryRequested || reconcilesUnknown {
 				return DeliveryObservation{}, errors.New("REQUESTED delivery can only transition to a terminal observation")
 			}
+			currentRequestID = previous.RequestObservationID
 		case DeliveryUnknown:
-			if (status != DeliveryAccepted && status != DeliveryFailed) || attempt != previous.Attempt || !reconcilesUnknown {
+			if (status != DeliveryAccepted && status != DeliveryFailed) || !reconcilesUnknown {
 				return DeliveryObservation{}, errors.New("UNKNOWN delivery requires an explicit terminal reconciliation")
 			}
+			currentRequestID = previous.RequestObservationID
 		case DeliveryFailed:
-			if previous.Attempt == ^uint32(0) || status != DeliveryRequested || attempt != previous.Attempt+1 || reconcilesUnknown || evidenceSHA256 != "" {
-				return DeliveryObservation{}, errors.New("FAILED delivery can only start the next REQUESTED attempt")
+			if status != DeliveryRequested || requestObservationID != "" || reconcilesUnknown || evidenceSHA256 != "" {
+				return DeliveryObservation{}, errors.New("FAILED delivery can only start a new REQUESTED attempt")
 			}
+			attempt++
 		case DeliveryAccepted:
 			return DeliveryObservation{}, errors.New("ACCEPTED delivery is terminal")
+		}
+		if status == DeliveryRequested {
+			if requestObservationID != "" {
+				return DeliveryObservation{}, errors.New("new REQUESTED attempt cannot reference a previous request")
+			}
+		} else if requestObservationID == "" || requestObservationID != currentRequestID {
+			return DeliveryObservation{}, errors.New("delivery outcome must reference the current REQUESTED observation")
 		}
 		if previous.Status != DeliveryUnknown && reconcilesUnknown {
 			return DeliveryObservation{}, errors.New("delivery reconciliation requires a prior UNKNOWN observation")
 		}
 	}
+
+	observationID := DeliveryObservationID(commandID)
+	if status == DeliveryRequested {
+		requestObservationID = observationID
+	}
 	observation := DeliveryObservation{
-		ID: DeliveryObservationID(commandID), CommandID: commandID, JobID: job.ID,
-		MessageID: message.ID, Recipient: message.Recipient,
+		ID: observationID, CommandID: commandID, JobID: job.ID,
+		MessageID: message.ID, RequestObservationID: requestObservationID,
+		Recipient: message.Recipient,
 		ObservedBy: ActorRef{Kind: ActorOrchestrator, ID: OrchestratorActorID},
-		Status:     status, Attempt: attempt, EvidenceSHA256: evidenceSHA256,
+		Status: status, Attempt: attempt, EvidenceSHA256: evidenceSHA256,
 		ReconcilesUnknown: reconcilesUnknown,
-		CreatedAt:         now.UTC().Round(0), CreatedRevision: job.Revision + 1,
+		CreatedAt: now.UTC().Round(0), CreatedRevision: job.Revision + 1,
 	}
 	if err := observation.Validate(job); err != nil {
 		return DeliveryObservation{}, err
@@ -335,8 +352,26 @@ func (d DeliveryObservation) Validate(job Job) error {
 	if d.EvidenceSHA256 != "" && !validSHA256(d.EvidenceSHA256) {
 		return errors.New("DeliveryObservation evidence digest is invalid")
 	}
-	if d.Status == DeliveryRequested && (d.EvidenceSHA256 != "" || d.ReconcilesUnknown) {
-		return errors.New("REQUESTED delivery cannot contain result evidence")
+	if d.Status == DeliveryRequested {
+		if d.RequestObservationID != d.ID || d.EvidenceSHA256 != "" || d.ReconcilesUnknown {
+			return errors.New("REQUESTED delivery must identify itself and cannot contain result evidence")
+		}
+	} else {
+		if !validPlanningIdentity(d.RequestObservationID) {
+			return errors.New("delivery outcome must identify its REQUESTED observation")
+		}
+		requestFound := false
+		for _, request := range job.DeliveryObservations {
+			if request.ID == d.RequestObservationID && request.MessageID == d.MessageID &&
+				request.Status == DeliveryRequested && request.Attempt == d.Attempt &&
+				request.CreatedRevision < d.CreatedRevision {
+				requestFound = true
+				break
+			}
+		}
+		if !requestFound {
+			return errors.New("delivery outcome references no earlier REQUESTED observation for this attempt")
+		}
 	}
 	if d.ReconcilesUnknown && d.Status != DeliveryAccepted && d.Status != DeliveryFailed {
 		return errors.New("only terminal delivery observations can reconcile UNKNOWN")
@@ -396,7 +431,8 @@ func validateJobMessageFacts(job Job) error {
 	for messageID, history := range deliveryByMessage {
 		for index, observation := range history {
 			if index == 0 {
-				if observation.Status != DeliveryRequested || observation.Attempt != 1 || observation.ReconcilesUnknown {
+				if observation.Status != DeliveryRequested || observation.Attempt != 1 ||
+					observation.RequestObservationID != observation.ID || observation.ReconcilesUnknown {
 					return fmt.Errorf("first delivery observation for %s must be REQUESTED", messageID)
 				}
 				continue
@@ -404,16 +440,19 @@ func validateJobMessageFacts(job Job) error {
 			previous := history[index-1]
 			switch previous.Status {
 			case DeliveryRequested:
-				if observation.Status == DeliveryRequested || observation.Attempt != previous.Attempt || observation.ReconcilesUnknown {
+				if observation.Status == DeliveryRequested || observation.Attempt != previous.Attempt ||
+					observation.RequestObservationID != previous.RequestObservationID || observation.ReconcilesUnknown {
 					return fmt.Errorf("invalid delivery transition after REQUESTED for %s", messageID)
 				}
 			case DeliveryUnknown:
 				if (observation.Status != DeliveryAccepted && observation.Status != DeliveryFailed) ||
-					observation.Attempt != previous.Attempt || !observation.ReconcilesUnknown {
+					observation.Attempt != previous.Attempt ||
+					observation.RequestObservationID != previous.RequestObservationID || !observation.ReconcilesUnknown {
 					return fmt.Errorf("UNKNOWN delivery for %s requires terminal reconciliation", messageID)
 				}
 			case DeliveryFailed:
-				if observation.Status != DeliveryRequested || observation.Attempt != previous.Attempt+1 || observation.ReconcilesUnknown {
+				if observation.Status != DeliveryRequested || observation.Attempt != previous.Attempt+1 ||
+					observation.RequestObservationID != observation.ID || observation.ReconcilesUnknown {
 					return fmt.Errorf("FAILED delivery for %s requires a new REQUESTED attempt", messageID)
 				}
 			case DeliveryAccepted:
