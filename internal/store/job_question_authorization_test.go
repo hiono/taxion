@@ -60,7 +60,7 @@ func TestJobQuestionAuthorizationStorePersistsAndReplays(t *testing.T) {
 		Role: "CODER", Effect: "repository.write", Resource: contract.TargetRepositories[0],
 		ProviderID: "provider.test", AccountID: "account.primary",
 		ConfigurationSHA256: contract.ConfigurationSHA256,
-		ReservedTurns: 1, ReservedTokens: 10, ExpiresAt: now.Add(30 * time.Minute),
+		ReservedTurns:       1, ReservedTokens: 10, ExpiresAt: now.Add(30 * time.Minute),
 	}
 	permissionSHA, err := domain.ExecutionPermissionRequestSHA256(permissionRequest)
 	if err != nil {
@@ -108,9 +108,9 @@ func TestJobQuestionAuthorizationStorePersistsAndReplays(t *testing.T) {
 		t.Fatal("Planner has no accepted Provider Session")
 	}
 	messageReceipt, message, err := database.AddJobMessage(ctx, job.ID, job.Revision, "cmd_86868686868686868686868686868686", domain.JobMessageRequest{
-		Sender: domain.ActorRef{Kind: domain.ActorCoder, ID: job.RoleExecutions[len(job.RoleExecutions)-1].ID},
+		Sender:    domain.ActorRef{Kind: domain.ActorCoder, ID: job.RoleExecutions[len(job.RoleExecutions)-1].ID},
 		Recipient: domain.ActorRef{Kind: domain.ActorPlanner, ID: planner.ID},
-		Kind: domain.MessageKindQuestion, Body: "Please clarify the approved implementation constraint.",
+		Kind:      domain.MessageKindQuestion, Body: "Please clarify the approved implementation constraint.",
 	})
 	if err != nil {
 		t.Fatalf("AddJobMessage: %v", err)
@@ -136,7 +136,7 @@ func TestJobQuestionAuthorizationStorePersistsAndReplays(t *testing.T) {
 			Mode: domain.PlanningReadOnlyBoundarySnapshot, Reference: "question_snapshot_store",
 			SHA256: strings.Repeat("d", 64),
 		},
-		Budget: domain.PlanningBudget{MaxTurns: 1, MaxTokens: 10},
+		Budget:   domain.PlanningBudget{MaxTurns: 1, MaxTokens: 10},
 		Deadline: contract.Deadline.Add(-time.Minute),
 	}
 	receipt, authorization, err := database.AddJobQuestionAuthorization(ctx, job.ID, job.Revision, request)
