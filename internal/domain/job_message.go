@@ -249,6 +249,7 @@ func (a ActorRef) Validate(job Job) error {
 func NewDeliveryObservation(
 	job Job,
 	messageID, commandID string,
+	attempt uint32,
 	status DeliveryStatus,
 	evidenceSHA256 string,
 	reconcilesUnknown bool,
@@ -271,28 +272,28 @@ func NewDeliveryObservation(
 		return DeliveryObservation{}, errors.New("DeliveryObservation status is invalid")
 	}
 	history := deliveryHistoryForMessage(job, messageID)
-	attempt := uint32(1)
+	if attempt == 0 {
+		return DeliveryObservation{}, errors.New("DeliveryObservation attempt is required")
+	}
 	if len(history) == 0 {
-		if status != DeliveryRequested || evidenceSHA256 != "" || reconcilesUnknown {
+		if status != DeliveryRequested || attempt != 1 || evidenceSHA256 != "" || reconcilesUnknown {
 			return DeliveryObservation{}, errors.New("first DeliveryObservation must be REQUESTED")
 		}
 	} else {
 		previous := history[len(history)-1]
-		attempt = previous.Attempt
 		switch previous.Status {
 		case DeliveryRequested:
-			if status == DeliveryRequested || reconcilesUnknown {
+			if status == DeliveryRequested || attempt != previous.Attempt || reconcilesUnknown {
 				return DeliveryObservation{}, errors.New("REQUESTED delivery can only transition to a terminal observation")
 			}
 		case DeliveryUnknown:
-			if (status != DeliveryAccepted && status != DeliveryFailed) || !reconcilesUnknown {
+			if (status != DeliveryAccepted && status != DeliveryFailed) || attempt != previous.Attempt || !reconcilesUnknown {
 				return DeliveryObservation{}, errors.New("UNKNOWN delivery requires an explicit terminal reconciliation")
 			}
 		case DeliveryFailed:
-			if status != DeliveryRequested || reconcilesUnknown || evidenceSHA256 != "" {
-				return DeliveryObservation{}, errors.New("FAILED delivery can only start a new REQUESTED attempt")
+			if previous.Attempt == ^uint32(0) || status != DeliveryRequested || attempt != previous.Attempt+1 || reconcilesUnknown || evidenceSHA256 != "" {
+				return DeliveryObservation{}, errors.New("FAILED delivery can only start the next REQUESTED attempt")
 			}
-			attempt++
 		case DeliveryAccepted:
 			return DeliveryObservation{}, errors.New("ACCEPTED delivery is terminal")
 		}
