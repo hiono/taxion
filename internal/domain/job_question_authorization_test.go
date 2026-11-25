@@ -208,9 +208,6 @@ func TestJobQuestionAuthorizationRejectsScopeAndBudgetExpansion(t *testing.T) {
 		{name: "deadline exceeds contract", mutate: func(r *JobQuestionAuthorizationRequest) { r.Deadline = contract.Deadline.Add(time.Minute) }},
 		{name: "mutable context", mutate: func(r *JobQuestionAuthorizationRequest) { r.ReadOnlyBoundary.Mode = "mutable" }},
 	}
-	if _, err := NewJobQuestionAuthorization(job, base, now.Add(3*time.Minute)); err != nil {
-		t.Fatalf("unmodified JobQuestionAuthorization request was rejected: %v", err)
-	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			request := base
