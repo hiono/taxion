@@ -234,16 +234,12 @@ func (c *ExecutionController) StartTaskExecution(
 				return store.CommandReceipt{}, domain.RoleExecution{}, domain.ProviderStartIntent{},
 					errors.Join(err, errors.New("Task Start persistence is partial; adopted Worktree reservation was retained"))
 			}
-			if !executionPersisted {
-				if releaser, ok := c.worktrees.(TaskWorktreeAdoptionReservationReleaser); ok {
-					if releaseErr := releaser.ReleaseAdoptionReservation(
-						persistCtx, request.JobID, task, snapshot.WorktreePath,
-					); releaseErr != nil {
-						return store.CommandReceipt{}, domain.RoleExecution{}, domain.ProviderStartIntent{},
-							errors.Join(err, fmt.Errorf("release uncommitted adopted Worktree reservation: %w", releaseErr))
-					}
-				}
-			}
+			// A read-back without this command's assignment does not prove that
+			// another concurrent Start has not committed the same Task/Worktree.
+			// Keep the reservation: releasing it here could invalidate that
+			// committed assignment because Store and Worktree locks are separate.
+			// The same Task can retry against this reservation; cross-Task release
+			// belongs to the serialized Worktree ownership lifecycle.
 		}
 		return store.CommandReceipt{}, domain.RoleExecution{}, domain.ProviderStartIntent{}, err
 	}
