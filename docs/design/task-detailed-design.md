@@ -65,7 +65,7 @@ Reviewerはmutable Worktreeを取得しません。Coderの確定JobOutputから
 
 **現行実装の状態**: Managerはtrusted Repositoryに属する既存linked WorktreeのAdoptを実装済みです。TaskExecutionStart requestにWorktreePathを指定する場合、ExecutionPermissionのResourceとTask approved TargetResourcesへ同一のcanonical pathを含める必要があります。ManagerはHEAD commit / tree、HEAD mode / branch ref、Git common metadata、baseline、staged / unstaged / untracked state digestを検証し、Manager管理領域へ登録情報と物理Worktree予約を保存します。既存Worktreeのファイル、index、HEAD、branch refは変更しません。Assignmentはprovenanceと初期state digestを保持し、RoleExecution / ProviderStartIntentと同一JobAggregate transactionで永続化します。Adoptの再試行は初期状態identityが一致する場合だけ許可します。
 
-現行のAdoptはTask-bound Coder Startに統合されており、独立した事前登録Commandではありません。TaskごとのAssignment ownerは固定され、ownership transfer、release、quarantine、orphan recoveryは未実装です。Adoption reservationはManager管理領域に保持され、Release実装まで再利用・解放できません。Reviewer独立snapshot / read-only executionも未実装のため、Reviewerへのmutable Worktree移管は許可しません。
+現行のAdoptはTask-bound Coder Startに統合されており、独立した事前登録Commandではありません。TaskごとのAssignment ownerは固定され、ownership transfer、release、quarantine、orphan recoveryは未実装です。Adoption reservationはManager管理領域に保持されます。Adopt後のTask Start永続化が失敗した場合、ExecutionControllerはJobAggregateを読み戻し、RoleExecutionとWorktreeAssignmentの両方が未保存であることを確認した場合に限りreservationを解放します。読み戻し不能または部分保存を検出した場合はreservationを保持します。解放時もTask / Job別のimmutable baselineは保持し、同じTaskの再試行は初期state identityが一致する場合だけ許可します。この処理はStart前のreservation rollbackであり、確定済みWorktreeのownership release / quarantine / orphan recoveryとは区別します。Reviewer独立snapshot / read-only executionも未実装のため、Reviewerへのmutable Worktree移管は許可しません。
 
 ## 6. Task-bound Coder Turn
 

@@ -35,7 +35,7 @@
 | TK-031 | Worktree replay and concurrency | Same Job / Task is provisioned concurrently or retried | Resolve to one deterministic Worktree path and the same baseline |
 | TK-032 | Repository scope rejection | Task repository is unregistered, outside approved scope, or multiple repositories are requested | Reject without Provider dispatch |
 | TK-033 | Worktree path isolation | Workspace root overlaps source repository, or expected Worktree path is a symlink | Reject before Provider dispatch |
-| TK-034 | Worktree baseline integrity | HEAD descends from baseline; then switch to unrelated history or attach a branch | Accept descendant commits; reject unrelated history and non-detached Worktree |
+| TK-034 | Worktree baseline integrity | HEAD descends from baseline; then switch to unrelated history or attach a branch | Accept descendant commits; reject unrelated history; Create requires detached HEAD, while Adopt accepts detached or branch-attached HEAD and preserves branch identity |
 | TK-035 | Atomic Worktree assignment | StartTaskExecution persists WorktreeAssignment, RoleExecution, ProviderStartIntent | All facts commit in one Job revision or none commit |
 | TK-036 | Worktree assignment replay | Exact Start command is replayed before and after SQLite restart | Return original assignment, RoleExecution, ProviderStartIntent, and receipt |
 | TK-037 | Worktree owner exclusion | Another command attempts to start a different RoleExecution for the same Task | Reject until an explicit safe handoff exists; preserve assignment |
