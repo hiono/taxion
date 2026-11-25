@@ -68,6 +68,28 @@ func (c *JobQuestionAuthorizationController) Authorize(
 	if err := job.Validate(); err != nil {
 		return store.CommandReceipt{}, domain.JobQuestionAuthorization{}, fmt.Errorf("validate Job before question authorization: %w", err)
 	}
+	for _, existing := range job.JobQuestionAuthorizations {
+		if existing.CommandID != commandID {
+			continue
+		}
+		if existing.JobID != job.ID || existing.QuestionMessageID != questionMessageID ||
+			existing.Budget != budget || !existing.Deadline.Equal(deadline.UTC().Round(0)) {
+			return store.CommandReceipt{}, domain.JobQuestionAuthorization{}, store.ErrIdempotencyConflict
+		}
+		request := domain.JobQuestionAuthorizationRequest{
+			JobID: existing.JobID, CommandID: existing.CommandID,
+			QuestionMessageID: existing.QuestionMessageID,
+			PlannerRoleExecutionID: existing.PlannerRoleExecutionID,
+			ProviderSessionID: existing.ProviderSessionID,
+			RepositoryID: existing.RepositoryID,
+			PlanningRepositoryID: existing.PlanningRepositoryID,
+			ProviderID: existing.ProviderID, AccountID: existing.AccountID,
+			ConfigurationSHA256: existing.ConfigurationSHA256,
+			ReadOnlyBoundary: existing.ReadOnlyBoundary,
+			Budget: existing.Budget, Deadline: existing.Deadline,
+		}
+		return c.store.AddJobQuestionAuthorization(ctx, job.ID, job.Revision, request)
+	}
 	var question domain.JobMessage
 	questionFound := false
 	for _, candidate := range job.JobMessages {
