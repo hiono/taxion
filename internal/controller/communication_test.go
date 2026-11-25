@@ -10,52 +10,75 @@ import (
 	"github.com/hiono/taxion/internal/provider"
 )
 
-func TestCommunicationControllerPersistsRoleQuestionAndAnswer(t *testing.T) {
+func TestCommunicationControllerPersistsCoderPlannerQuestionAndAnswer(t *testing.T) {
+	database, jobID, revision, task := approvedExecutionPermissionControllerFixture(t)
 	runtime := &fakePlanningProviderRuntime{}
-	providerController, database, principal, jobID, grantID, documents := newProviderControllerFixture(t, runtime)
-	_, firstExecution, _, firstStart, err := providerController.StartPlanning(
-		context.Background(), jobID, grantID, "cmd_11111111111111111111111111111111", documents, principal,
+	now := time.Now().UTC().Round(0)
+	assessor := &fakeExecutionEffectAssessor{assessment: domain.ExecutionEffectAssessment{
+		Reversible: true, Mutating: true, ValidUntil: now.Add(45 * time.Minute),
+	}}
+	executionController, err := NewExecutionController(database, assessor)
+	if err != nil {
+		t.Fatalf("NewExecutionController: %v", err)
+	}
+	executionController.now = func() time.Time { return now }
+	permissionRequest := domain.ExecutionPermissionRequest{
+		JobID: jobID, TaskID: task.ID, CommandID: "cmd_92929292929292929292929292929292",
+		Role: domain.RoleCoder, Effect: "repository.write",
+		Resource: revision.Contract.TargetRepositories[0],
+		ProviderID: runtime.identity.ProviderID, AccountID: runtime.identity.AccountID,
+		ConfigurationSHA256: revision.Contract.ConfigurationSHA256,
+		ReservedTurns: 1, ReservedTokens: 100, ExpiresAt: now.Add(30 * time.Minute),
+	}
+	_, permission, err := executionController.Authorize(context.Background(), permissionRequest)
+	if err != nil {
+		t.Fatalf("Authorize Coder execution: %v", err)
+	}
+	_, coderExecution, _, err := executionController.StartTaskExecution(
+		context.Background(), permission.ID, "cmd_a7070707070707070707070707070707", permissionRequest,
 	)
 	if err != nil {
-		t.Fatalf("StartPlanning first Role: %v", err)
+		t.Fatalf("StartTaskExecution Coder: %v", err)
+	}
+
+	providerController, err := NewProviderControllerWithExecution(database, runtime, executionController)
+	if err != nil {
+		t.Fatalf("NewProviderControllerWithExecution: %v", err)
+	}
+	runtime.startResult = provider.StartResult{
+		OperationID: permission.OperationID, SessionID: "session_coder",
+		ReceiptID: "receipt_coder", EvidenceSHA256: strings.Repeat("f", 64),
+	}
+	coderStart, _, err := providerController.DispatchTaskExecution(
+		context.Background(), jobID, coderExecution.ID, permission.ID, permissionRequest,
+	)
+	if err != nil {
+		t.Fatalf("DispatchTaskExecution Coder: %v", err)
 	}
 
 	job, err := database.GetJob(context.Background(), jobID)
 	if err != nil {
-		t.Fatalf("GetJob before second PlanningAuthorization: %v", err)
+		t.Fatalf("GetJob before communication: %v", err)
 	}
-	now := time.Now().UTC()
-	secondGrantCommand := "cmd_22222222222222222222222222222222"
-	secondGrant, err := domain.NewPlanningAuthorization(job, principal.PrincipalID(), secondGrantCommand,
-		domain.PlanningAuthorizationRequest{
-			ProviderID: runtime.identity.ProviderID, AccountID: runtime.identity.AccountID,
-			ConfigurationSHA256: runtime.identity.ConfigurationSHA256,
-			RepositoryID:        "https://github.com/example/project@" + strings.Repeat("b", 40),
-			ReadOnlyBoundary: domain.PlanningReadOnlyBoundary{
-				Mode: domain.PlanningReadOnlyBoundarySnapshot, Reference: "snapshot_1",
-				SHA256: sha256String(documents[0].Content),
-			},
-			Budget:   domain.PlanningBudget{MaxTurns: 3, MaxTokens: 1000},
-			Deadline: now.Add(time.Hour),
-		}, now)
-	if err != nil {
-		t.Fatalf("NewPlanningAuthorization second Role: %v", err)
+	var plannerExecution domain.RoleExecution
+	for _, execution := range job.RoleExecutions {
+		if execution.Role == domain.RolePlanner {
+			plannerExecution = execution
+			break
+		}
 	}
-	if _, err := database.AddPlanningAuthorization(
-		context.Background(), jobID, job.Revision, secondGrantCommand, secondGrant, principal,
-	); err != nil {
-		t.Fatalf("AddPlanningAuthorization second Role: %v", err)
+	if plannerExecution.ID == "" {
+		t.Fatal("Planner RoleExecution was not found")
 	}
-	secondStartCommand := "cmd_33333333333333333333333333333333"
-	runtime.startResult = provider.StartResult{
-		OperationID: domain.ProviderStartOperationID(secondStartCommand),
-		SessionID:   "session_2", ReceiptID: "receipt_2", EvidenceSHA256: strings.Repeat("e", 64),
+	var plannerSession string
+	for _, observation := range job.ProviderStartObservations {
+		if observation.RoleExecutionID == plannerExecution.ID &&
+			observation.Status == domain.ProviderStartAccepted {
+			plannerSession = observation.ProviderSessionID
+		}
 	}
-	_, secondExecution, _, secondStart, err := providerController.StartPlanning(
-		context.Background(), jobID, secondGrant.ID, secondStartCommand, documents, principal,
-	)
-	if err != nil {
-		t.Fatalf("StartPlanning second Role: %v", err)
+	if plannerSession == "" {
+		t.Fatal("accepted Planner Provider Session was not found")
 	}
 
 	communication, err := NewCommunicationController(database)
@@ -63,41 +86,41 @@ func TestCommunicationControllerPersistsRoleQuestionAndAnswer(t *testing.T) {
 		t.Fatalf("NewCommunicationController: %v", err)
 	}
 	question, err := communication.SendFromRole(context.Background(), RoleMessageRequest{
-		JobID: jobID, RoleExecutionID: firstExecution.ID, ProviderSessionID: firstStart.SessionID,
+		JobID: jobID, RoleExecutionID: coderExecution.ID, ProviderSessionID: coderStart.ProviderSessionID,
 		CommandID: "cmd_44444444444444444444444444444444",
-		Recipient: domain.ActorRef{Kind: domain.ActorPlanner, ID: secondExecution.ID},
-		Kind:      domain.MessageKindQuestion,
-		Body:      "この制約の優先順位を確認してください。\n既存のContextは維持してください。",
+		Recipient: domain.ActorRef{Kind: domain.ActorPlanner, ID: plannerExecution.ID},
+		Kind: domain.MessageKindQuestion,
+		Body: "この制約の優先順位を確認してください。\\n元のTaskとContextは維持してください。",
 	})
 	if err != nil {
-		t.Fatalf("SendFromRole QUESTION: %v", err)
+		t.Fatalf("SendFromRole Coder QUESTION: %v", err)
 	}
-	if question.Message.Sender.ID != firstExecution.ID || question.Message.Recipient.ID != secondExecution.ID ||
-		question.Message.Body == "" || question.Delivery == nil ||
-		question.Delivery.Status != domain.DeliveryRequested || question.Delivery.Recipient.ID != secondExecution.ID {
-		t.Fatalf("Role QUESTION was not persisted with its recipient delivery request: %#v", question)
+	if question.Message.Sender.Kind != domain.ActorCoder ||
+		question.Message.Sender.ID != coderExecution.ID ||
+		question.Message.Recipient.ID != plannerExecution.ID {
+		t.Fatalf("Coder QUESTION identity was not preserved: %#v", question.Message)
 	}
 
 	answer, err := communication.SendFromRole(context.Background(), RoleMessageRequest{
-		JobID: jobID, RoleExecutionID: secondExecution.ID, ProviderSessionID: secondStart.SessionID,
+		JobID: jobID, RoleExecutionID: plannerExecution.ID, ProviderSessionID: plannerSession,
 		CommandID: "cmd_55555555555555555555555555555555",
-		Recipient: domain.ActorRef{Kind: domain.ActorPlanner, ID: firstExecution.ID},
-		Kind:      domain.MessageKindAnswer, ReplyToMessageID: question.Message.ID,
+		Recipient: domain.ActorRef{Kind: domain.ActorCoder, ID: coderExecution.ID},
+		Kind: domain.MessageKindAnswer, ReplyToMessageID: question.Message.ID,
 		Body: "優先順位は安全性、次に完遂性です。",
 	})
 	if err != nil {
-		t.Fatalf("SendFromRole ANSWER: %v", err)
+		t.Fatalf("SendFromRole Planner ANSWER: %v", err)
 	}
 	if answer.Message.ThreadID != question.Message.ThreadID ||
 		answer.Message.ReplyToMessageID != question.Message.ID ||
-		answer.Message.Sender.ID != secondExecution.ID ||
-		answer.Message.Recipient.ID != firstExecution.ID {
-		t.Fatalf("Role ANSWER lost correlation or identity: %#v", answer.Message)
+		answer.Message.Sender.ID != plannerExecution.ID ||
+		answer.Message.Recipient.ID != coderExecution.ID {
+		t.Fatalf("Planner ANSWER lost correlation or identity: %#v", answer.Message)
 	}
 
 	persisted, err := database.GetJob(context.Background(), jobID)
 	if err != nil {
-		t.Fatalf("GetJob after Role communication: %v", err)
+		t.Fatalf("GetJob after Coder / Planner communication: %v", err)
 	}
 	if len(persisted.JobMessages) != 2 || len(persisted.DeliveryObservations) != 2 {
 		t.Fatalf("persisted communication facts: messages=%d deliveries=%d", len(persisted.JobMessages), len(persisted.DeliveryObservations))
