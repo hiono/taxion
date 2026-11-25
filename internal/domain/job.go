@@ -757,7 +757,7 @@ func (j Job) Validate() error {
 				continue
 			}
 			previous := observations[i-1]
-			if previous.Status != ProviderStartUnknown ||
+			if previous.Status == ProviderStartAccepted || previous.Status == ProviderStartFailed ||
 				observation.CreatedRevision <= previous.CreatedRevision ||
 				observation.CreatedAt.Before(previous.CreatedAt) {
 				return fmt.Errorf("%w: invalid Provider Start observation sequence for %s", ErrInvalidJob, operationID)
@@ -765,8 +765,15 @@ func (j Job) Validate() error {
 			if observation.Status == ProviderStartUnknown && observation.ReconcilesUnknown {
 				return fmt.Errorf("%w: UNKNOWN Provider Start observation cannot reconcile UNKNOWN", ErrInvalidJob)
 			}
-			if observation.Status != ProviderStartUnknown && !observation.ReconcilesUnknown {
-				return fmt.Errorf("%w: terminal Provider Start observation must reconcile UNKNOWN", ErrInvalidJob)
+			if observation.Status == ProviderStartDispatching && !observation.ReconcilesUnknown {
+				return fmt.Errorf("%w: repeated Provider Start dispatch requires reconciliation evidence", ErrInvalidJob)
+			}
+			if observation.Status == ProviderStartAccepted || observation.Status == ProviderStartFailed {
+				expectedReconciliation := previous.Status == ProviderStartUnknown ||
+					(previous.Status == ProviderStartDispatching && previous.ReconcilesUnknown)
+				if observation.ReconcilesUnknown != expectedReconciliation {
+					return fmt.Errorf("%w: Provider Start terminal observation has incorrect reconciliation state", ErrInvalidJob)
+				}
 			}
 		}
 	}

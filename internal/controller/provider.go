@@ -395,6 +395,7 @@ func (c *ProviderController) DispatchTaskExecution(
 		}
 		return observation, provider.StartResult{}, provider.ErrUnsupportedCapability
 	}
+	lookupEvidenceSHA256 := ""
 	if canLookup {
 		lookupRequest := provider.LookupRequest{OperationID: intent.ID}
 		lookup, lookupErr := c.runtime.Lookup(ctx, lookupRequest)
@@ -412,6 +413,7 @@ func (c *ProviderController) DispatchTaskExecution(
 			}
 			return observation, provider.StartResult{}, provider.ErrProviderInvalidResult
 		}
+		lookupEvidenceSHA256 = lookup.EvidenceSHA256
 		if lookup.Found {
 			switch lookup.Status {
 			case provider.LookupStatusFailed:
@@ -488,6 +490,46 @@ func (c *ProviderController) DispatchTaskExecution(
 	if c.runtime.Identity() != identity {
 		return domain.ProviderStartObservation{}, provider.StartResult{}, errors.New("Provider Runtime identity changed before dispatch")
 	}
+	hasPriorDispatchBoundary := false
+	for _, observation := range current.ProviderStartObservations {
+		if observation.OperationID == intent.ID && observation.Status == domain.ProviderStartDispatching {
+			hasPriorDispatchBoundary = true
+			break
+		}
+	}
+	if hasPriorDispatchBoundary && !canRetry {
+		observation, persistErr := c.recordTaskStartObservation(
+			ctx, job.ID, intent.ID, domain.ProviderStartUnknown, "", "", "", false,
+		)
+		return observation, provider.StartResult{}, errors.Join(provider.ErrUnsupportedCapability, persistErr)
+	}
+	dispatchEvidenceSHA256 := ""
+	reconcilesUnknown := false
+	if previous, found := latestStartObservation(current, intent.ID); found {
+		if previous.Status == domain.ProviderStartUnknown || previous.Status == domain.ProviderStartDispatching {
+			reconcilesUnknown = true
+			idempotencyEvidence := providerCapabilityEvidenceSHA256(capabilities, provider.CapabilityStartIdempotency)
+			if hasPriorDispatchBoundary && !validProviderEvidenceSHA256(idempotencyEvidence) {
+				return previous, provider.StartResult{}, provider.ErrUnsupportedCapability
+			}
+			material := intent.ID + "\x00" + permission.ID + "\x00" + fmt.Sprintf("%d", current.Revision) +
+				"\x00" + identity.ProviderID + "\x00" + identity.AccountID + "\x00" + identity.ConfigurationSHA256 +
+				"\x00" + lookupEvidenceSHA256 + "\x00" + idempotencyEvidence
+			digest := sha256.Sum256([]byte(material))
+			dispatchEvidenceSHA256 = hex.EncodeToString(digest[:])
+		}
+	}
+	dispatchCommandID, err := domain.NewID("cmd")
+	if err != nil {
+		return domain.ProviderStartObservation{}, provider.StartResult{}, err
+	}
+	_, _, err = c.store.AddTaskProviderStartObservation(
+		ctx, jobID, current.Revision, intent.ID, dispatchCommandID, domain.ProviderStartDispatching,
+		"", "", dispatchEvidenceSHA256, reconcilesUnknown,
+	)
+	if err != nil {
+		return domain.ProviderStartObservation{}, provider.StartResult{}, fmt.Errorf("persist atomic Provider Start dispatch boundary: %w", err)
+	}
 	result, startErr := c.runtime.Start(ctx, request)
 	if startErr != nil {
 		status, evidence := domain.ProviderStartUnknown, ""
@@ -557,10 +599,17 @@ func (c *ProviderController) recordTaskStartObservation(
 			previous.EvidenceSHA256 == evidenceSHA256 {
 			return previous, nil
 		}
-		if previous.Status == domain.ProviderStartUnknown && status != domain.ProviderStartUnknown {
-			reconcilesUnknown = true
-		} else if previous.Status != domain.ProviderStartUnknown {
+		if previous.Status == domain.ProviderStartAccepted || previous.Status == domain.ProviderStartFailed {
 			return domain.ProviderStartObservation{}, errors.New("Task Provider Start observation is already terminal")
+		}
+		if status == domain.ProviderStartUnknown {
+			reconcilesUnknown = false
+		} else if status != domain.ProviderStartDispatching &&
+			(previous.Status == domain.ProviderStartUnknown ||
+				(previous.Status == domain.ProviderStartDispatching && previous.ReconcilesUnknown)) {
+			reconcilesUnknown = true
+		} else if status != domain.ProviderStartDispatching && previous.Status == domain.ProviderStartDispatching {
+			reconcilesUnknown = false
 		}
 	}
 	commandID := domain.ProviderStartObservationCommandID(

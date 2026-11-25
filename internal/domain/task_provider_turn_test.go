@@ -421,6 +421,49 @@ func TestTaskTurnDispatchCannotReleaseClaimAfterUnknownObservationAsDefinitiveFa
 	}
 }
 
+func TestProviderStartDispatchBoundaryRequiresUnexpiredPermission(t *testing.T) {
+	job, execution, permission, now := taskTurnFixture(t)
+	job.ProviderStartObservations = nil
+	job.Revision--
+	for _, intent := range job.ProviderStartIntents {
+		if intent.ID == execution.ProviderStartOperationID {
+			job.UpdatedAt = intent.CreatedAt
+			break
+		}
+	}
+	if err := job.Validate(); err != nil {
+		t.Fatalf("Job without Start observation: %v", err)
+	}
+	commandID := "cmd_61616161616161616161616161616161"
+	valid, err := NewProviderStartObservation(job, execution.ProviderStartOperationID, "",
+		commandID, ProviderStartDispatching, "", "", "", false, now)
+	if err != nil {
+		t.Fatalf("valid dispatch boundary: %v", err)
+	}
+	job.ProviderStartObservations = append(job.ProviderStartObservations, valid)
+	job.Revision++
+	job.UpdatedAt = valid.CreatedAt
+	if err := job.Validate(); err != nil {
+		t.Fatalf("Job.Validate with dispatch boundary: %v", err)
+	}
+
+	expiredJob, expiredExecution, _, expiredNow := taskTurnFixture(t)
+	expiredJob.ProviderStartObservations = nil
+	expiredJob.Revision--
+	for _, intent := range expiredJob.ProviderStartIntents {
+		if intent.ID == expiredExecution.ProviderStartOperationID {
+			expiredJob.UpdatedAt = intent.CreatedAt
+			break
+		}
+	}
+	if _, err := NewProviderStartObservation(expiredJob, expiredExecution.ProviderStartOperationID, "",
+		"cmd_62626262626262626262626262626262", ProviderStartDispatching, "", "", "", false,
+		permission.ExpiresAt.Add(time.Second)); err == nil {
+		t.Fatal("expired ExecutionPermission crossed the Provider Start dispatch boundary")
+	}
+	_ = expiredNow
+}
+
 func TestTaskTurnDispatchClaimRequiresLatestResumeAttached(t *testing.T) {
 	job, execution, permission, now := taskTurnFixture(t)
 	turn, err := NewTaskTurnIntent(job, execution.ID, permission.ID, "session_task",

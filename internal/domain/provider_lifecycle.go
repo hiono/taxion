@@ -9,9 +9,10 @@ import (
 )
 
 const (
-	ProviderStartAccepted = "ACCEPTED"
-	ProviderStartFailed   = "FAILED"
-	ProviderStartUnknown  = "UNKNOWN"
+	ProviderStartAccepted   = "ACCEPTED"
+	ProviderStartDispatching = "DISPATCHING"
+	ProviderStartFailed     = "FAILED"
+	ProviderStartUnknown    = "UNKNOWN"
 )
 
 type ProviderStartObservation struct {
@@ -69,7 +70,36 @@ func NewProviderStartObservation(
 	if err := validateProviderStartObservationAuthority(job, start, principalID); err != nil {
 		return ProviderStartObservation{}, err
 	}
+	if status == ProviderStartDispatching {
+		var execution RoleExecution
+		for _, candidate := range job.RoleExecutions {
+			if candidate.ID == start.RoleExecutionID {
+				execution = candidate
+				break
+			}
+		}
+		permission, permissionFound := executionPermissionByID(job, start.ExecutionPermissionID)
+		assignmentFound := false
+		for _, assignment := range job.WorktreeAssignments {
+			if assignment.ID == execution.WorktreeID && assignment.OwnerRoleExecutionID == execution.ID &&
+				assignment.TaskID == execution.TaskID && assignment.JobID == job.ID {
+				assignmentFound = true
+				break
+			}
+		}
+		if execution.ID == "" || !permissionFound || !assignmentFound ||
+			permission.ValidateFor(job, start.ID, start.RequestSHA256, now) != nil {
+			return ProviderStartObservation{}, errors.New("Provider Start dispatch boundary requires the current unexpired ExecutionPermission and exact Worktree assignment")
+		}
+	}
 	switch status {
+	case ProviderStartDispatching:
+		if providerSessionID != "" || receiptID != "" ||
+			(evidenceSHA256 != "" && !validSHA256(evidenceSHA256)) ||
+			(reconcilesUnknown && !validSHA256(evidenceSHA256)) ||
+			(!reconcilesUnknown && evidenceSHA256 != "") {
+			return ProviderStartObservation{}, errors.New("DISPATCHING Provider Start observation contains invalid retry evidence")
+		}
 	case ProviderStartUnknown:
 		if (providerSessionID != "" && !validPlanningIdentity(providerSessionID)) ||
 			(receiptID != "" && !validPlanningIdentity(receiptID)) ||
@@ -98,14 +128,22 @@ func NewProviderStartObservation(
 		if reconcilesUnknown {
 			return ProviderStartObservation{}, errors.New("first Provider Start observation cannot reconcile UNKNOWN")
 		}
-	} else if previous.Status != ProviderStartUnknown {
+	} else if previous.Status == ProviderStartAccepted || previous.Status == ProviderStartFailed {
 		return ProviderStartObservation{}, errors.New("terminal Provider Start observation cannot be replaced")
 	} else if status == ProviderStartUnknown {
 		if reconcilesUnknown {
 			return ProviderStartObservation{}, errors.New("UNKNOWN Provider Start observation cannot claim terminal reconciliation")
 		}
-	} else if !reconcilesUnknown {
-		return ProviderStartObservation{}, errors.New("terminal Provider Start observation must reconcile prior UNKNOWN")
+	} else if status == ProviderStartDispatching {
+		if !reconcilesUnknown {
+			return ProviderStartObservation{}, errors.New("repeated Provider Start dispatch requires explicit reconciliation evidence")
+		}
+	} else {
+		expectedReconciliation := previous.Status == ProviderStartUnknown ||
+			(previous.Status == ProviderStartDispatching && previous.ReconcilesUnknown)
+		if reconcilesUnknown != expectedReconciliation {
+			return ProviderStartObservation{}, errors.New("Provider Start terminal observation has incorrect UNKNOWN reconciliation state")
+		}
 	}
 	if job.Revision >= uint64(^uint64(0)>>1) {
 		return ProviderStartObservation{}, errors.New("Job revision exhausted")
@@ -178,6 +216,13 @@ func (o ProviderStartObservation) Validate(job Job, start ProviderStartIntent) e
 		return errors.New("Provider Start observation identity or metadata mismatch")
 	}
 	switch o.Status {
+	case ProviderStartDispatching:
+		if o.ProviderSessionID != "" || o.ReceiptID != "" ||
+			(o.EvidenceSHA256 != "" && !validSHA256(o.EvidenceSHA256)) ||
+			(o.ReconcilesUnknown && !validSHA256(o.EvidenceSHA256)) ||
+			(!o.ReconcilesUnknown && o.EvidenceSHA256 != "") {
+			return errors.New("DISPATCHING Provider Start observation evidence is invalid")
+		}
 	case ProviderStartUnknown:
 		if (o.ProviderSessionID != "" && !validPlanningIdentity(o.ProviderSessionID)) ||
 			(o.ReceiptID != "" && !validPlanningIdentity(o.ReceiptID)) ||
@@ -223,7 +268,7 @@ func validateProviderStartSession(job Job, start ProviderStartIntent, sessionID 
 		return errors.New("Provider Start observation does not precede the planning turn")
 	}
 	switch observation.Status {
-	case ProviderStartUnknown:
+	case ProviderStartUnknown, ProviderStartDispatching:
 		return &PlanningBoundaryError{
 			Boundary: PlanningBoundaryTurn, ReasonCode: "provider_start_unknown",
 			Cause: errors.New("Provider Start is unresolved; reconcile the same OperationID before starting a turn"),
