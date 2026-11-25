@@ -320,11 +320,11 @@ func NewDeliveryObservation(
 	observation := DeliveryObservation{
 		ID: observationID, CommandID: commandID, JobID: job.ID,
 		MessageID: message.ID, RequestObservationID: requestObservationID,
-		Recipient: message.Recipient,
+		Recipient:  message.Recipient,
 		ObservedBy: ActorRef{Kind: ActorOrchestrator, ID: OrchestratorActorID},
-		Status: status, Attempt: attempt, EvidenceSHA256: evidenceSHA256,
+		Status:     status, Attempt: attempt, EvidenceSHA256: evidenceSHA256,
 		ReconcilesUnknown: reconcilesUnknown,
-		CreatedAt: now.UTC().Round(0), CreatedRevision: job.Revision + 1,
+		CreatedAt:         now.UTC().Round(0), CreatedRevision: job.Revision + 1,
 	}
 	if err := observation.Validate(job); err != nil {
 		return DeliveryObservation{}, err
