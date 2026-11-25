@@ -461,7 +461,7 @@ func TestTaskProviderResumeFinalizesClaimAfterPostClaimReadFailure(t *testing.T)
 			enableTaskResumeE5(&f)
 			f.controller.store = &failResumeClaimReadStore{
 				ProviderExecutionStore: f.database,
-				failAt: failAt,
+				failAt:                 failAt,
 			}
 			commandID := "cmd_e1212121212121212121212121212121"
 			_, observation, _, err := f.resume(commandID)
