@@ -132,7 +132,7 @@ func TestTaskCoderTurnResumeAndStopFactsPersistAcrossRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, _, _, _, err = database.AddTaskTurnDispatchObservation(
+	_, _, _, err = database.AddTaskTurnDispatchObservation(
 		ctx, jobID, job.Revision, turnClaim.ID,
 		domain.TaskTurnDispatchObservationCommandID(turnClaim.ID, domain.TaskTurnDispatchObservationStarted, ""),
 		domain.TaskTurnDispatchObservationStarted, "", principal,
@@ -159,7 +159,7 @@ func TestTaskCoderTurnResumeAndStopFactsPersistAcrossRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	returnedEvidence := strings.Repeat("9", 64)
-	_, _, err = database.AddTaskTurnDispatchObservation(
+	_, _, _, err = database.AddTaskTurnDispatchObservation(
 		ctx, jobID, job.Revision, turnClaim.ID,
 		domain.TaskTurnDispatchObservationCommandID(turnClaim.ID, domain.TaskTurnDispatchObservationUnknownReturned, returnedEvidence),
 		domain.TaskTurnDispatchObservationUnknownReturned, returnedEvidence, principal,
