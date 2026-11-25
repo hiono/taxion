@@ -462,7 +462,7 @@ func TestTaskProviderSendCannotDispatchAfterStopIntent(t *testing.T) {
 	}
 }
 
-func TestTaskProviderStopRejectsUnresolvedTaskTurn(t *testing.T) {
+func TestTaskProviderStopAllowsUnclaimedTaskTurnIntent(t *testing.T) {
 	f := newTaskProviderStopFixture(t)
 	job, err := f.database.GetJob(f.ctx, f.jobID)
 	if err != nil {
@@ -474,16 +474,18 @@ func TestTaskProviderStopRejectsUnresolvedTaskTurn(t *testing.T) {
 	); err != nil {
 		t.Fatalf("persist pending Task Turn: %v", err)
 	}
-	if _, _, _, err := f.stop("cmd_acacacacacacacacacacacacacacacac", domain.ProviderStopReasonTaskComplete); err == nil {
-		t.Fatal("Provider Stop was accepted while the same Session had an unresolved Task Turn")
+	_, _, observation, err := f.stop("cmd_acacacacacacacacacacacacacacacac", domain.ProviderStopReasonTaskComplete)
+	if err != nil || !observation.Stopped || !observation.Quiescent || f.runtime.stopCalls != 1 {
+		t.Fatalf("Stop did not proceed after an unclaimed Task Turn intent: observation=%#v calls=%d err=%v",
+			observation, f.runtime.stopCalls, err)
 	}
 	job, err = f.database.GetJob(f.ctx, f.jobID)
 	if err != nil {
-		t.Fatalf("GetJob after rejected Stop: %v", err)
+		t.Fatalf("GetJob after Stop: %v", err)
 	}
-	if len(job.ProviderStopIntents) != 0 || f.runtime.stopCalls != 0 {
-		t.Fatalf("rejected Stop created an intent or reached Provider: intents=%d stopCalls=%d",
-			len(job.ProviderStopIntents), f.runtime.stopCalls)
+	if len(job.ProviderStopIntents) != 1 || len(job.ProviderStopObservations) != 1 {
+		t.Fatalf("Stop facts were not persisted: intents=%d observations=%d",
+			len(job.ProviderStopIntents), len(job.ProviderStopObservations))
 	}
 }
 

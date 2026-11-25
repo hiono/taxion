@@ -42,8 +42,8 @@ func TaskTurnDispatchObservationID(commandID string) string {
 	return planningOperationID("task_turn_dispatch_observation", commandID)
 }
 
-func TaskTurnDispatchObservationCommandID(claimID, status string) string {
-	sum := sha256.Sum256([]byte("taxion:task-turn-dispatch-observation:" + claimID + ":" + status))
+func TaskTurnDispatchObservationCommandID(claimID, status, evidenceSHA256 string) string {
+	sum := sha256.Sum256([]byte("taxion:task-turn-dispatch-observation:" + claimID + ":" + status + ":" + evidenceSHA256))
 	return "cmd_" + hex.EncodeToString(sum[:16])
 }
 
@@ -142,6 +142,10 @@ func NewTaskTurnDispatchClaim(
 		if observation.Status != TaskTurnUnknown {
 			return TaskTurnDispatchClaim{}, errors.New("terminal Task Turn cannot acquire a dispatch claim")
 		}
+	}
+	if resumeStatus, found := LatestPlanningResumeStatus(job, turn.RoleExecutionID); found &&
+		resumeStatus != PlanningResumeAttached {
+		return TaskTurnDispatchClaim{}, errors.New("Task Turn dispatch claim requires the latest Resume to be ATTACHED")
 	}
 	for _, stopIntent := range job.ProviderStopIntents {
 		if stopIntent.RoleExecutionID == turn.RoleExecutionID && stopIntent.SessionID == turn.ProviderSessionID {

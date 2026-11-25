@@ -108,7 +108,7 @@ func validateTaskTurnDispatchObservations(job Job) error {
 		byClaim[observation.ClaimID] = append(byClaim[observation.ClaimID], observation)
 	}
 	for claimID, observations := range byClaim {
-		started, preDispatchFailure, postStartFailure, lookupNotFound := 0, 0, 0, 0
+		started, preDispatchFailure, postStartFailure := 0, 0, 0
 		for _, observation := range observations {
 			switch observation.Status {
 			case TaskTurnDispatchObservationStarted:
@@ -117,13 +117,10 @@ func validateTaskTurnDispatchObservations(job Job) error {
 				preDispatchFailure++
 			case TaskTurnDispatchObservationPreAdapterRejection, TaskTurnDispatchObservationDefinitiveFailure:
 				postStartFailure++
-			case TaskTurnDispatchObservationLookupNotFound:
-				lookupNotFound++
 			}
 		}
-		if started > 1 || preDispatchFailure > 1 || postStartFailure > 1 || lookupNotFound > 1 ||
-			(preDispatchFailure > 0 && (started > 0 || postStartFailure > 0 || lookupNotFound > 0)) ||
-			(postStartFailure > 0 && lookupNotFound > 0) {
+		if started > 1 || preDispatchFailure > 1 || postStartFailure > 1 ||
+			(preDispatchFailure > 0 && (started > 0 || postStartFailure > 0)) {
 			return fmt.Errorf("%w: conflicting Task Turn dispatch observations for claim %s", ErrInvalidJob, claimID)
 		}
 	}

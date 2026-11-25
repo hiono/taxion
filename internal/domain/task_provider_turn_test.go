@@ -385,10 +385,39 @@ func TestTaskTurnDispatchCannotReleaseClaimAfterUnknownObservationAsDefinitiveFa
 	job.TaskTurnObservations = append(job.TaskTurnObservations, unknown)
 	job.Revision++
 	job.UpdatedAt = unknown.CreatedAt
+	failureEvidence := strings.Repeat("f", 64)
+	appendTaskTurnDispatchObservationForTest(t, &job, claim, TaskTurnDispatchObservationDefinitiveFailure, failureEvidence, now.Add(150*time.Second))
 	commandID := TaskTurnDispatchReleaseCommandID(claim.ID, TaskTurnDispatchReleasedDefinitiveFailure)
 	if _, err := NewTaskTurnDispatchRelease(job, claim.ID, principalID, commandID,
-		TaskTurnDispatchReleasedDefinitiveFailure, "", "", now.Add(3*time.Minute)); err == nil {
-		t.Fatal("UNKNOWN Task Turn claim was released as definitive_failure without reconciliation evidence")
+		TaskTurnDispatchReleasedDefinitiveFailure, failureEvidence, "", now.Add(3*time.Minute)); err == nil {
+		t.Fatal("UNKNOWN Task Turn claim was released as definitive_failure despite a prior ambiguous Provider operation")
+	}
+
+	control, controlExecution, controlPermission, controlNow := taskTurnFixture(t)
+	controlTurn, err := NewTaskTurnIntent(control, controlExecution.ID, controlPermission.ID, "session_task",
+		"cmd_16161616161616161616161616161616", strings.Repeat("2", 64), 40, controlNow)
+	if err != nil {
+		t.Fatalf("control NewTaskTurnIntent: %v", err)
+	}
+	control.TaskTurnIntents = append(control.TaskTurnIntents, controlTurn)
+	control.Revision++
+	control.UpdatedAt = controlTurn.CreatedAt
+	controlPrincipal := control.JobApprovals[len(control.JobApprovals)-1].ApproverPrincipalID
+	controlClaim, err := NewTaskTurnDispatchClaim(control, controlTurn.ID, controlPrincipal,
+		"cmd_17171717171717171717171717171717", controlNow.Add(time.Minute))
+	if err != nil {
+		t.Fatalf("control NewTaskTurnDispatchClaim: %v", err)
+	}
+	control.TaskTurnDispatchClaims = append(control.TaskTurnDispatchClaims, controlClaim)
+	control.Revision++
+	control.UpdatedAt = controlClaim.CreatedAt
+	appendTaskTurnDispatchObservationForTest(t, &control, controlClaim, TaskTurnDispatchObservationStarted, "", controlNow.Add(90*time.Second))
+	controlFailureEvidence := strings.Repeat("e", 64)
+	appendTaskTurnDispatchObservationForTest(t, &control, controlClaim, TaskTurnDispatchObservationDefinitiveFailure, controlFailureEvidence, controlNow.Add(2*time.Minute))
+	controlCommandID := TaskTurnDispatchReleaseCommandID(controlClaim.ID, TaskTurnDispatchReleasedDefinitiveFailure)
+	if _, err := NewTaskTurnDispatchRelease(control, controlClaim.ID, controlPrincipal, controlCommandID,
+		TaskTurnDispatchReleasedDefinitiveFailure, controlFailureEvidence, "", controlNow.Add(3*time.Minute)); err != nil {
+		t.Fatalf("definitive failure without UNKNOWN was rejected: %v", err)
 	}
 }
 

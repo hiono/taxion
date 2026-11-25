@@ -433,6 +433,25 @@ func validProviderStopReason(reason ProviderStopReason) bool {
 	}
 }
 
+func taskTurnHasUnresolvedDispatch(job Job, turnID string) bool {
+	for _, claim := range job.TaskTurnDispatchClaims {
+		if claim.TurnID != turnID {
+			continue
+		}
+		if _, started := taskTurnDispatchObservationForClaim(job, claim.ID, TaskTurnDispatchObservationStarted); !started {
+			continue
+		}
+		if _, rejected := taskTurnDispatchObservationForClaim(job, claim.ID, TaskTurnDispatchObservationPreAdapterRejection); rejected {
+			continue
+		}
+		if _, failed := taskTurnDispatchObservationForClaim(job, claim.ID, TaskTurnDispatchObservationDefinitiveFailure); failed {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
 func validateNoUnresolvedTaskTurnBeforeStop(job Job, roleExecutionID, sessionID string) error {
 	for _, turn := range job.TaskTurnIntents {
 		if turn.RoleExecutionID != roleExecutionID || turn.ProviderSessionID != sessionID {
@@ -444,7 +463,9 @@ func validateNoUnresolvedTaskTurnBeforeStop(job Job, roleExecutionID, sessionID 
 		observation, found := latestTaskTurnObservation(job, turn.ID)
 		if !found || observation.Status == TaskTurnUnknown ||
 			observation.CreatedRevision <= turn.CreatedRevision {
-			return errors.New("Provider Stop requires every prior Task Turn in the Session to be terminal")
+			if taskTurnHasUnresolvedDispatch(job, turn.ID) {
+				return errors.New("Provider Stop requires every dispatched Task Turn in the Session to be terminal")
+			}
 		}
 	}
 	return nil
