@@ -79,17 +79,6 @@ func (c *JobQuestionAuthorizationController) Authorize(
 		}
 		return receipt, authorization, nil
 	}
-	receipt, existing, found, err := c.store.GetJobQuestionAuthorizationCommand(ctx, jobID, commandID)
-	if err != nil {
-		return store.CommandReceipt{}, domain.JobQuestionAuthorization{}, err
-	}
-	if found {
-		if existing.QuestionMessageID != questionMessageID || existing.Budget != budget ||
-			!existing.Deadline.Equal(deadline.UTC().Round(0)) {
-			return store.CommandReceipt{}, domain.JobQuestionAuthorization{}, store.ErrIdempotencyConflict
-		}
-		return receipt, existing, nil
-	}
 	job, err := c.store.GetJob(ctx, jobID)
 	if err != nil {
 		return store.CommandReceipt{}, domain.JobQuestionAuthorization{}, err
