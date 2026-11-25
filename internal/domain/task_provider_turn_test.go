@@ -525,6 +525,18 @@ func TestTaskTurnDispatchClaimRequiresLatestResumeAttached(t *testing.T) {
 	job.Revision++
 	job.UpdatedAt = turn.CreatedAt
 	principalID := job.JobApprovals[len(job.JobApprovals)-1].ApproverPrincipalID
+	returnedEvidence := strings.Repeat("9", 64)
+	returnedUnknown, err := NewTaskTurnDispatchObservation(
+		job, claim.ID, principalID,
+		TaskTurnDispatchObservationCommandID(claim.ID, TaskTurnDispatchObservationUnknownReturned, returnedEvidence),
+		TaskTurnDispatchObservationUnknownReturned, returnedEvidence, now.Add(3*time.Minute+30*time.Second),
+	)
+	if err != nil {
+		t.Fatalf("Task Turn returned UNKNOWN: %v", err)
+	}
+	job.TaskTurnDispatchObservations = append(job.TaskTurnDispatchObservations, returnedUnknown)
+	job.Revision++
+	job.UpdatedAt = returnedUnknown.CreatedAt
 	resume, err := NewPlanningResumeIntent(job, execution.ID, principalID, "session_task",
 		"cmd_32323232323232323232323232323232", strings.Repeat("4", 64), true, now.Add(time.Minute))
 	if err != nil {

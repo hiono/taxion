@@ -22,6 +22,7 @@ const (
 	TaskTurnDispatchObservationPreAdapterRejection = "pre_adapter_rejection"
 	TaskTurnDispatchObservationDefinitiveFailure   = "definitive_failure"
 	TaskTurnDispatchObservationLookupNotFound      = "lookup_not_found"
+	TaskTurnDispatchObservationUnknownReturned     = "unknown_returned"
 )
 
 type TaskTurnDispatchObservation struct {

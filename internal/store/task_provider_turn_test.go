@@ -158,6 +158,19 @@ func TestTaskCoderTurnResumeAndStopFactsPersistAcrossRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	returnedEvidence := strings.Repeat("9", 64)
+	_, _, err = database.AddTaskTurnDispatchObservation(
+		ctx, jobID, job.Revision, turnClaim.ID,
+		domain.TaskTurnDispatchObservationCommandID(turnClaim.ID, domain.TaskTurnDispatchObservationUnknownReturned, returnedEvidence),
+		domain.TaskTurnDispatchObservationUnknownReturned, returnedEvidence, principal,
+	)
+	if err != nil {
+		t.Fatalf("Add returned UNKNOWN dispatch observation: %v", err)
+	}
+	job, err = database.GetJob(ctx, jobID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	_, resume, err := database.AddPlanningResumeIntent(ctx, jobID, job.Revision,
 		start.RoleExecution.ID, "session_1", "cmd_e9090909090909090909090909090909",
 		strings.Repeat("f", 64), true, principal)

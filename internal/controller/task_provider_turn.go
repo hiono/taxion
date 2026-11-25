@@ -467,6 +467,13 @@ func (c *ProviderController) dispatchTaskTurn(
 		if persistErr != nil {
 			return receipt, turn, observation, provider.TurnResult{}, errors.Join(err, persistErr)
 		}
+		evidenceSHA256 := providerTurnUnknownReturnedEvidence(turn.OperationID, claim.ID)
+		_, _, dispatchErr := c.recordTaskTurnDispatchObservation(
+			ctx, current.ID, claim.ID, domain.TaskTurnDispatchObservationUnknownReturned, evidenceSHA256, principal,
+		)
+		if dispatchErr != nil {
+			return receipt, turn, observation, provider.TurnResult{}, errors.Join(err, dispatchErr)
+		}
 		return receipt, turn, observation, provider.TurnResult{}, err
 	}
 	if result.OperationID != turn.OperationID || result.TurnID != turn.ID ||

@@ -1137,6 +1137,10 @@ func providerTurnPreAdapterRejectionEvidence(operationID string, err error) (str
 	return preDispatch.EvidenceSHA256, true
 }
 
+func providerTurnUnknownReturnedEvidence(operationID, claimID string) string {
+	return sha256String("taxion:task-turn-unknown-returned:" + operationID + ":" + claimID)
+}
+
 func providerTurnDefinitiveFailureEvidence(operationID string, err error) (string, bool) {
 	var operationError *provider.OperationError
 	if !errors.As(err, &operationError) || operationError == nil ||

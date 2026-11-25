@@ -76,6 +76,15 @@ func (o TaskTurnDispatchObservation) Validate(job Job) error {
 		if !started || start.CreatedRevision >= o.CreatedRevision || !validSHA256(o.EvidenceSHA256) {
 			return errors.New("Lookup NOT_FOUND requires a prior dispatch start and evidence")
 		}
+	case TaskTurnDispatchObservationUnknownReturned:
+		if !started || start.CreatedRevision >= o.CreatedRevision || !validSHA256(o.EvidenceSHA256) {
+			return errors.New("returned UNKNOWN requires a prior dispatch start and evidence")
+		}
+		latest, found := latestTaskTurnObservation(job, o.TurnID)
+		if !found || latest.Status != TaskTurnUnknown || latest.DispatchClaimID != claim.ID ||
+			latest.CreatedRevision >= o.CreatedRevision {
+			return errors.New("returned UNKNOWN must follow the UNKNOWN observation for the same dispatch claim")
+		}
 	default:
 		return errors.New("unsupported Task Turn dispatch observation status")
 	}
@@ -108,7 +117,7 @@ func validateTaskTurnDispatchObservations(job Job) error {
 		byClaim[observation.ClaimID] = append(byClaim[observation.ClaimID], observation)
 	}
 	for claimID, observations := range byClaim {
-		started, preDispatchFailure, postStartFailure := 0, 0, 0
+		started, preDispatchFailure, postStartFailure, unknownReturned := 0, 0, 0, 0
 		for _, observation := range observations {
 			switch observation.Status {
 			case TaskTurnDispatchObservationStarted:
@@ -117,10 +126,13 @@ func validateTaskTurnDispatchObservations(job Job) error {
 				preDispatchFailure++
 			case TaskTurnDispatchObservationPreAdapterRejection, TaskTurnDispatchObservationDefinitiveFailure:
 				postStartFailure++
+			case TaskTurnDispatchObservationUnknownReturned:
+				unknownReturned++
 			}
 		}
-		if started > 1 || preDispatchFailure > 1 || postStartFailure > 1 ||
-			(preDispatchFailure > 0 && (started > 0 || postStartFailure > 0)) {
+		if started > 1 || preDispatchFailure > 1 || postStartFailure > 1 || unknownReturned > 1 ||
+			(unknownReturned > 0 && started == 0) ||
+			(preDispatchFailure > 0 && (started > 0 || postStartFailure > 0 || unknownReturned > 0)) {
 			return fmt.Errorf("%w: conflicting Task Turn dispatch observations for claim %s", ErrInvalidJob, claimID)
 		}
 	}
