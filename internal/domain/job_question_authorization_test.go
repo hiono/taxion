@@ -8,8 +8,8 @@ import (
 
 func TestJobQuestionAuthorizationBindsOneApprovedQuestionAndPlannerSession(t *testing.T) {
 	pinnedRepository := "https://example.com/team/repo.git@" + strings.Repeat("a", 40)
-	if !validRepositoryIdentity(pinnedRepository) {
-		t.Fatal("validRepositoryIdentity rejected an approved commit-pinned repository target")
+	if !repositoryInJobContract(JobContract{TargetRepositories: []string{pinnedRepository}}, pinnedRepository) {
+		t.Fatal("exact JobContract membership rejected an approved commit-pinned repository target")
 	}
 	job, task, now := approvedJobWithTaskForExecutionPermission(t)
 	permissionRequest := executionPermissionTestRequest(job, now)
