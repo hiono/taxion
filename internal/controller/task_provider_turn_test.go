@@ -798,7 +798,7 @@ func TestReleaseTaskTurnDispatchClaimForIdempotentRetryDoesNotReleaseReplacement
 	}
 
 	if _, err := f.controller.releaseTaskTurnDispatchClaimForIdempotentRetry(
-		f.ctx, staleLookupJob, turn, f.principal, strings.Repeat("b", 64),
+		f.ctx, staleLookupJob, turn, f.principal, strings.Repeat("b", 64), strings.Repeat("a", 64),
 	); !errors.Is(err, provider.ErrStopUnconfirmed) {
 		t.Fatalf("stale Lookup released a replacement claim: %v", err)
 	}
