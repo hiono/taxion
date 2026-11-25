@@ -418,12 +418,16 @@ func (c *ProviderController) DispatchTaskExecution(
 		}
 		lookupEvidenceSHA256 = lookup.EvidenceSHA256
 		if !lookup.Found && lookup.Status == provider.LookupStatusNotFound {
-			observation, persistErr := c.recordTaskStartObservation(
-				ctx, job.ID, intent.ID, domain.ProviderStartFailed, "", "", lookup.EvidenceSHA256, false,
-			)
-			return observation, provider.StartResult{}, errors.Join(
-				errors.New("Task Provider Start lookup confirmed NOT_FOUND"), persistErr,
-			)
+			// A confirmed absence permits a first dispatch only when Start
+			// idempotency is independently verified. Without it, fail closed.
+			if !canRetry {
+				observation, persistErr := c.recordTaskStartObservation(
+					ctx, job.ID, intent.ID, domain.ProviderStartFailed, "", "", lookup.EvidenceSHA256, false,
+				)
+				return observation, provider.StartResult{}, errors.Join(
+					errors.New("Task Provider Start lookup confirmed NOT_FOUND without verified idempotency"), persistErr,
+				)
+			}
 		}
 		if lookup.Found {
 			switch lookup.Status {
