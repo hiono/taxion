@@ -215,6 +215,11 @@ func (c *ProviderController) StartPlanning(
 	if err := currentGrant.ValidateFor(current, principal.PrincipalID(), c.now()); err != nil {
 		return receipt, execution, intent, provider.StartResult{}, err
 	}
+	if err := c.recordStartObservation(
+		ctx, jobID, intent.ID, domain.ProviderStartDispatching, "", "", "", false, principal,
+	); err != nil {
+		return receipt, execution, intent, provider.StartResult{}, fmt.Errorf("persist Provider Start dispatch boundary: %w", err)
+	}
 	result, err := c.runtime.Start(ctx, request)
 	if err != nil {
 		if providerOperationMayHaveStarted(err) {

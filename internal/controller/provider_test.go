@@ -907,8 +907,9 @@ func TestProviderControllerPersistsStartIntentBeforeCallingRuntime(t *testing.T)
 		if len(job.ProviderStartIntents) != 1 || job.ProviderStartIntents[0].ID != request.OperationID {
 			return errors.New("Provider Start was called before intent commit")
 		}
-		if len(job.ProviderStartObservations) != 0 {
-			return errors.New("Provider Start observation exists before the external call")
+		if len(job.ProviderStartObservations) != 1 ||
+			job.ProviderStartObservations[0].Status != domain.ProviderStartDispatching {
+			return errors.New("Provider Start dispatch boundary was not persisted before the external call")
 		}
 		intent := job.ProviderStartIntents[0]
 		if job.Revision != intent.CreatedRevision || intent.RoleExecutionID != request.RoleExecutionID {
@@ -929,8 +930,10 @@ func TestProviderControllerPersistsStartIntentBeforeCallingRuntime(t *testing.T)
 	if err != nil {
 		t.Fatalf("GetJob: %v", err)
 	}
-	if len(job.ProviderStartObservations) != 1 || job.ProviderStartObservations[0].Status != domain.ProviderStartAccepted {
-		t.Fatalf("Provider Start acceptance was not persisted: %#v", job.ProviderStartObservations)
+	if len(job.ProviderStartObservations) != 2 ||
+		job.ProviderStartObservations[0].Status != domain.ProviderStartDispatching ||
+		job.ProviderStartObservations[1].Status != domain.ProviderStartAccepted {
+		t.Fatalf("Provider Start dispatch and acceptance were not persisted: %#v", job.ProviderStartObservations)
 	}
 }
 
@@ -948,8 +951,10 @@ func TestProviderControllerReconcilesAmbiguousStartWithoutBlindReplay(t *testing
 	if err != nil {
 		t.Fatalf("GetJob after ambiguous Start: %v", err)
 	}
-	if len(job.ProviderStartObservations) != 1 || job.ProviderStartObservations[0].Status != domain.ProviderStartUnknown {
-		t.Fatalf("ambiguous Start was not persisted as UNKNOWN: %#v", job.ProviderStartObservations)
+	if len(job.ProviderStartObservations) != 2 ||
+		job.ProviderStartObservations[0].Status != domain.ProviderStartDispatching ||
+		job.ProviderStartObservations[1].Status != domain.ProviderStartUnknown {
+		t.Fatalf("ambiguous Start dispatch boundary and UNKNOWN were not persisted: %#v", job.ProviderStartObservations)
 	}
 	runtime.startErr = nil
 	_, _, _, result, err := controller.StartPlanning(context.Background(), jobID, grantID, commandID, documents, principal)
@@ -963,9 +968,11 @@ func TestProviderControllerReconcilesAmbiguousStartWithoutBlindReplay(t *testing
 	if err != nil {
 		t.Fatalf("GetJob after recovery: %v", err)
 	}
-	if len(job.ProviderStartObservations) != 2 ||
-		job.ProviderStartObservations[1].Status != domain.ProviderStartAccepted ||
-		!job.ProviderStartObservations[1].ReconcilesUnknown {
+	if len(job.ProviderStartObservations) != 3 ||
+		job.ProviderStartObservations[0].Status != domain.ProviderStartDispatching ||
+		job.ProviderStartObservations[1].Status != domain.ProviderStartUnknown ||
+		job.ProviderStartObservations[2].Status != domain.ProviderStartAccepted ||
+		!job.ProviderStartObservations[2].ReconcilesUnknown {
 		t.Fatalf("UNKNOWN was not reconciled by same OperationID: %#v", job.ProviderStartObservations)
 	}
 }
@@ -984,9 +991,10 @@ func TestProviderControllerPersistsDefinitiveStartFailureWithoutLookupOrReplay(t
 	if err != nil {
 		t.Fatalf("GetJob after definitive Start failure: %v", err)
 	}
-	if len(job.ProviderStartObservations) != 1 ||
-		job.ProviderStartObservations[0].Status != domain.ProviderStartFailed ||
-		job.ProviderStartObservations[0].EvidenceSHA256 == "" {
+	if len(job.ProviderStartObservations) != 2 ||
+		job.ProviderStartObservations[0].Status != domain.ProviderStartDispatching ||
+		job.ProviderStartObservations[1].Status != domain.ProviderStartFailed ||
+		job.ProviderStartObservations[1].EvidenceSHA256 == "" {
 		t.Fatalf("definitive Start failure was not persisted as FAILED: %#v", job.ProviderStartObservations)
 	}
 	_, _, _, _, err = controller.StartPlanning(context.Background(), jobID, grantID, commandID, documents, principal)
@@ -1021,10 +1029,11 @@ func TestProviderControllerReconcilesUnknownToFailedAfterDefinitiveRetry(t *test
 	if err != nil {
 		t.Fatalf("GetJob after definitive retry failure: %v", err)
 	}
-	if len(job.ProviderStartObservations) != 2 ||
-		job.ProviderStartObservations[0].Status != domain.ProviderStartUnknown ||
-		job.ProviderStartObservations[1].Status != domain.ProviderStartFailed ||
-		!job.ProviderStartObservations[1].ReconcilesUnknown {
+	if len(job.ProviderStartObservations) != 3 ||
+		job.ProviderStartObservations[0].Status != domain.ProviderStartDispatching ||
+		job.ProviderStartObservations[1].Status != domain.ProviderStartUnknown ||
+		job.ProviderStartObservations[2].Status != domain.ProviderStartFailed ||
+		!job.ProviderStartObservations[2].ReconcilesUnknown {
 		t.Fatalf("UNKNOWN was not terminally reconciled as FAILED: %#v", job.ProviderStartObservations)
 	}
 	_, _, _, _, err = controller.StartPlanning(context.Background(), jobID, grantID, commandID, documents, principal)
@@ -1055,7 +1064,10 @@ func TestProviderControllerDoesNotStartAfterGrantDeadlineButAllowsLookupRecovery
 	if err != nil {
 		t.Fatalf("GetJob: %v", err)
 	}
-	if len(job.ProviderStartObservations) != 2 || !job.ProviderStartObservations[1].ReconcilesUnknown {
+	if len(job.ProviderStartObservations) != 3 ||
+		job.ProviderStartObservations[0].Status != domain.ProviderStartDispatching ||
+		job.ProviderStartObservations[1].Status != domain.ProviderStartUnknown ||
+		!job.ProviderStartObservations[2].ReconcilesUnknown {
 		t.Fatalf("deadline recovery did not append reconciliation: %#v", job.ProviderStartObservations)
 	}
 }
@@ -1128,7 +1140,10 @@ func TestProviderControllerDoesNotBlindlyRetryWhenNoSafeStartCapabilityExists(t 
 		t.Fatalf("GetJob: %v", err)
 	}
 	if runtime.startCalls != 1 || runtime.lookupCalls != 0 ||
-		len(job.ProviderStartObservations) != 1 || job.ProviderStartObservations[0].Status != domain.ProviderStartUnknown {
+		len(job.ProviderStartObservations) != 3 ||
+		job.ProviderStartObservations[0].Status != domain.ProviderStartDispatching ||
+		job.ProviderStartObservations[1].Status != domain.ProviderStartUnknown ||
+		job.ProviderStartObservations[2].Status != domain.ProviderStartUnknown {
 		t.Fatalf("unsafe retry occurred: starts=%d lookups=%d observations=%#v", runtime.startCalls, runtime.lookupCalls, job.ProviderStartObservations)
 	}
 }

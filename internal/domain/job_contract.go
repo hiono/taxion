@@ -271,8 +271,7 @@ func NewJobContractAmendmentRevision(
 	}
 	for _, start := range job.ProviderStartIntents {
 		if observation, found := latestProviderStartObservation(job, start.ID); found &&
-			(observation.Status == ProviderStartDispatching ||
-				(observation.Status == ProviderStartUnknown && providerStartHasDispatchBoundary(job, start.ID))) {
+			(observation.Status == ProviderStartDispatching || observation.Status == ProviderStartUnknown) {
 			return JobContractRevision{}, errors.New("JobContract amendment is blocked while a Provider Start dispatch is unresolved")
 		}
 	}

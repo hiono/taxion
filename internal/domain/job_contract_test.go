@@ -235,15 +235,44 @@ func TestJobContractAmendmentRejectsUnresolvedProviderStartDispatch(t *testing.T
 	latest := job.JobContractRevisions[len(job.JobContractRevisions)-1]
 	contract := validJobContract(now.Add(2 * time.Hour))
 	contract.Purpose = "Amended while Provider Start is unresolved"
-	if _, err := NewJobContractAmendmentRevision(
-		job, "cmd_71717171717171717171717171717171",
-		latest.Revision, latest.CanonicalHash, "test concurrent amendment",
-		auth.AuthenticatedPrincipal{}, contract, now.Add(5*time.Minute),
-	); err == nil || !strings.Contains(err.Error(), "Provider Start dispatch is unresolved") {
+	amendment := func(candidate Job) error {
+		latest := candidate.JobContractRevisions[len(candidate.JobContractRevisions)-1]
+		_, err := NewJobContractAmendmentRevision(
+			candidate, "cmd_71717171717171717171717171717171",
+			latest.Revision, latest.CanonicalHash, "test concurrent amendment",
+			auth.AuthenticatedPrincipal{}, contract, now.Add(5*time.Minute),
+		)
+		return err
+	}
+	if err := amendment(job); err == nil || !strings.Contains(err.Error(), "Provider Start dispatch is unresolved") {
 		t.Fatalf("JobContract amendment was not rejected by the unresolved Start dispatch: %v", err)
+	}
+	job.ProviderStartObservations[len(job.ProviderStartObservations)-1].Status = ProviderStartUnknown
+	if err := job.Validate(); err != nil {
+		t.Fatalf("Job with unresolved UNKNOWN Start: %v", err)
+	}
+	if err := amendment(job); err == nil || !strings.Contains(err.Error(), "Provider Start dispatch is unresolved") {
+		t.Fatalf("JobContract amendment was not rejected by UNKNOWN Start without a dispatch fact: %v", err)
+	}
+	acceptedJob, _, _, acceptedNow := taskTurnFixture(t)
+	acceptedErr := NewJobContractAmendmentRevisionErrorForTest(acceptedJob, acceptedNow)
+	if acceptedErr == nil || strings.Contains(acceptedErr.Error(), "Provider Start dispatch is unresolved") {
+		t.Fatalf("accepted Provider Start was incorrectly blocked by dispatch boundary: %v", acceptedErr)
 	}
 }
 
+
+// NewJobContractAmendmentRevisionErrorForTest exercises the accepted Start boundary
+// without requiring a constructible authenticated principal in this package.
+func NewJobContractAmendmentRevisionErrorForTest(job Job, now time.Time) error {
+	latest := job.JobContractRevisions[len(job.JobContractRevisions)-1]
+	_, err := NewJobContractAmendmentRevision(
+		job, "cmd_72727272727272727272727272727272",
+		latest.Revision, latest.CanonicalHash, "test accepted amendment",
+		auth.AuthenticatedPrincipal{}, validJobContract(now.Add(2*time.Hour)), now.Add(5*time.Minute),
+	)
+	return err
+}
 func TestJobApprovalRejectsMismatchedHumanIdentity(t *testing.T) {
 	job, execution, sourceResult, now := jobWithAcceptedPlanner(t)
 	revision, err := NewJobContractRevision(
