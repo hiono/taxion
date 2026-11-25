@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -153,6 +154,9 @@ func TestJobQuestionAuthorizationStorePersistsAndReplays(t *testing.T) {
 	if err != nil || len(restored.JobQuestionAuthorizations) != 1 {
 		t.Fatalf("GetJob after JobQuestionAuthorization: count=%d err=%v", len(restored.JobQuestionAuthorizations), err)
 	}
+	if !reflect.DeepEqual(restored.JobQuestionAuthorizations[0], authorization) {
+		t.Fatalf("persisted JobQuestionAuthorization changed bindings: got %#v want %#v", restored.JobQuestionAuthorizations[0], authorization)
+	}
 	if err := restored.Validate(); err != nil {
 		t.Fatalf("restored Job.Validate: %v", err)
 	}
@@ -168,9 +172,16 @@ func TestJobQuestionAuthorizationStorePersistsAndReplays(t *testing.T) {
 	if err != nil || len(restarted.JobQuestionAuthorizations) != 1 {
 		t.Fatalf("GetJob after restart: count=%d err=%v", len(restarted.JobQuestionAuthorizations), err)
 	}
+	if !reflect.DeepEqual(restarted.JobQuestionAuthorizations[0], authorization) {
+		t.Fatalf("restarted JobQuestionAuthorization changed bindings: got %#v want %#v", restarted.JobQuestionAuthorizations[0], authorization)
+	}
+	lookupReceipt, lookupGrant, found, err := reopened.GetJobQuestionAuthorizationCommand(ctx, job.ID, request.CommandID)
+	if err != nil || !found || lookupReceipt != receipt || !reflect.DeepEqual(lookupGrant, authorization) {
+		t.Fatalf("GetJobQuestionAuthorizationCommand replay mismatch: %#v %#v found=%v err=%v", lookupReceipt, lookupGrant, found, err)
+	}
 	replay, replayed, err := reopened.AddJobQuestionAuthorization(ctx, restarted.ID, restarted.Revision, request)
-	if err != nil || replay != receipt || replayed.ID != authorization.ID {
-		t.Fatalf("JobQuestionAuthorization replay changed receipt or grant: %#v %#v %v", replay, replayed, err)
+	if err != nil || replay != receipt || !reflect.DeepEqual(replayed, authorization) {
+		t.Fatalf("JobQuestionAuthorization replay changed receipt or bindings: %#v %#v %v", replay, replayed, err)
 	}
 	changed := request
 	changed.ReadOnlyBoundary.SHA256 = strings.Repeat("f", 64)
