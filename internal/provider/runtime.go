@@ -525,7 +525,8 @@ func safeAdapterError(err error) error {
 	}
 	if errors.Is(err, ErrCredentialUnavailable) {
 		if errors.Is(err, ErrCredentialLeaseCleanupFailed) {
-			return errors.Join(ErrCredentialUnavailable, ErrCredentialLeaseCleanupFailed)
+			return errors.Join(ErrCredentialUnavailable, ErrCredentialLeaseCleanupFailed,
+				&OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown})
 		}
 		return errors.Join(ErrCredentialUnavailable, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown})
 	}
