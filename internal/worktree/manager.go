@@ -408,6 +408,14 @@ func (m *Manager) Verify(ctx context.Context, jobID string, task domain.Task, sn
 	return m.verify(ctx, jobID, task, snapshot)
 }
 
+func verifyWorktreeHeadUnchanged(ctx context.Context, directory, expected string) error {
+	actual, err := gitOutput(ctx, directory, "rev-parse", "--verify", "HEAD^{commit}")
+	if err != nil || actual != expected {
+		return errors.New("Task Worktree HEAD changed while its identity was verified")
+	}
+	return nil
+}
+
 func (m *Manager) verify(ctx context.Context, jobID string, task domain.Task, snapshot Snapshot) error {
 	if m == nil || ctx == nil || !validPathIdentity(jobID) || !validPathIdentity(task.ID) {
 		return errors.New("Worktree manager, context, Job ID, and Task ID are required")
@@ -501,6 +509,9 @@ func (m *Manager) verify(ctx context.Context, jobID string, task domain.Task, sn
 		if !isDetachedHeadProbeError(detachedErr) {
 			return fmt.Errorf("verify Task Worktree detached HEAD: %w", detachedErr)
 		}
+	}
+	if err := verifyWorktreeHeadUnchanged(ctx, worktreePath, head); err != nil {
+		return err
 	}
 	gitDir, err := gitOutput(ctx, worktreePath, "rev-parse", "--absolute-git-dir")
 	if err != nil {
@@ -887,17 +898,35 @@ func canonicalDirectory(path string, create bool) (string, error) {
 	return filepath.Clean(resolved), nil
 }
 
+func gitCommandEnvironment() []string {
+	overridden := map[string]struct{}{
+		"GIT_DIR": {}, "GIT_WORK_TREE": {}, "GIT_INDEX_FILE": {}, "GIT_COMMON_DIR": {},
+		"GIT_PREFIX": {}, "GIT_OBJECT_DIRECTORY": {}, "GIT_ALTERNATE_OBJECT_DIRECTORIES": {},
+	}
+	environment := os.Environ()
+	filtered := make([]string, 0, len(environment))
+	for _, variable := range environment {
+		name, _, _ := strings.Cut(variable, "=")
+		if _, skip := overridden[strings.ToUpper(name)]; !skip {
+			filtered = append(filtered, variable)
+		}
+	}
+	return filtered
+}
+
 func gitOutput(ctx context.Context, directory string, args ...string) (string, error) {
 	command := exec.CommandContext(ctx, "git", append([]string{"--no-replace-objects", "-C", directory}, args...)...)
+	command.Env = gitCommandEnvironment()
 	output, err := command.Output()
 	if err != nil {
 		return "", err
 	}
-	return strings.TrimSpace(string(output)), nil
+	return strings.TrimRight(string(output), "\r\n"), nil
 }
 
 func runGit(ctx context.Context, directory string, args ...string) error {
 	command := exec.CommandContext(ctx, "git", append([]string{"--no-replace-objects", "-C", directory}, args...)...)
+	command.Env = gitCommandEnvironment()
 	if output, err := command.CombinedOutput(); err != nil {
 		return fmt.Errorf("%w: %s", err, strings.TrimSpace(string(output)))
 	}

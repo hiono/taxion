@@ -14,6 +14,89 @@ import (
 	"github.com/hiono/taxion/internal/domain"
 )
 
+
+func TestVerifyWorktreeHeadUnchangedRejectsChangedHEAD(t *testing.T) {
+	repository := initRepository(t)
+	expected := gitTestOutput(t, repository, "rev-parse", "HEAD")
+	if err := os.WriteFile(filepath.Join(repository, "advance.txt"), []byte("advance\n"), 0o600); err != nil {
+		t.Fatalf("write commit: %v", err)
+	}
+	gitTestRun(t, repository, "add", "advance.txt")
+	gitTestRun(t, repository, "commit", "-m", "advance HEAD")
+	if err := verifyWorktreeHeadUnchanged(context.Background(), repository, expected); err == nil {
+		t.Fatal("HEAD change during identity verification was accepted")
+	}
+}
+
+func TestManagerPreservesTrailingWhitespaceInRepositoryPath(t *testing.T) {
+	parent := canonicalTempDir(t)
+	repository := filepath.Join(parent, "client ")
+	if err := os.MkdirAll(repository, 0o700); err != nil {
+		t.Fatalf("create repository path: %v", err)
+	}
+	gitTestRun(t, repository, "init", "--initial-branch=taxion-test-base")
+	gitTestRun(t, repository, "config", "user.name", "Taxion Test")
+	gitTestRun(t, repository, "config", "user.email", "taxion-test@example.invalid")
+	gitTestRun(t, repository, "config", "commit.gpgSign", "false")
+	if err := os.WriteFile(filepath.Join(repository, "README.md"), []byte("baseline\n"), 0o600); err != nil {
+		t.Fatalf("write baseline: %v", err)
+	}
+	gitTestRun(t, repository, "add", "README.md")
+	gitTestRun(t, repository, "commit", "-m", "initial commit")
+
+	workspace := filepath.Join(canonicalTempDir(t), "worktrees")
+	manager, err := NewManager(workspace, []Repository{{ID: "repo.primary", Path: repository}})
+	if err != nil {
+		t.Fatalf("NewManager rejected a valid repository path with trailing whitespace: %v", err)
+	}
+	task := domain.Task{ID: "task_0123456789abcdef", TargetRepositories: []string{"repo.primary"}}
+	snapshot, err := manager.Prepare(context.Background(), "job_0123456789abcdef", task)
+	if err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	if err := manager.Verify(context.Background(), "job_0123456789abcdef", task, snapshot); err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+}
+
+func TestManagerCaptureOutputIgnoresInheritedGitIndexFile(t *testing.T) {
+	repository := initRepository(t)
+	manager, err := NewManager(filepath.Join(canonicalTempDir(t), "worktrees"), []Repository{{ID: "repo.primary", Path: repository}})
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	jobID := "job_0123456789abcdef"
+	task := domain.Task{ID: "task_0123456789abcdef", TargetRepositories: []string{"repo.primary"}}
+	snapshot, err := manager.Prepare(context.Background(), jobID, task)
+	if err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	gitTestRun(t, snapshot.WorktreePath, "config", "user.name", "Taxion Test")
+	gitTestRun(t, snapshot.WorktreePath, "config", "user.email", "taxion-test@example.invalid")
+	if err := os.WriteFile(filepath.Join(snapshot.WorktreePath, "output.txt"), []byte("output\n"), 0o600); err != nil {
+		t.Fatalf("write output: %v", err)
+	}
+	gitTestRun(t, snapshot.WorktreePath, "add", "output.txt")
+	gitTestRun(t, snapshot.WorktreePath, "commit", "-m", "capture output")
+	indexPath := gitTestOutput(t, snapshot.WorktreePath, "rev-parse", "--git-path", "index")
+	if !filepath.IsAbs(indexPath) {
+		indexPath = filepath.Join(snapshot.WorktreePath, indexPath)
+	}
+	alternateIndex := filepath.Join(canonicalTempDir(t), "alternate-index")
+	index, err := os.ReadFile(indexPath)
+	if err != nil {
+		t.Fatalf("read clean index: %v", err)
+	}
+	if err := os.WriteFile(alternateIndex, index, 0o600); err != nil {
+		t.Fatalf("write alternate index: %v", err)
+	}
+	gitTestRun(t, snapshot.WorktreePath, "rm", "--cached", "output.txt")
+	t.Setenv("GIT_INDEX_FILE", alternateIndex)
+	if _, err := manager.CaptureOutput(context.Background(), jobID, task, snapshot); err == nil {
+		t.Fatal("CaptureOutput accepted a staged deletion by reading an inherited alternate index")
+	}
+}
+
 func TestManagerPreparesDetachedTaskWorktreeAtImmutableBaseline(t *testing.T) {
 	repository := initRepository(t)
 	workspace := filepath.Join(canonicalTempDir(t), "worktrees")
