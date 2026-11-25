@@ -1286,7 +1286,7 @@ func TestProviderControllerDispatchesTaskCoderStartWithDurableIntentAndReconcile
 		Identity: runtime.identity, StartLookup: true, StartIdempotency: true, TaskWorktree: true,
 		Evidence: []provider.CapabilityEvidence{
 			{Capability: provider.CapabilityStartLookup, Identity: runtime.identity, TestID: "task-start-test",
-				EvidenceSHA256: strings.Repeat("a", 64), EvidenceLevel: provider.EvidenceSynthetic, VerifiedAt: now},
+				EvidenceSHA256: strings.Repeat("a", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
 			{Capability: provider.CapabilityStartIdempotency, Identity: runtime.identity, TestID: "task-start-test",
 				EvidenceSHA256: strings.Repeat("b", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
 			{Capability: provider.CapabilityTaskWorktree, Identity: runtime.identity, TestID: "task-worktree-test",
@@ -1412,7 +1412,7 @@ func TestProviderControllerReconcilesTaskCoderStartUnknownBySameOperationID(t *t
 		Evidence: []provider.CapabilityEvidence{{
 			Capability: provider.CapabilityStartLookup, Identity: runtime.identity,
 			TestID: "task-start-test", EvidenceSHA256: strings.Repeat("d", 64),
-			EvidenceLevel: provider.EvidenceSynthetic, VerifiedAt: now,
+			EvidenceLevel: provider.EvidenceLive, VerifiedAt: now,
 		}, {
 			Capability: provider.CapabilityStartIdempotency, Identity: runtime.identity,
 			TestID: "task-start-test", EvidenceSHA256: strings.Repeat("e", 64),
@@ -1544,7 +1544,7 @@ func TestProviderControllerRevalidatesTaskWorktreeAfterLookupBeforeStart(t *test
 		Identity: runtime.identity, StartLookup: true, StartIdempotency: true, TaskWorktree: true,
 		Evidence: []provider.CapabilityEvidence{
 			{Capability: provider.CapabilityStartLookup, Identity: runtime.identity, TestID: "task-start-test",
-				EvidenceSHA256: strings.Repeat("a", 64), EvidenceLevel: provider.EvidenceSynthetic, VerifiedAt: now},
+				EvidenceSHA256: strings.Repeat("a", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
 			{Capability: provider.CapabilityStartIdempotency, Identity: runtime.identity, TestID: "task-start-test",
 				EvidenceSHA256: strings.Repeat("b", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
 			{Capability: provider.CapabilityTaskWorktree, Identity: runtime.identity, TestID: "task-worktree-test",

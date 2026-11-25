@@ -939,7 +939,7 @@ func TestTaskTurnUnknownReturnedIsRecordedForRetryClaim(t *testing.T) {
 	job.UpdatedAt = claimA.CreatedAt
 	appendTaskTurnDispatchObservationForTest(t, &job, claimA, TaskTurnDispatchObservationStarted, "", now.Add(70*time.Second))
 	unknown, err := NewTaskTurnObservationForClaim(job, turn.ID, claimA.ID,
-		"cmd_d82828282828282828282828282828282", TaskTurnUnknown, 0, "", false, now.Add(80*time.Second))
+		"cmd_d8282828282828282828282828282828", TaskTurnUnknown, 0, "", false, now.Add(80*time.Second))
 	if err != nil {
 		t.Fatal(err)
 	}
