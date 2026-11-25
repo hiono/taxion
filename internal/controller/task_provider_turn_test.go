@@ -152,6 +152,12 @@ func TestProviderControllerSendTaskExecutionPersistsResultAndCompleteUsage(t *te
 			len(job.TaskTurnIntents), len(job.TaskTurnDispatchClaims), len(job.TaskTurnObservations), runtime.sendCalls, err)
 	}
 	worktree.failAt = 0
+	runtime.sendHook = func(_ context.Context, request provider.TurnRequest) error {
+		if !request.RequireIdempotency {
+			return errors.New("Task Turn with verified E4 Send idempotency did not require Provider-side deduplication")
+		}
+		return nil
+	}
 	_, turn, observation, result, err := providerController.SendTaskExecution(
 		ctx, jobID, execution.ID, permission.ID, "cmd_d3030303030303030303030303030303",
 		"Implement the approved Task changes.", permissionRequest, 100, principal,
