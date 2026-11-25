@@ -27,7 +27,7 @@ var (
 	ErrUnsupportedSchema   = errors.New("unsupported database schema version")
 )
 
-const schemaVersion = 1
+const schemaVersion = 2
 const createLocalDraftJobCommandType = "CreateJob"
 const createTrustedDraftJobCommandType = "CreateTrustedDraftJob"
 const addPlanningAuthorizationCommandType = "AddPlanningAuthorization"
@@ -143,9 +143,9 @@ func (s *Store) initialize(ctx context.Context) error {
 			return fmt.Errorf("create Job schema: %w", err)
 		}
 	}
-	if version == 0 {
+	if version < schemaVersion {
 		if _, err := tx.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d", schemaVersion)); err != nil {
-			return fmt.Errorf("set schema version: %w", err)
+			return fmt.Errorf("upgrade schema version: %w", err)
 		}
 	}
 	if err := tx.Commit(); err != nil {
