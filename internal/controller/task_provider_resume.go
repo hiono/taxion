@@ -173,130 +173,29 @@ func (c *ProviderController) ResumeTaskExecution(
 		return receipt, intent, observation, provider.ResumeResult{}, errors.Join(cause, persistErr)
 	}
 
-	latest, err = c.store.GetJob(ctx, jobID)
-	if err != nil {
-		return receipt, intent, domain.PlanningResumeObservation{}, provider.ResumeResult{}, err
-	}
 	claimCommandID := domain.PlanningResumeDispatchClaimCommandID(intent.ID)
-	_, claim, createdClaim, err := c.store.AddPlanningResumeDispatchClaim(
+	_, _, _, err = c.store.AddPlanningResumeDispatchClaim(
 		ctx, latest.ID, latest.Revision, intent.ID, claimCommandID, principal,
 	)
 	if err != nil {
 		return receipt, intent, domain.PlanningResumeObservation{}, provider.ResumeResult{}, err
 	}
-	recordClaimedFailure := func(cause error) (domain.PlanningResumeObservation, error) {
-		if !createdClaim {
-			return domain.PlanningResumeObservation{}, errors.Join(provider.ErrResumeUnconfirmed, cause)
-		}
-		recoveryCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-		defer cancel()
-		latestJob, readErr := c.store.GetJob(recoveryCtx, jobID)
-		if readErr != nil {
-			return domain.PlanningResumeObservation{}, errors.Join(cause, readErr)
-		}
-		if previous, found := latestProviderResumeObservation(latestJob, intent.ID); found &&
-			previous.Status == domain.PlanningResumeUnknown && previous.DispatchClaimID == claim.ID {
-			return previous, errors.Join(provider.ErrResumeUnconfirmed, cause)
-		}
-		evidence := providerResumeNotDispatchedEvidence(intent.ID, cause)
-		observation, persistErr := c.recordResumeObservation(
-			recoveryCtx, jobID, intent.ID, domain.PlanningResumeFailed, evidence, provider.ResumeResult{}, principal,
-		)
-		if persistErr != nil {
-			return observation, errors.Join(cause, persistErr)
-		}
-		releaseErr := c.releasePlanningResumeDispatchClaim(ctx, jobID, intent, domain.PlanningResumeDispatchReleasedFailed, principal)
-		return observation, errors.Join(cause, releaseErr)
-	}
-	claimedJob, err := c.store.GetJob(ctx, jobID)
-	if err != nil {
-		cause := fmt.Errorf("read Job after acquiring Task Resume dispatch claim: %w", err)
-		observation, persistErr := recordClaimedFailure(cause)
-		return receipt, intent, observation, provider.ResumeResult{}, errors.Join(cause, persistErr)
-	}
-	activeClaim, active := domain.ActivePlanningResumeDispatchClaim(claimedJob, intent.OperationID)
-	if !active || activeClaim.ID != claim.ID {
-		return receipt, intent, domain.PlanningResumeObservation{}, provider.ResumeResult{}, provider.ErrResumeUnconfirmed
-	}
-	if !createdClaim {
-		// A replay may retry only after the prior attempt durably recorded UNKNOWN.
-		// Before that observation exists, the original claimant may still be
-		// validating pre-dispatch conditions and must retain exclusive ownership.
-		previous, found := latestProviderResumeObservation(claimedJob, intent.ID)
-		if !found || previous.Status != domain.PlanningResumeUnknown || previous.DispatchClaimID != claim.ID {
-			return receipt, intent, domain.PlanningResumeObservation{}, provider.ResumeResult{}, provider.ErrResumeUnconfirmed
-		}
-	}
-	_, claimedExecution, claimedPermission, claimedTask, claimedAssignment, claimedStart, claimedSession, err :=
-		c.taskProviderExecutionTarget(ctx, jobID, roleExecutionID, permissionID, permissionRequest, principal)
-	if err != nil || claimedJob.ID != latest.ID || claimedExecution.ID != execution.ID ||
-		claimedPermission.ID != permission.ID || claimedTask.ID != task.ID ||
-		claimedAssignment != assignment || claimedStart.ID != start.ID || claimedSession != sessionID {
-		cause := errors.Join(errors.New("Task Resume authority changed after acquiring dispatch claim"), err)
-		observation, persistErr := recordClaimedFailure(cause)
-		return receipt, intent, observation, provider.ResumeResult{}, persistErr
-	}
-	if err := claimedPermission.ValidateFor(claimedJob, claimedPermission.OperationID, claimedPermission.RequestSHA256, c.now()); err != nil {
-		observation, persistErr := recordClaimedFailure(err)
-		return receipt, intent, observation, provider.ResumeResult{}, persistErr
-	}
-	for _, stopIntent := range claimedJob.ProviderStopIntents {
-		if stopIntent.RoleExecutionID == execution.ID && stopIntent.SessionID == sessionID {
-			cause := errors.New("Task Provider Resume is blocked by a Stop intent saved after claim acquisition")
-			observation, persistErr := recordClaimedFailure(cause)
-			return receipt, intent, observation, provider.ResumeResult{}, persistErr
-		}
-	}
-	if err := c.worktreeVerifier.Verify(ctx, claimedJob.ID, claimedTask, claimedAssignment.Snapshot()); err != nil {
-		cause := fmt.Errorf("reverify owned Task Worktree after Resume dispatch claim: %w", err)
-		observation, persistErr := recordClaimedFailure(cause)
-		return receipt, intent, observation, provider.ResumeResult{}, persistErr
-	}
-	latestClaimedJob, err := c.store.GetJob(ctx, jobID)
-	if err != nil {
-		cause := fmt.Errorf("read Job before Task Resume dispatch: %w", err)
-		observation, persistErr := recordClaimedFailure(cause)
-		return receipt, intent, observation, provider.ResumeResult{}, errors.Join(cause, persistErr)
-	}
-	activeClaim, active = domain.ActivePlanningResumeDispatchClaim(latestClaimedJob, intent.OperationID)
-	if !active || activeClaim.ID != claim.ID {
-		return receipt, intent, domain.PlanningResumeObservation{}, provider.ResumeResult{}, provider.ErrResumeUnconfirmed
-	}
-	if err := claimedPermission.ValidateFor(latestClaimedJob, claimedPermission.OperationID, claimedPermission.RequestSHA256, c.now()); err != nil {
-		observation, persistErr := recordClaimedFailure(err)
-		return receipt, intent, observation, provider.ResumeResult{}, persistErr
-	}
-	for _, stopIntent := range latestClaimedJob.ProviderStopIntents {
-		if stopIntent.RoleExecutionID == execution.ID && stopIntent.SessionID == sessionID {
-			cause := errors.New("Task Provider Resume is blocked by a Stop intent saved before dispatch")
-			observation, persistErr := recordClaimedFailure(cause)
-			return receipt, intent, observation, provider.ResumeResult{}, persistErr
-		}
-	}
-
 	result, err := c.runtime.Resume(ctx, request)
 	if err != nil {
-		if evidence, rejected := providerResumePreDispatchEvidence(intent.OperationID, err); rejected {
-			if !createdClaim {
-				latestJob, readErr := c.store.GetJob(ctx, jobID)
-				if readErr != nil {
-					return receipt, intent, domain.PlanningResumeObservation{}, provider.ResumeResult{}, errors.Join(err, readErr)
-				}
-				if previous, found := latestProviderResumeObservation(latestJob, intent.ID); found &&
-					previous.Status == domain.PlanningResumeUnknown && previous.DispatchClaimID == claim.ID {
-					return receipt, intent, previous, provider.ResumeResult{}, errors.Join(provider.ErrResumeUnconfirmed, err)
-				}
-			}
+		if _, rejected := providerResumePreDispatchEvidence(intent.OperationID, err); rejected {
 			observation, persistErr := c.recordResumeObservation(
-				ctx, jobID, intent.ID, domain.PlanningResumeFailed, evidence, provider.ResumeResult{}, principal,
+				ctx, jobID, intent.ID, domain.PlanningResumeUnknown, "", provider.ResumeResult{}, principal,
 			)
 			if persistErr != nil {
-				return receipt, intent, observation, provider.ResumeResult{}, errors.Join(err, persistErr)
+				return receipt, intent, observation, provider.ResumeResult{}, errors.Join(provider.ErrResumeUnconfirmed, err, persistErr)
 			}
-			releaseErr := c.releasePlanningResumeDispatchClaim(
-				ctx, jobID, intent, domain.PlanningResumeDispatchReleasedFailed, principal,
-			)
-			return receipt, intent, observation, provider.ResumeResult{}, errors.Join(err, releaseErr)
+			if observation.Status == domain.PlanningResumeAttached {
+				return receipt, intent, observation, resumeResultFromObservation(observation), nil
+			}
+			if observation.Status == domain.PlanningResumeFailed {
+				return receipt, intent, observation, provider.ResumeResult{}, errors.Join(errors.New("Task Provider Resume previously failed"), err)
+			}
+			return receipt, intent, observation, provider.ResumeResult{}, errors.Join(provider.ErrResumeUnconfirmed, err)
 		}
 		if evidence, definitive := providerResumeDefinitiveFailureEvidence(intent.OperationID, err); definitive {
 			observation, persistErr := c.recordResumeObservation(

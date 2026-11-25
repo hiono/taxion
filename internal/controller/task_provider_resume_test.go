@@ -375,15 +375,15 @@ func TestTaskProviderResumePersistsDefinitiveFailureAndAllowsStop(t *testing.T) 
 	}
 }
 
-func TestTaskProviderResumeDoesNotDispatchFromReplayedActiveClaim(t *testing.T) {
+func TestTaskProviderResumeConcurrentReplayUsesSameOperationIdentity(t *testing.T) {
 	f := newTaskProviderStopFixture(t)
 	prepareTaskResumeTurn(t, &f)
 	enableTaskResumeE5(&f)
 
-	entered := make(chan struct{})
+	entered := make(chan provider.ResumeRequest, 2)
 	continueResume := make(chan struct{})
-	f.runtime.resumeHook = func(ctx context.Context, _ provider.ResumeRequest) error {
-		close(entered)
+	f.runtime.resumeHook = func(ctx context.Context, request provider.ResumeRequest) error {
+		entered <- request
 		select {
 		case <-continueResume:
 			return nil
@@ -393,21 +393,33 @@ func TestTaskProviderResumeDoesNotDispatchFromReplayedActiveClaim(t *testing.T) 
 	}
 	commandID := "cmd_83838383838383838383838383838383"
 	firstResult := make(chan error, 1)
+	secondResult := make(chan error, 1)
 	go func() {
 		_, _, _, err := f.resume(commandID)
 		firstResult <- err
 	}()
-	<-entered
-
-	_, _, _, replayErr := f.resume(commandID)
-	if !errors.Is(replayErr, provider.ErrResumeUnconfirmed) || f.runtime.resumeCalls != 1 {
+	firstRequest := <-entered
+	go func() {
+		_, _, _, err := f.resume(commandID)
+		secondResult <- err
+	}()
+	secondRequest := <-entered
+	if firstRequest.OperationID != secondRequest.OperationID ||
+		firstRequest.SessionID != secondRequest.SessionID ||
+		!firstRequest.RequireIdempotency || !secondRequest.RequireIdempotency {
 		close(continueResume)
-		t.Fatalf("replayed Resume dispatched while another caller owned the claim: calls=%d err=%v",
-			f.runtime.resumeCalls, replayErr)
+		t.Fatalf("concurrent Resume replay changed operation identity or omitted idempotency: first=%#v second=%#v",
+			firstRequest, secondRequest)
 	}
 	close(continueResume)
 	if err := <-firstResult; err != nil {
-		t.Fatalf("claim owner failed to complete Resume: %v", err)
+		t.Fatalf("first Resume caller failed: %v", err)
+	}
+	if err := <-secondResult; err != nil {
+		t.Fatalf("replayed Resume caller failed: %v", err)
+	}
+	if f.runtime.resumeCalls != 2 {
+		t.Fatalf("E4 Resume idempotency was not exercised for both callers: calls=%d", f.runtime.resumeCalls)
 	}
 	job, err := f.database.GetJob(f.ctx, f.jobID)
 	if err != nil {
@@ -416,10 +428,71 @@ func TestTaskProviderResumeDoesNotDispatchFromReplayedActiveClaim(t *testing.T) 
 	if len(job.PlanningResumeObservations) != 1 ||
 		job.PlanningResumeObservations[0].Status != domain.PlanningResumeAttached ||
 		len(job.PlanningResumeDispatchClaims) != 1 || len(job.PlanningResumeDispatchReleases) != 1 {
-		t.Fatalf("Resume race left inconsistent facts: observations=%#v claims=%#v releases=%#v",
+		t.Fatalf("concurrent Resume replay left inconsistent facts: observations=%#v claims=%#v releases=%#v",
 			job.PlanningResumeObservations, job.PlanningResumeDispatchClaims, job.PlanningResumeDispatchReleases)
 	}
 }
+
+func TestTaskProviderResumeRecoversClaimCommittedBeforeProviderDispatch(t *testing.T) {
+	f := newTaskProviderStopFixture(t)
+	prepareTaskResumeTurn(t, &f)
+	enableTaskResumeE5(&f)
+	commandID := "cmd_84848484848484848484848484848484"
+
+	job, err := f.database.GetJob(f.ctx, f.jobID)
+	if err != nil {
+		t.Fatalf("GetJob before Resume intent: %v", err)
+	}
+	evidenceSHA256, err := capabilityEvidenceDigest(
+		f.runtime.capabilities, provider.CapabilitySessionReattach, provider.EvidenceDurable,
+	)
+	if err != nil {
+		t.Fatalf("Session Reattach evidence: %v", err)
+	}
+	_, intent, err := f.database.AddPlanningResumeIntent(
+		f.ctx, job.ID, job.Revision, f.execution.ID, "session_1", commandID,
+		evidenceSHA256, true, f.principal,
+	)
+	if err != nil {
+		t.Fatalf("persist Resume intent before simulated process stop: %v", err)
+	}
+	job, err = f.database.GetJob(f.ctx, f.jobID)
+	if err != nil {
+		t.Fatalf("GetJob before dispatch claim: %v", err)
+	}
+	_, claim, created, err := f.database.AddPlanningResumeDispatchClaim(
+		f.ctx, job.ID, job.Revision, intent.ID, domain.PlanningResumeDispatchClaimCommandID(intent.ID), f.principal,
+	)
+	if err != nil || !created {
+		t.Fatalf("persist Resume dispatch claim before simulated process stop: claim=%#v created=%v err=%v", claim, created, err)
+	}
+
+	restarted, err := NewProviderControllerWithExecutionAndWorktree(
+		f.database, f.runtime, f.controller.execution, f.worktree,
+	)
+	if err != nil {
+		t.Fatalf("recreate ProviderController: %v", err)
+	}
+	restarted.now = f.controller.now
+	f.controller = restarted
+
+	replayedIntent, observation, result, err := f.resume(commandID)
+	if err != nil || replayedIntent.ID != intent.ID || observation.Status != domain.PlanningResumeAttached ||
+		!result.Attached || result.OperationID != intent.OperationID || f.runtime.resumeCalls != 1 {
+		t.Fatalf("unobserved active Resume claim was not recovered with the same operation identity: intent=%#v observation=%#v result=%#v calls=%d err=%v",
+			replayedIntent, observation, result, f.runtime.resumeCalls, err)
+	}
+	job, err = f.database.GetJob(f.ctx, f.jobID)
+	if err != nil {
+		t.Fatalf("GetJob after recovered Resume: %v", err)
+	}
+	if len(job.PlanningResumeDispatchClaims) != 1 || len(job.PlanningResumeDispatchReleases) != 1 ||
+		len(job.PlanningResumeObservations) != 1 || job.PlanningResumeObservations[0].DispatchClaimID != claim.ID {
+		t.Fatalf("recovered Resume facts do not share the original claim: claims=%#v releases=%#v observations=%#v",
+			job.PlanningResumeDispatchClaims, job.PlanningResumeDispatchReleases, job.PlanningResumeObservations)
+	}
+}
+
 
 type failResumeClaimReadStore struct {
 	ProviderExecutionStore
@@ -435,7 +508,7 @@ func (s *failResumeClaimReadStore) AddPlanningResumeDispatchClaim(
 	receipt, claim, created, err := s.ProviderExecutionStore.AddPlanningResumeDispatchClaim(
 		ctx, jobID, expectedRevision, resumeID, commandID, principal,
 	)
-	if err == nil {
+	if err == nil && created {
 		s.armed = true
 		s.claimReads = 0
 	}
@@ -453,39 +526,32 @@ func (s *failResumeClaimReadStore) GetJob(ctx context.Context, jobID string) (do
 	return s.ProviderExecutionStore.GetJob(ctx, jobID)
 }
 
-func TestTaskProviderResumeFinalizesClaimAfterPostClaimReadFailure(t *testing.T) {
-	for _, failAt := range []int{1, 3} {
-		t.Run(fmt.Sprintf("post-claim-read-%d", failAt), func(t *testing.T) {
-			f := newTaskProviderStopFixture(t)
-			prepareTaskResumeTurn(t, &f)
-			enableTaskResumeE5(&f)
-			f.controller.store = &failResumeClaimReadStore{
-				ProviderExecutionStore: f.database,
-				failAt:                 failAt,
-			}
-			commandID := "cmd_e1212121212121212121212121212121"
-			_, observation, _, err := f.resume(commandID)
-			if err == nil || observation.Status != domain.PlanningResumeFailed || f.runtime.resumeCalls != 0 {
-				t.Fatalf("post-claim read failure was not finalized before Provider dispatch: observation=%#v calls=%d err=%v",
-					observation, f.runtime.resumeCalls, err)
-			}
-			job, readErr := f.database.GetJob(f.ctx, f.jobID)
-			if readErr != nil {
-				t.Fatalf("GetJob after failed Resume claim: %v", readErr)
-			}
-			if len(job.PlanningResumeDispatchClaims) != 1 || len(job.PlanningResumeDispatchReleases) != 1 ||
-				len(job.PlanningResumeObservations) == 0 {
-				t.Fatalf("Resume claim was not finalized and released: claims=%#v releases=%#v observations=%#v",
-					job.PlanningResumeDispatchClaims, job.PlanningResumeDispatchReleases, job.PlanningResumeObservations)
-			}
-			claim := job.PlanningResumeDispatchClaims[0]
-			latest, found := latestProviderResumeObservation(job, claim.ResumeID)
-			if !found || latest.Status != domain.PlanningResumeFailed || latest.DispatchClaimID != claim.ID ||
-				job.PlanningResumeDispatchReleases[0].ClaimID != claim.ID ||
-				job.PlanningResumeDispatchReleases[0].Outcome != domain.PlanningResumeDispatchReleasedFailed {
-				t.Fatalf("Resume failure facts do not match the acquired claim: latest=%#v claim=%#v release=%#v",
-					latest, claim, job.PlanningResumeDispatchReleases[0])
-			}
-		})
+func TestTaskProviderResumeRecoversAfterObservationReadFailure(t *testing.T) {
+	f := newTaskProviderStopFixture(t)
+	prepareTaskResumeTurn(t, &f)
+	enableTaskResumeE5(&f)
+	f.controller.store = &failResumeClaimReadStore{
+		ProviderExecutionStore: f.database,
+		failAt:                 1,
+	}
+	commandID := "cmd_e1212121212121212121212121212121"
+	_, observation, _, err := f.resume(commandID)
+	if err == nil || observation.Status != domain.PlanningResumeUnknown || f.runtime.resumeCalls != 1 {
+		t.Fatalf("observation read failure did not preserve recoverable UNKNOWN: observation=%#v calls=%d err=%v",
+			observation, f.runtime.resumeCalls, err)
+	}
+	job, readErr := f.database.GetJob(f.ctx, f.jobID)
+	if readErr != nil {
+		t.Fatalf("GetJob after Resume observation read failure: %v", readErr)
+	}
+	if len(job.PlanningResumeDispatchClaims) != 1 || len(job.PlanningResumeDispatchReleases) != 0 ||
+		len(job.PlanningResumeObservations) != 1 || job.PlanningResumeObservations[0].Status != domain.PlanningResumeUnknown {
+		t.Fatalf("Resume claim was not retained with UNKNOWN: claims=%#v releases=%#v observations=%#v",
+			job.PlanningResumeDispatchClaims, job.PlanningResumeDispatchReleases, job.PlanningResumeObservations)
+	}
+	_, attached, result, err := f.resume(commandID)
+	if err != nil || attached.Status != domain.PlanningResumeAttached || !result.Attached || f.runtime.resumeCalls != 2 {
+		t.Fatalf("same Resume identity did not recover after observation read failure: observation=%#v result=%#v calls=%d err=%v",
+			attached, result, f.runtime.resumeCalls, err)
 	}
 }

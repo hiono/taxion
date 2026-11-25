@@ -1900,73 +1900,88 @@ func (c *ProviderController) recordResumeObservation(
 	// reconciliation evidence solely because the request context was canceled.
 	persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 	defer cancel()
-	job, err := c.store.GetJob(persistCtx, jobID)
-	if err != nil {
-		return domain.PlanningResumeObservation{}, err
-	}
-	previous, found := latestProviderResumeObservation(job, resumeID)
-	if found {
-		if previous.Status == domain.PlanningResumeUnknown {
-			if status == domain.PlanningResumeUnknown {
+
+	var lastConflict error
+	for attempt := 0; attempt < 5; attempt++ {
+		job, err := c.store.GetJob(persistCtx, jobID)
+		if err != nil {
+			return domain.PlanningResumeObservation{}, err
+		}
+		previous, found := latestProviderResumeObservation(job, resumeID)
+		if found {
+			if previous.Status == domain.PlanningResumeUnknown {
+				if status == domain.PlanningResumeUnknown {
+					return previous, nil
+				}
+			} else if previous.Status == domain.PlanningResumeNotDispatched {
+				if status == domain.PlanningResumeNotDispatched {
+					return previous, nil
+				}
+			} else if status == domain.PlanningResumeUnknown ||
+				(previous.Status == status && previous.EvidenceSHA256 == evidenceSHA256) {
+				// A concurrent retry may have persisted the terminal outcome first.
+				// A later ambiguous/pre-dispatch response cannot supersede that fact.
 				return previous, nil
+			} else {
+				return domain.PlanningResumeObservation{}, errors.New("Provider Resume already has a terminal observation")
 			}
-		} else if previous.Status == domain.PlanningResumeNotDispatched {
-			if status == domain.PlanningResumeNotDispatched {
-				return previous, nil
+		}
+		reconcilesUnknown := found && previous.Status == domain.PlanningResumeUnknown && status != domain.PlanningResumeUnknown
+		commandID := providerResumeObservationCommandID(resumeID, status, evidenceSHA256, reconcilesUnknown)
+		var resume domain.PlanningResumeIntent
+		foundResume := false
+		for _, candidate := range job.PlanningResumeIntents {
+			if candidate.ID == resumeID {
+				resume, foundResume = candidate, true
+				break
 			}
-			// A durable NOT_DISPATCHED fact proves this OperationID never reached
-			// the Provider, so a later attempt may append its own result.
-		} else if previous.Status == status && previous.EvidenceSHA256 == evidenceSHA256 {
-			return previous, nil
+		}
+		if !foundResume {
+			return domain.PlanningResumeObservation{}, errors.New("PlanningResumeIntent was not found")
+		}
+		var execution domain.RoleExecution
+		foundExecution := false
+		for _, candidate := range job.RoleExecutions {
+			if candidate.ID == resume.RoleExecutionID {
+				execution, foundExecution = candidate, true
+				break
+			}
+		}
+		if !foundExecution {
+			return domain.PlanningResumeObservation{}, errors.New("Provider Resume RoleExecution was not found")
+		}
+
+		var observation domain.PlanningResumeObservation
+		if execution.Role == domain.RoleCoder {
+			providerResponse := domain.ProviderResumeResponse{}
+			if status == domain.PlanningResumeAttached {
+				providerResponse = domain.ProviderResumeResponse{
+					OperationID: response.OperationID, SessionID: response.SessionID,
+					Attached: response.Attached, EvidenceSHA256: response.EvidenceSHA256,
+				}
+			}
+			_, observation, err = c.store.AddTaskProviderResumeObservation(
+				persistCtx, job.ID, job.Revision, resumeID, commandID, status, evidenceSHA256,
+				providerResponse, reconcilesUnknown,
+			)
+		} else if execution.Role == domain.RolePlanner {
+			_, observation, err = c.store.AddPlanningResumeObservation(
+				persistCtx, job.ID, job.Revision, resumeID, commandID, status, evidenceSHA256, reconcilesUnknown, principal,
+			)
 		} else {
-			return domain.PlanningResumeObservation{}, errors.New("Provider Resume already has a terminal observation")
+			return domain.PlanningResumeObservation{}, errors.New("Provider Resume observation role is unsupported")
 		}
-	}
-	reconcilesUnknown := found && previous.Status == domain.PlanningResumeUnknown && status != domain.PlanningResumeUnknown
-	commandID := providerResumeObservationCommandID(resumeID, status, evidenceSHA256, reconcilesUnknown)
-	var resume domain.PlanningResumeIntent
-	foundResume := false
-	for _, candidate := range job.PlanningResumeIntents {
-		if candidate.ID == resumeID {
-			resume, foundResume = candidate, true
-			break
+		if err == nil {
+			return observation, nil
 		}
-	}
-	if !foundResume {
-		return domain.PlanningResumeObservation{}, errors.New("PlanningResumeIntent was not found")
-	}
-	var execution domain.RoleExecution
-	foundExecution := false
-	for _, candidate := range job.RoleExecutions {
-		if candidate.ID == resume.RoleExecutionID {
-			execution, foundExecution = candidate, true
-			break
+		if !errors.Is(err, store.ErrIdempotencyConflict) {
+			return domain.PlanningResumeObservation{}, err
 		}
+		lastConflict = err
 	}
-	if !foundExecution {
-		return domain.PlanningResumeObservation{}, errors.New("Provider Resume RoleExecution was not found")
-	}
-	if execution.Role == domain.RoleCoder {
-		providerResponse := domain.ProviderResumeResponse{}
-		if status == domain.PlanningResumeAttached {
-			providerResponse = domain.ProviderResumeResponse{
-				OperationID: response.OperationID, SessionID: response.SessionID,
-				Attached: response.Attached, EvidenceSHA256: response.EvidenceSHA256,
-			}
-		}
-		_, observation, err := c.store.AddTaskProviderResumeObservation(
-			persistCtx, job.ID, job.Revision, resumeID, commandID, status, evidenceSHA256,
-			providerResponse, reconcilesUnknown,
-		)
-		return observation, err
-	}
-	if execution.Role != domain.RolePlanner {
-		return domain.PlanningResumeObservation{}, errors.New("Provider Resume observation role is unsupported")
-	}
-	_, observation, err := c.store.AddPlanningResumeObservation(
-		persistCtx, job.ID, job.Revision, resumeID, commandID, status, evidenceSHA256, reconcilesUnknown, principal,
+	return domain.PlanningResumeObservation{}, fmt.Errorf(
+		"retry Provider Resume observation after concurrent Job revisions: %w", lastConflict,
 	)
-	return observation, err
 }
 
 func latestProviderResumeObservation(job domain.Job, resumeID string) (domain.PlanningResumeObservation, bool) {
