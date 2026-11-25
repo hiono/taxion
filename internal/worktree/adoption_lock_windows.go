@@ -64,6 +64,42 @@ func openWorktreeIndexLockFile(path string) (*os.File, error) {
 	return file, nil
 }
 
+
+func openRegularWorktreeFile(root *os.Root, rootPath, relative string) (*os.File, os.FileInfo, error) {
+	_ = rootPath
+	if root == nil || relative == "" || filepath.IsAbs(relative) || filepath.Clean(relative) != relative {
+		return nil, nil, errors.New("Worktree file path must be relative to its root")
+	}
+	initialInfo, err := root.Lstat(relative)
+	if err != nil {
+		return nil, nil, err
+	}
+	if !initialInfo.Mode().IsRegular() {
+		return nil, nil, errors.New("Worktree file is not a regular file")
+	}
+	file, err := root.Open(relative)
+	if err != nil {
+		return nil, nil, err
+	}
+	info, err := file.Stat()
+	if err != nil || !info.Mode().IsRegular() {
+		_ = file.Close()
+		if err != nil {
+			return nil, nil, err
+		}
+		return nil, nil, errors.New("Worktree file is not a regular file")
+	}
+	pathInfo, err := root.Lstat(relative)
+	if err != nil || !pathInfo.Mode().IsRegular() || !os.SameFile(info, pathInfo) {
+		_ = file.Close()
+		if err != nil {
+			return nil, nil, err
+		}
+		return nil, nil, errors.New("Worktree file changed while it was being opened")
+	}
+	return file, info, nil
+}
+
 func (l *adoptionFileLock) release() {
 	if l == nil || l.file == nil {
 		return

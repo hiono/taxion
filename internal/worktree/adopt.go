@@ -560,7 +560,7 @@ func initialWorktreeStateSHA256(
 		if relativePath == "" || filepath.IsAbs(relativePath) || filepath.Clean(relativePath) != relativePath {
 			return "", errors.New("untracked Worktree path is not a canonical relative path")
 		}
-		file, info, err := openRegularWorktreeFile(worktreeRoot, relativePath)
+		file, info, err := openRegularWorktreeFile(worktreeRoot, path, relativePath)
 		if err != nil {
 			return "", fmt.Errorf("open untracked Worktree file within its root: %w", err)
 		}
@@ -584,40 +584,6 @@ func initialWorktreeStateSHA256(
 		}
 	}
 	return hex.EncodeToString(hash.Sum(nil)), nil
-}
-
-func openRegularWorktreeFile(root *os.Root, relative string) (*os.File, os.FileInfo, error) {
-	if root == nil || relative == "" || filepath.IsAbs(relative) || filepath.Clean(relative) != relative {
-		return nil, nil, errors.New("Worktree file path must be relative to its root")
-	}
-	initialInfo, err := root.Lstat(relative)
-	if err != nil {
-		return nil, nil, err
-	}
-	if !initialInfo.Mode().IsRegular() {
-		return nil, nil, errors.New("Worktree file is not a regular file")
-	}
-	file, err := root.Open(relative)
-	if err != nil {
-		return nil, nil, err
-	}
-	info, err := file.Stat()
-	if err != nil || !info.Mode().IsRegular() {
-		_ = file.Close()
-		if err != nil {
-			return nil, nil, err
-		}
-		return nil, nil, errors.New("Worktree file is not a regular file")
-	}
-	pathInfo, err := root.Lstat(relative)
-	if err != nil || !pathInfo.Mode().IsRegular() || !os.SameFile(info, pathInfo) {
-		_ = file.Close()
-		if err != nil {
-			return nil, nil, err
-		}
-		return nil, nil, errors.New("Worktree file changed while it was being opened")
-	}
-	return file, info, nil
 }
 
 type contextReader struct {
@@ -691,7 +657,7 @@ func hashTrackedWorktreeFiles(ctx context.Context, path string, root *os.Root, h
 			if !info.Mode().IsRegular() {
 				return errors.New("tracked Worktree file is not a regular file")
 			}
-			file, openedInfo, err := openRegularWorktreeFile(root, relativePath)
+			file, openedInfo, err := openRegularWorktreeFile(root, path, relativePath)
 			if err != nil {
 				return fmt.Errorf("open tracked Worktree file %q within its root: %w", relative, err)
 			}
