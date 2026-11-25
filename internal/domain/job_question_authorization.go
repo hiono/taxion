@@ -144,7 +144,7 @@ func NewJobQuestionAuthorization(job Job, request JobQuestionAuthorizationReques
 		QuestionMessageID: question.ID, PlannerRoleExecutionID: planner.ID,
 		ProviderSessionID: request.ProviderSessionID, RepositoryID: request.RepositoryID,
 		PlanningRepositoryID: request.PlanningRepositoryID,
-		ProviderID: request.ProviderID, AccountID: request.AccountID,
+		ProviderID:           request.ProviderID, AccountID: request.AccountID,
 		ConfigurationSHA256: request.ConfigurationSHA256, ReadOnlyBoundary: request.ReadOnlyBoundary,
 		Budget: request.Budget, IssuedAt: now, Deadline: request.Deadline.UTC().Round(0),
 		CreatedAt: now, CreatedRevision: job.Revision + 1,
