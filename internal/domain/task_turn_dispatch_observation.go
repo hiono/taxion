@@ -60,6 +60,10 @@ func (o TaskTurnDispatchObservation) Validate(job Job) error {
 		if (started && start.ID != o.ID) || o.EvidenceSHA256 != "" {
 			return errors.New("Task Turn dispatch start must be the first claim observation and contain no failure evidence")
 		}
+		if resumeStatus, found := LatestPlanningResumeStatus(job, claim.RoleExecutionID); found &&
+			resumeStatus != PlanningResumeAttached {
+			return errors.New("Task Turn dispatch start requires the latest Resume to be ATTACHED")
+		}
 	case TaskTurnDispatchObservationPreDispatchFailure:
 		if started || !validSHA256(o.EvidenceSHA256) {
 			return errors.New("pre-dispatch failure requires evidence and must precede dispatch start")

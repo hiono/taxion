@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/hiono/taxion/internal/auth"
 	"github.com/hiono/taxion/internal/domain"
@@ -30,13 +31,6 @@ func (c *ProviderController) ResumeTaskExecution(
 	if execution.Role != domain.RoleCoder || permission.Role != domain.RoleCoder {
 		return store.CommandReceipt{}, domain.PlanningResumeIntent{}, domain.PlanningResumeObservation{}, provider.ResumeResult{}, errors.New("Task Provider Resume requires a Coder execution")
 	}
-	if err := permission.ValidateFor(job, permission.OperationID, permission.RequestSHA256, c.now()); err != nil {
-		return store.CommandReceipt{}, domain.PlanningResumeIntent{}, domain.PlanningResumeObservation{}, provider.ResumeResult{}, err
-	}
-	if err := c.worktreeVerifier.Verify(ctx, job.ID, task, assignment.Snapshot()); err != nil {
-		return store.CommandReceipt{}, domain.PlanningResumeIntent{}, domain.PlanningResumeObservation{}, provider.ResumeResult{}, fmt.Errorf("verify owned Task Worktree before Resume: %w", err)
-	}
-
 	var existing *domain.PlanningResumeIntent
 	for i := range job.PlanningResumeIntents {
 		candidate := &job.PlanningResumeIntents[i]
@@ -68,6 +62,16 @@ func (c *ProviderController) ResumeTaskExecution(
 			releaseErr := c.releasePlanningResumeDispatchClaim(ctx, job.ID, intent, outcome, principal)
 			return receipt, intent, previous, resumeResultFromObservation(previous), errors.Join(resultErr, releaseErr)
 		}
+	}
+
+	if err := permission.ValidateFor(job, permission.OperationID, permission.RequestSHA256, c.now()); err != nil {
+		return store.CommandReceipt{}, domain.PlanningResumeIntent{}, domain.PlanningResumeObservation{}, provider.ResumeResult{}, err
+	}
+	if c.worktreeVerifier == nil {
+		return store.CommandReceipt{}, domain.PlanningResumeIntent{}, domain.PlanningResumeObservation{}, provider.ResumeResult{}, errors.New("Task Provider Resume requires a trusted Worktree verifier")
+	}
+	if err := c.worktreeVerifier.Verify(ctx, job.ID, task, assignment.Snapshot()); err != nil {
+		return store.CommandReceipt{}, domain.PlanningResumeIntent{}, domain.PlanningResumeObservation{}, provider.ResumeResult{}, fmt.Errorf("verify owned Task Worktree before Resume: %w", err)
 	}
 
 	capabilities, err := c.runtime.Capabilities(ctx)
@@ -174,7 +178,7 @@ func (c *ProviderController) ResumeTaskExecution(
 		return receipt, intent, domain.PlanningResumeObservation{}, provider.ResumeResult{}, err
 	}
 	claimCommandID := domain.PlanningResumeDispatchClaimCommandID(intent.ID)
-	_, claim, _, err := c.store.AddPlanningResumeDispatchClaim(
+	_, claim, createdClaim, err := c.store.AddPlanningResumeDispatchClaim(
 		ctx, latest.ID, latest.Revision, intent.ID, claimCommandID, principal,
 	)
 	if err != nil {
@@ -191,6 +195,17 @@ func (c *ProviderController) ResumeTaskExecution(
 	_, claimedExecution, claimedPermission, claimedTask, claimedAssignment, claimedStart, claimedSession, err :=
 		c.taskProviderExecutionTarget(ctx, jobID, roleExecutionID, permissionID, permissionRequest, principal)
 	recordClaimedFailure := func(cause error) (domain.PlanningResumeObservation, error) {
+		if !createdClaim {
+			return domain.PlanningResumeObservation{}, errors.Join(provider.ErrResumeUnconfirmed, cause)
+		}
+		latestJob, readErr := c.store.GetJob(ctx, jobID)
+		if readErr != nil {
+			return domain.PlanningResumeObservation{}, errors.Join(cause, readErr)
+		}
+		if previous, found := latestProviderResumeObservation(latestJob, intent.ID); found &&
+			previous.Status == domain.PlanningResumeUnknown {
+			return previous, errors.Join(provider.ErrResumeUnconfirmed, cause)
+		}
 		evidence := providerResumeNotDispatchedEvidence(intent.ID, cause)
 		observation, persistErr := c.recordResumeObservation(
 			ctx, jobID, intent.ID, domain.PlanningResumeFailed, evidence, provider.ResumeResult{}, principal,
@@ -309,6 +324,8 @@ func (c *ProviderController) releasePlanningResumeDispatchClaim(
 	if !active || claim.ResumeID != intent.ID {
 		return nil
 	}
-	_, _, err = c.store.ReleasePlanningResumeDispatchClaim(ctx, jobID, claim.ID, principal, outcome)
+	releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	_, _, err = c.store.ReleasePlanningResumeDispatchClaim(releaseCtx, jobID, claim.ID, principal, outcome)
 	return err
 }

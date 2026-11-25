@@ -219,6 +219,82 @@ func TestPlanningResumeUnknownRequiresSameOperationReconciliation(t *testing.T) 
 		t.Fatalf("turn number after resume = %d, want 2", nextTurn.TurnNumber)
 	}
 }
+func TestPlanningResumeNotDispatchedAllowsNewIntentWithRefreshedEvidence(t *testing.T) {
+	job, principal, executionID := planningLifecycleJob(t)
+	now := job.UpdatedAt.Add(time.Second)
+	turn, err := NewPlanningTurnIntent(job, executionID, principal, "session_1",
+		"cmd_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", strings.Repeat("a", 64), 100, now)
+	if err != nil {
+		t.Fatalf("turn: %v", err)
+	}
+	job.PlanningTurnIntents = append(job.PlanningTurnIntents, turn)
+	job.Revision++
+	job.UpdatedAt = turn.CreatedAt
+	first, err := NewPlanningResumeIntent(job, executionID, principal, "session_1",
+		"cmd_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", strings.Repeat("b", 64), true, now.Add(time.Second))
+	if err != nil {
+		t.Fatalf("first Resume intent: %v", err)
+	}
+	job.PlanningResumeIntents = append(job.PlanningResumeIntents, first)
+	job.Revision++
+	job.UpdatedAt = first.CreatedAt
+	notDispatched, err := NewPlanningResumeObservation(job, first.ID, principal,
+		"cmd_cccccccccccccccccccccccccccccccc", PlanningResumeNotDispatched, strings.Repeat("c", 64), false, now.Add(2*time.Second))
+	if err != nil {
+		t.Fatalf("NOT_DISPATCHED observation: %v", err)
+	}
+	job.PlanningResumeObservations = append(job.PlanningResumeObservations, notDispatched)
+	job.Revision++
+	job.UpdatedAt = notDispatched.CreatedAt
+	second, err := NewPlanningResumeIntent(job, executionID, principal, "session_1",
+		"cmd_dddddddddddddddddddddddddddddddd", strings.Repeat("d", 64), true, now.Add(3*time.Second))
+	if err != nil {
+		t.Fatalf("new Resume intent with refreshed E5 evidence: %v", err)
+	}
+	if second.CapabilityEvidenceSHA256 != strings.Repeat("d", 64) || second.ID == first.ID {
+		t.Fatalf("new Resume intent did not bind refreshed capability evidence: %#v", second)
+	}
+	job.PlanningResumeIntents = append(job.PlanningResumeIntents, second)
+	job.Revision++
+	job.UpdatedAt = second.CreatedAt
+	if err := job.Validate(); err != nil {
+		t.Fatalf("Job.Validate after NOT_DISPATCHED renewal: %v", err)
+	}
+}
+
+func TestPlanningResumeDispatchClaimRejectsTerminalIntent(t *testing.T) {
+	job, principal, executionID := planningLifecycleJob(t)
+	now := job.UpdatedAt.Add(time.Second)
+	turn, err := NewPlanningTurnIntent(job, executionID, principal, "session_1",
+		"cmd_11111111111111111111111111111111", strings.Repeat("1", 64), 100, now)
+	if err != nil {
+		t.Fatalf("turn: %v", err)
+	}
+	job.PlanningTurnIntents = append(job.PlanningTurnIntents, turn)
+	job.Revision++
+	job.UpdatedAt = turn.CreatedAt
+	resume, err := NewPlanningResumeIntent(job, executionID, principal, "session_1",
+		"cmd_22222222222222222222222222222222", strings.Repeat("2", 64), true, now.Add(time.Second))
+	if err != nil {
+		t.Fatalf("Resume intent: %v", err)
+	}
+	job.PlanningResumeIntents = append(job.PlanningResumeIntents, resume)
+	job.Revision++
+	job.UpdatedAt = resume.CreatedAt
+	attached, err := NewPlanningResumeObservation(job, resume.ID, principal,
+		"cmd_33333333333333333333333333333333", PlanningResumeAttached, strings.Repeat("3", 64), false, now.Add(2*time.Second))
+	if err != nil {
+		t.Fatalf("ATTACHED observation: %v", err)
+	}
+	job.PlanningResumeObservations = append(job.PlanningResumeObservations, attached)
+	job.Revision++
+	job.UpdatedAt = attached.CreatedAt
+	if _, err := NewPlanningResumeDispatchClaim(job, resume.ID, principal,
+		"cmd_44444444444444444444444444444444", now.Add(3*time.Second)); err == nil {
+		t.Fatal("terminal ATTACHED Resume intent acquired a new dispatch claim")
+	}
+}
+
 func TestPlanningResumeFactsRejectNonAppendOrderedHistory(t *testing.T) {
 	job, principal, executionID := planningLifecycleJob(t)
 	now := job.UpdatedAt.Add(time.Second)

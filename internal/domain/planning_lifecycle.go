@@ -690,6 +690,13 @@ func NewPlanningResumeIntent(job Job, roleExecutionID, principalID, providerSess
 	if _, active := ActivePlanningResumeDispatchClaimForSession(job, execution.ID, providerSessionID); active {
 		return PlanningResumeIntent{}, &PlanningBoundaryError{Boundary: PlanningBoundaryResume, ReasonCode: "resume_dispatch_in_progress", Cause: errors.New("Provider Resume dispatch is already in progress for this Session")}
 	}
+	for _, turn := range job.TaskTurnIntents {
+		if turn.RoleExecutionID == execution.ID && turn.ProviderSessionID == providerSessionID {
+			if _, active := ActiveTaskTurnDispatchClaim(job, turn.OperationID); active {
+				return PlanningResumeIntent{}, &PlanningBoundaryError{Boundary: PlanningBoundaryResume, ReasonCode: "task_turn_dispatch_in_progress", Cause: errors.New("Provider Resume is blocked while a Task Turn dispatch is active for this Session")}
+			}
+		}
+	}
 	for _, previous := range job.PlanningResumeIntents {
 		if previous.RoleExecutionID != execution.ID {
 			continue
@@ -707,9 +714,7 @@ func NewPlanningResumeIntent(job Job, roleExecutionID, principalID, providerSess
 		}
 		sameAuthority := previous.ExecutionPermissionID == executionPermissionID &&
 			previous.PlanningAuthorizationID == planningAuthorizationID
-		if (observations == 0 && sameAuthority) ||
-			lastStatus == PlanningResumeUnknown ||
-			(lastStatus == PlanningResumeNotDispatched && sameAuthority) {
+		if (observations == 0 && sameAuthority) || lastStatus == PlanningResumeUnknown {
 			return PlanningResumeIntent{}, &PlanningBoundaryError{Boundary: PlanningBoundaryResume, ReasonCode: "previous_resume_unknown", Cause: errors.New("previous Provider resume is unresolved under the same authority; reconcile or renew its authority before another resume")}
 		}
 	}

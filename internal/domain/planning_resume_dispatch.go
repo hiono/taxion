@@ -192,6 +192,19 @@ func (c PlanningResumeDispatchClaim) Validate(job Job) error {
 		c.CreatedAt.Before(resume.CreatedAt) {
 		return errors.New("PlanningResumeDispatchClaim does not match its Resume intent")
 	}
+	var latestResumeObservation *PlanningResumeObservation
+	for i := range job.PlanningResumeObservations {
+		observation := &job.PlanningResumeObservations[i]
+		if observation.ResumeID == resume.ID &&
+			(latestResumeObservation == nil || observation.CreatedRevision > latestResumeObservation.CreatedRevision) {
+			latestResumeObservation = observation
+		}
+	}
+	if latestResumeObservation != nil &&
+		(latestResumeObservation.Status == PlanningResumeAttached || latestResumeObservation.Status == PlanningResumeFailed) &&
+		latestResumeObservation.CreatedRevision < c.CreatedRevision {
+		return errors.New("terminal Resume intent cannot acquire another dispatch claim")
+	}
 	var latestBeforeClaim *PlanningResumeIntent
 	for i := range job.PlanningResumeIntents {
 		candidate := &job.PlanningResumeIntents[i]
