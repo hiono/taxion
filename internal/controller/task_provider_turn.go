@@ -452,7 +452,7 @@ func (c *ProviderController) dispatchTaskTurn(
 			}
 			_, _, releaseErr := c.store.ReleaseTaskTurnDispatchClaim(
 				ctx, current.ID, claim.ID, principal,
-				domain.TaskTurnDispatchReleasedDefinitiveFailure, evidenceSHA256,
+				domain.TaskTurnDispatchReleasedDefinitiveFailure, evidenceSHA256, "",
 			)
 			return receipt, turn, domain.TaskTurnObservation{}, provider.TurnResult{}, errors.Join(err, releaseErr)
 		}

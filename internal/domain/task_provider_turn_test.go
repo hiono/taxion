@@ -184,7 +184,7 @@ func TestTaskTurnUnknownReconciliationAndCumulativeBudget(t *testing.T) {
 	job.UpdatedAt = completed.CreatedAt
 	releaseCommand := TaskTurnDispatchReleaseCommandID(claim.ID, TaskTurnDispatchReleasedCompleted)
 	release, err := NewTaskTurnDispatchRelease(job, claim.ID, principalID, releaseCommand,
-		TaskTurnDispatchReleasedCompleted, "", now.Add(4*time.Minute+30*time.Second))
+		TaskTurnDispatchReleasedCompleted, "", "", now.Add(4*time.Minute+30*time.Second))
 	if err != nil {
 		t.Fatalf("release completed Task Turn dispatch claim: %v", err)
 	}
@@ -296,7 +296,7 @@ func TestTaskTurnMustFollowPreviousTerminalObservationTime(t *testing.T) {
 	job.UpdatedAt = terminal.CreatedAt
 	releaseCommand := TaskTurnDispatchReleaseCommandID(claim.ID, TaskTurnDispatchReleasedCompleted)
 	release, err := NewTaskTurnDispatchRelease(job, claim.ID, principalID, releaseCommand,
-		TaskTurnDispatchReleasedCompleted, "", now.Add(4*time.Minute))
+		TaskTurnDispatchReleasedCompleted, "", "", now.Add(4*time.Minute))
 	if err != nil {
 		t.Fatalf("release completed dispatch claim: %v", err)
 	}
@@ -387,7 +387,7 @@ func TestTaskTurnDispatchCannotReleaseClaimAfterUnknownObservationAsDefinitiveFa
 	job.UpdatedAt = unknown.CreatedAt
 	commandID := TaskTurnDispatchReleaseCommandID(claim.ID, TaskTurnDispatchReleasedDefinitiveFailure)
 	if _, err := NewTaskTurnDispatchRelease(job, claim.ID, principalID, commandID,
-		TaskTurnDispatchReleasedDefinitiveFailure, "", now.Add(3*time.Minute)); err == nil {
+		TaskTurnDispatchReleasedDefinitiveFailure, "", "", now.Add(3*time.Minute)); err == nil {
 		t.Fatal("UNKNOWN Task Turn claim was released as definitive_failure without reconciliation evidence")
 	}
 }
@@ -423,8 +423,9 @@ func TestTaskTurnDispatchDefinitiveFailureIsScopedToReplacementClaim(t *testing.
 	lookupEvidence := strings.Repeat("a", 64)
 	appendTaskTurnDispatchObservationForTest(t, &job, firstClaim, TaskTurnDispatchObservationLookupNotFound, lookupEvidence, now.Add(3*time.Minute))
 	retryCommand := TaskTurnDispatchReleaseCommandID(firstClaim.ID, TaskTurnDispatchReleasedIdempotentRetry)
+	idempotencyEvidence := strings.Repeat("b", 64)
 	firstRelease, err := NewTaskTurnDispatchRelease(job, firstClaim.ID, principalID, retryCommand,
-		TaskTurnDispatchReleasedIdempotentRetry, lookupEvidence, now.Add(3*time.Minute+30*time.Second))
+		TaskTurnDispatchReleasedIdempotentRetry, idempotencyEvidence, lookupEvidence, now.Add(3*time.Minute+30*time.Second))
 	if err != nil {
 		t.Fatalf("release first claim for idempotent retry: %v", err)
 	}

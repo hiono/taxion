@@ -241,7 +241,7 @@ func TestTaskCoderTurnResumeAndStopFactsPersistAcrossRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, _, err := database.ReleaseTaskTurnDispatchClaim(
-		ctx, jobID, turnClaim.ID, principal, domain.TaskTurnDispatchReleasedCompleted, "",
+		ctx, jobID, turnClaim.ID, principal, domain.TaskTurnDispatchReleasedCompleted, "", "",
 	); err != nil {
 		t.Fatalf("ReleaseTaskTurnDispatchClaim: %v", err)
 	}
