@@ -1377,6 +1377,28 @@ func TestProviderControllerReconcilesTaskCoderStartUnknownBySameOperationID(t *t
 		startErr: &provider.OperationError{Class: provider.FailureAmbiguous, Code: provider.OperationCodeTimeout},
 	}
 	runtime.capabilities = provider.Capabilities{
+		Identity: runtime.identity, TaskWorktree: true,
+		Evidence: []provider.CapabilityEvidence{{
+			Capability: provider.CapabilityTaskWorktree, Identity: runtime.identity,
+			TestID: "task-worktree-test", EvidenceSHA256: strings.Repeat("b", 64),
+			EvidenceLevel: provider.EvidenceLive, VerifiedAt: now,
+		}},
+	}
+	controller, err := NewProviderControllerWithExecutionAndWorktree(database, runtime, executionController, &fakeTaskWorktreeVerifier{})
+	if err != nil {
+		t.Fatalf("NewProviderControllerWithExecution: %v", err)
+	}
+	if observation, _, dispatchErr := controller.DispatchTaskExecution(ctx, jobID, execution.ID, permission.ID, request);
+		!errors.Is(dispatchErr, provider.ErrUnsupportedCapability) || observation.ID != "" || runtime.startCalls != 0 || runtime.lookupCalls != 0 {
+		t.Fatalf("Task Start without safe capabilities was not rejected before dispatch: %#v starts=%d lookups=%d err=%v",
+			observation, runtime.startCalls, runtime.lookupCalls, dispatchErr)
+	}
+	jobWithoutDispatch, err := database.GetJob(ctx, jobID)
+	if err != nil || len(jobWithoutDispatch.ProviderStartObservations) != 0 {
+		t.Fatalf("pre-dispatch capability rejection persisted an UNKNOWN observation: %#v %v",
+			jobWithoutDispatch.ProviderStartObservations, err)
+	}
+	runtime.capabilities = provider.Capabilities{
 		Identity: runtime.identity, StartLookup: true, StartIdempotency: true, TaskWorktree: true,
 		Evidence: []provider.CapabilityEvidence{{
 			Capability: provider.CapabilityStartLookup, Identity: runtime.identity,
@@ -1391,10 +1413,6 @@ func TestProviderControllerReconcilesTaskCoderStartUnknownBySameOperationID(t *t
 			TestID: "task-worktree-test", EvidenceSHA256: strings.Repeat("b", 64),
 			EvidenceLevel: provider.EvidenceLive, VerifiedAt: now,
 		}},
-	}
-	controller, err := NewProviderControllerWithExecutionAndWorktree(database, runtime, executionController, &fakeTaskWorktreeVerifier{})
-	if err != nil {
-		t.Fatalf("NewProviderControllerWithExecution: %v", err)
 	}
 	unknown, _, err := controller.DispatchTaskExecution(ctx, jobID, execution.ID, permission.ID, request)
 	if err == nil || unknown.Status != domain.ProviderStartUnknown || runtime.startCalls != 1 {

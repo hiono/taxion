@@ -389,11 +389,9 @@ func (c *ProviderController) DispatchTaskExecution(
 	canLookup := capabilities.HasEvidenceAtLeast(provider.CapabilityStartLookup, provider.EvidenceSynthetic)
 	canRetry := capabilities.HasEvidenceAtLeast(provider.CapabilityStartIdempotency, provider.EvidenceLive)
 	if !canLookup && !canRetry {
-		observation, persistErr := c.recordTaskStartObservation(ctx, job.ID, intent.ID, domain.ProviderStartUnknown, "", "", "", false)
-		if persistErr != nil {
-			return observation, provider.StartResult{}, errors.Join(provider.ErrUnsupportedCapability, persistErr)
-		}
-		return observation, provider.StartResult{}, provider.ErrUnsupportedCapability
+		// No Provider operation has been dispatched. Keep the durable intent,
+		// but do not misclassify this preflight rejection as an UNKNOWN operation.
+		return domain.ProviderStartObservation{}, provider.StartResult{}, provider.ErrUnsupportedCapability
 	}
 	lookupEvidenceSHA256 := ""
 	if canLookup {

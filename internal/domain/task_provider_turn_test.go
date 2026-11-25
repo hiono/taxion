@@ -557,6 +557,88 @@ func TestPlanningResumeIntentRejectsActiveTaskTurnDispatch(t *testing.T) {
 	}
 }
 
+func TestPlanningResumeIntentRejectsRetryDispatchAfterPriorUnknown(t *testing.T) {
+	job, execution, permission, now := taskTurnFixture(t)
+	turn, err := NewTaskTurnIntent(job, execution.ID, permission.ID, "session_task",
+		"cmd_71717171717171717171717171717171", strings.Repeat("7", 64), 40, now)
+	if err != nil {
+		t.Fatalf("NewTaskTurnIntent: %v", err)
+	}
+	job.TaskTurnIntents = append(job.TaskTurnIntents, turn)
+	job.Revision++
+	job.UpdatedAt = turn.CreatedAt
+	principalID := job.JobApprovals[len(job.JobApprovals)-1].ApproverPrincipalID
+
+	firstClaim, err := NewTaskTurnDispatchClaim(job, turn.ID, principalID,
+		"cmd_72727272727272727272727272727272", now.Add(time.Minute))
+	if err != nil {
+		t.Fatalf("first dispatch claim: %v", err)
+	}
+	job.TaskTurnDispatchClaims = append(job.TaskTurnDispatchClaims, firstClaim)
+	job.Revision++
+	job.UpdatedAt = firstClaim.CreatedAt
+	firstStarted, err := NewTaskTurnDispatchObservation(job, firstClaim.ID, principalID,
+		TaskTurnDispatchObservationCommandID(firstClaim.ID, TaskTurnDispatchObservationStarted, ""),
+		TaskTurnDispatchObservationStarted, "", now.Add(2*time.Minute))
+	if err != nil {
+		t.Fatalf("first dispatch STARTED: %v", err)
+	}
+	job.TaskTurnDispatchObservations = append(job.TaskTurnDispatchObservations, firstStarted)
+	job.Revision++
+	job.UpdatedAt = firstStarted.CreatedAt
+	unknown, err := NewTaskTurnObservationForClaim(job, turn.ID, firstClaim.ID,
+		"cmd_73737373737373737373737373737373", TaskTurnUnknown, 0, "", false, now.Add(3*time.Minute))
+	if err != nil {
+		t.Fatalf("first dispatch UNKNOWN: %v", err)
+	}
+	job.TaskTurnObservations = append(job.TaskTurnObservations, unknown)
+	job.Revision++
+	job.UpdatedAt = unknown.CreatedAt
+	lookupEvidence := strings.Repeat("8", 64)
+	lookup, err := NewTaskTurnDispatchObservation(job, firstClaim.ID, principalID,
+		TaskTurnDispatchObservationCommandID(firstClaim.ID, TaskTurnDispatchObservationLookupNotFound, lookupEvidence),
+		TaskTurnDispatchObservationLookupNotFound, lookupEvidence, now.Add(4*time.Minute))
+	if err != nil {
+		t.Fatalf("first dispatch Lookup NOT_FOUND: %v", err)
+	}
+	job.TaskTurnDispatchObservations = append(job.TaskTurnDispatchObservations, lookup)
+	job.Revision++
+	job.UpdatedAt = lookup.CreatedAt
+	release, err := NewTaskTurnDispatchRelease(job, firstClaim.ID, principalID,
+		"cmd_74747474747474747474747474747474", TaskTurnDispatchReleasedIdempotentRetry,
+		strings.Repeat("9", 64), lookupEvidence, now.Add(5*time.Minute))
+	if err != nil {
+		t.Fatalf("release first claim for idempotent retry: %v", err)
+	}
+	job.TaskTurnDispatchReleases = append(job.TaskTurnDispatchReleases, release)
+	job.Revision++
+	job.UpdatedAt = release.CreatedAt
+
+	retryClaim, err := NewTaskTurnDispatchClaim(job, turn.ID, principalID,
+		"cmd_75757575757575757575757575757575", now.Add(6*time.Minute))
+	if err != nil {
+		t.Fatalf("retry dispatch claim: %v", err)
+	}
+	job.TaskTurnDispatchClaims = append(job.TaskTurnDispatchClaims, retryClaim)
+	job.Revision++
+	job.UpdatedAt = retryClaim.CreatedAt
+	retryStarted, err := NewTaskTurnDispatchObservation(job, retryClaim.ID, principalID,
+		TaskTurnDispatchObservationCommandID(retryClaim.ID, TaskTurnDispatchObservationStarted, ""),
+		TaskTurnDispatchObservationStarted, "", now.Add(7*time.Minute))
+	if err != nil {
+		t.Fatalf("retry dispatch STARTED: %v", err)
+	}
+	job.TaskTurnDispatchObservations = append(job.TaskTurnDispatchObservations, retryStarted)
+	job.Revision++
+	job.UpdatedAt = retryStarted.CreatedAt
+
+	if _, err := NewPlanningResumeIntent(job, execution.ID, principalID, "session_task",
+		"cmd_76767676767676767676767676767676", strings.Repeat("a", 64), true, now.Add(8*time.Minute));
+		err == nil || !strings.Contains(err.Error(), "task_turn_dispatch_in_progress") {
+		t.Fatalf("Resume intent during a retry dispatch = %v, want task_turn_dispatch_in_progress", err)
+	}
+}
+
 func TestPlanningResumeIntentAllowsRecoveryOfUnknownTaskTurn(t *testing.T) {
 	job, execution, permission, now := taskTurnFixture(t)
 	turn, err := NewTaskTurnIntent(job, execution.ID, permission.ID, "session_task",
