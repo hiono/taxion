@@ -25,10 +25,10 @@ func TestCommunicationControllerPersistsCoderPlannerQuestionAndAnswer(t *testing
 	permissionRequest := domain.ExecutionPermissionRequest{
 		JobID: jobID, TaskID: task.ID, CommandID: "cmd_92929292929292929292929292929292",
 		Role: domain.RoleCoder, Effect: "repository.write",
-		Resource: revision.Contract.TargetRepositories[0],
+		Resource:   revision.Contract.TargetRepositories[0],
 		ProviderID: runtime.identity.ProviderID, AccountID: runtime.identity.AccountID,
 		ConfigurationSHA256: revision.Contract.ConfigurationSHA256,
-		ReservedTurns: 1, ReservedTokens: 100, ExpiresAt: now.Add(30 * time.Minute),
+		ReservedTurns:       1, ReservedTokens: 100, ExpiresAt: now.Add(30 * time.Minute),
 	}
 	_, permission, err := executionController.Authorize(context.Background(), permissionRequest)
 	if err != nil {
@@ -89,8 +89,8 @@ func TestCommunicationControllerPersistsCoderPlannerQuestionAndAnswer(t *testing
 		JobID: jobID, RoleExecutionID: coderExecution.ID, ProviderSessionID: coderStart.ProviderSessionID,
 		CommandID: "cmd_44444444444444444444444444444444",
 		Recipient: domain.ActorRef{Kind: domain.ActorPlanner, ID: plannerExecution.ID},
-		Kind: domain.MessageKindQuestion,
-		Body: "この制約の優先順位を確認してください。\\n元のTaskとContextは維持してください。",
+		Kind:      domain.MessageKindQuestion,
+		Body:      "この制約の優先順位を確認してください。\\n元のTaskとContextは維持してください。",
 	})
 	if err != nil {
 		t.Fatalf("SendFromRole Coder QUESTION: %v", err)
@@ -105,7 +105,7 @@ func TestCommunicationControllerPersistsCoderPlannerQuestionAndAnswer(t *testing
 		JobID: jobID, RoleExecutionID: plannerExecution.ID, ProviderSessionID: plannerSession,
 		CommandID: "cmd_55555555555555555555555555555555",
 		Recipient: domain.ActorRef{Kind: domain.ActorCoder, ID: coderExecution.ID},
-		Kind: domain.MessageKindAnswer, ReplyToMessageID: question.Message.ID,
+		Kind:      domain.MessageKindAnswer, ReplyToMessageID: question.Message.ID,
 		Body: "優先順位は安全性、次に完遂性です。",
 	})
 	if err != nil {
