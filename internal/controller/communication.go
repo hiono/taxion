@@ -208,7 +208,7 @@ func (c *CommunicationController) RecordDeliveryObservation(
 
 func (c *CommunicationController) recordDeliveryObservation(
 	ctx context.Context,
-	jobID, messageID, commandID string,
+	jobID, messageID, requestObservationID, commandID string,
 	status domain.DeliveryStatus,
 	evidenceSHA256 string,
 	reconcilesUnknown bool,
