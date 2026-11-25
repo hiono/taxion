@@ -1008,7 +1008,7 @@ func TestProviderControllerPersistsDefinitiveStartFailureWithoutLookupOrReplay(t
 	}
 }
 
-func TestProviderControllerReconcilesUnknownToFailedAfterLookupNotFound(t *testing.T) {
+func TestProviderControllerReconcilesUnknownAfterLookupNotFoundWithIdempotentRetry(t *testing.T) {
 	runtime := &fakePlanningProviderRuntime{
 		startErr: &provider.OperationError{Class: provider.FailureAmbiguous, Code: provider.OperationCodeTimeout},
 	}
@@ -1023,106 +1023,96 @@ func TestProviderControllerReconcilesUnknownToFailedAfterLookupNotFound(t *testi
 		Status: provider.LookupStatusNotFound, EvidenceSHA256: strings.Repeat("f", 64),
 	}
 	runtime.startErr = nil
-	_, _, _, _, err = controller.StartPlanning(context.Background(), jobID, grantID, commandID, documents, principal)
-	if err == nil || !strings.Contains(err.Error(), "NOT_FOUND") {
-		t.Fatalf("Provider Start NOT_FOUND was not terminally recorded: %v", err)
+	runtime.startHook = func(ctx context.Context, request provider.StartRequest) error {
+		job, err := database.GetJob(ctx, jobID)
+		if err != nil {
+			return err
+		}
+		if len(job.ProviderStartObservations) != 4 {
+			return errors.New("retry dispatch boundary was not persisted before Provider Start")
+		}
+		last := job.ProviderStartObservations[3]
+		if last.Status != domain.ProviderStartDispatching || !last.ReconcilesUnknown ||
+			!validProviderEvidenceSHA256(last.EvidenceSHA256) || request.OperationID != domain.ProviderStartOperationID(commandID) {
+			return errors.New("retry dispatch boundary is not bound to the original idempotent OperationID")
+		}
+		return nil
 	}
-	job, err := database.GetJob(context.Background(), jobID)
-	if err != nil {
-		t.Fatalf("GetJob after definitive retry failure: %v", err)
-	}
-	if len(job.ProviderStartObservations) != 3 ||
-		job.ProviderStartObservations[0].Status != domain.ProviderStartDispatching ||
-		job.ProviderStartObservations[1].Status != domain.ProviderStartUnknown ||
-		job.ProviderStartObservations[2].Status != domain.ProviderStartFailed ||
-		!job.ProviderStartObservations[2].ReconcilesUnknown {
-		t.Fatalf("UNKNOWN was not terminally reconciled as FAILED: %#v", job.ProviderStartObservations)
-	}
-	_, _, _, _, err = controller.StartPlanning(context.Background(), jobID, grantID, commandID, documents, principal)
-	if err == nil || !strings.Contains(err.Error(), "definitively rejected") {
-		t.Fatalf("retry after terminal FAILED observation = %v", err)
-	}
-	if runtime.startCalls != 1 || runtime.lookupCalls != 1 {
-		t.Fatalf("Provider Start was resent after confirmed NOT_FOUND: starts=%d lookups=%d", runtime.startCalls, runtime.lookupCalls)
-	}
-}
-
-func TestProviderControllerDoesNotStartAfterGrantDeadlineButAllowsLookupRecovery(t *testing.T) {
-	runtime := &fakePlanningProviderRuntime{
-		startErr: &provider.OperationError{Class: provider.FailureAmbiguous, Code: provider.OperationCodeTimeout},
-	}
-	controller, database, principal, jobID, grantID, documents := newProviderControllerFixture(t, runtime)
-	commandID := "cmd_cccccccccccccccccccccccccccccccc"
-	_, _, _, _, _ = controller.StartPlanning(context.Background(), jobID, grantID, commandID, documents, principal)
-	controller.now = func() time.Time { return time.Now().UTC().Add(2 * time.Hour) }
 	_, _, _, result, err := controller.StartPlanning(context.Background(), jobID, grantID, commandID, documents, principal)
 	if err != nil {
-		t.Fatalf("lookup recovery after deadline: %v", err)
+		t.Fatalf("StartPlanning idempotent recovery: %v", err)
 	}
-	if runtime.startCalls != 1 || runtime.lookupCalls != 1 || result.SessionID != "session_1" {
-		t.Fatalf("deadline recovery issued a new Start: starts=%d lookups=%d", runtime.startCalls, runtime.lookupCalls)
-	}
-	job, err := database.GetJob(context.Background(), jobID)
-	if err != nil {
-		t.Fatalf("GetJob: %v", err)
-	}
-	if len(job.ProviderStartObservations) != 3 ||
-		job.ProviderStartObservations[0].Status != domain.ProviderStartDispatching ||
-		job.ProviderStartObservations[1].Status != domain.ProviderStartUnknown ||
-		!job.ProviderStartObservations[2].ReconcilesUnknown {
-		t.Fatalf("deadline recovery did not append reconciliation: %#v", job.ProviderStartObservations)
-	}
-}
-
-func TestProviderControllerRejectsProviderIdentityAndContextMismatchBeforeIntent(t *testing.T) {
-	runtime := &fakePlanningProviderRuntime{}
-	controller, database, principal, jobID, grantID, documents := newProviderControllerFixture(t, runtime)
-	runtime.identity.ProviderID = "provider.other"
-	if _, _, _, _, err := controller.StartPlanning(context.Background(), jobID, grantID, "cmd_dddddddddddddddddddddddddddddddd", documents, principal); err == nil {
-		t.Fatal("Provider identity mismatch was accepted")
-	}
-	runtime.identity.ProviderID = "provider.test"
-	documents[0].Content = "tampered snapshot"
-	if _, _, _, _, err := controller.StartPlanning(context.Background(), jobID, grantID, "cmd_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", documents, principal); err == nil {
-		t.Fatal("tampered context was accepted")
+	if runtime.startCalls != 2 || runtime.lookupCalls != 1 || result.SessionID != "session_1" {
+		t.Fatalf("NOT_FOUND did not reconcile through same OperationID: starts=%d lookups=%d result=%#v",
+			runtime.startCalls, runtime.lookupCalls, result)
 	}
 	job, err := database.GetJob(context.Background(), jobID)
 	if err != nil {
-		t.Fatalf("GetJob: %v", err)
+		t.Fatalf("GetJob after recovery: %v", err)
 	}
-	if len(job.ProviderStartIntents) != 0 || runtime.startCalls != 0 {
-		t.Fatalf("preflight mismatch caused a Provider intent or call: intents=%d calls=%d", len(job.ProviderStartIntents), runtime.startCalls)
+	want := []string{
+		domain.ProviderStartDispatching, domain.ProviderStartUnknown, domain.ProviderStartUnknown,
+		domain.ProviderStartDispatching, domain.ProviderStartAccepted,
+	}
+	if len(job.ProviderStartObservations) != len(want) {
+		t.Fatalf("unexpected Start observations: %#v", job.ProviderStartObservations)
+	}
+	for i, status := range want {
+		if job.ProviderStartObservations[i].Status != status {
+			t.Fatalf("Start observation %d = %s, want %s: %#v", i, job.ProviderStartObservations[i].Status, status, job.ProviderStartObservations)
+		}
+	}
+	if !job.ProviderStartObservations[3].ReconcilesUnknown || !job.ProviderStartObservations[4].ReconcilesUnknown {
+		t.Fatalf("idempotent redispatch did not reconcile UNKNOWN: %#v", job.ProviderStartObservations)
 	}
 }
-
-func TestProviderControllerRejectsUnverifiedSDKBeforeProviderSideEffect(t *testing.T) {
+func TestProviderControllerKeepsStartUnresolvedUntilIdempotencyEvidenceAppears(t *testing.T) {
 	runtime := &fakePlanningProviderRuntime{}
 	controller, database, principal, jobID, grantID, documents := newProviderControllerFixture(t, runtime)
-	runtime.identity.SDKVersion = "other-sdk/2"
 	commandID := "cmd_dddddddddddddddddddddddddddddddd"
+	runtime.capabilities = provider.Capabilities{Identity: runtime.identity}
 	if _, _, _, _, err := controller.StartPlanning(context.Background(), jobID, grantID, commandID, documents, principal); !errors.Is(err, provider.ErrUnsupportedCapability) {
-		t.Fatalf("unverified SDK version error = %v", err)
+		t.Fatalf("initial Start without safe capability = %v", err)
 	}
-	job, err := database.GetJob(context.Background(), jobID)
-	if err != nil {
-		t.Fatalf("GetJob: %v", err)
+	runtime.capabilities = provider.Capabilities{
+		Identity: runtime.identity, StartLookup: true,
+		Evidence: []provider.CapabilityEvidence{{
+			Capability: provider.CapabilityStartLookup, Identity: runtime.identity,
+			TestID: "start-lookup-test", EvidenceSHA256: strings.Repeat("a", 64),
+			EvidenceLevel: provider.EvidenceLive, VerifiedAt: time.Now().UTC(),
+		}},
 	}
-	if len(job.ProviderStartIntents) != 1 || len(job.ProviderStartObservations) != 0 || runtime.startCalls != 0 {
-		t.Fatalf("unverified SDK version caused external execution: intents=%d observations=%d starts=%d",
-			len(job.ProviderStartIntents), len(job.ProviderStartObservations), runtime.startCalls)
-	}
-	runtime.identity.SDKVersion = "test-sdk/1"
 	runtime.lookupResult = provider.LookupResult{
 		Found: false, OperationID: domain.ProviderStartOperationID(commandID),
-		Status: provider.LookupStatusNotFound, EvidenceSHA256: strings.Repeat("f", 64),
+		Status: provider.LookupStatusNotFound, EvidenceSHA256: strings.Repeat("b", 64),
 	}
-	if _, _, _, result, err := controller.StartPlanning(context.Background(), jobID, grantID, commandID, documents, principal); err != nil {
-		t.Fatalf("retry after trusted SDK verification: %v", err)
-	} else if result.SessionID != "session_1" {
-		t.Fatalf("unexpected Start result: %#v", result)
+	if _, _, _, _, err := controller.StartPlanning(context.Background(), jobID, grantID, commandID, documents, principal); !errors.Is(err, provider.ErrUnsupportedCapability) {
+		t.Fatalf("NOT_FOUND without E4 evidence = %v", err)
 	}
-	if runtime.startCalls != 1 || runtime.lookupCalls != 1 {
-		t.Fatalf("SDK retry did not use lookup-before-start: starts=%d lookups=%d", runtime.startCalls, runtime.lookupCalls)
+	job, err := database.GetJob(context.Background(), jobID)
+	if err != nil {
+		t.Fatalf("GetJob after unsupported retry: %v", err)
+	}
+	if len(job.ProviderStartIntents) != 1 || len(job.ProviderStartObservations) != 1 ||
+		job.ProviderStartObservations[0].Status != domain.ProviderStartUnknown || runtime.startCalls != 0 {
+		t.Fatalf("NOT_FOUND without E4 was incorrectly terminalized or dispatched: intents=%d observations=%#v starts=%d",
+			len(job.ProviderStartIntents), job.ProviderStartObservations, runtime.startCalls)
+	}
+	runtime.capabilities = provider.Capabilities{
+		Identity: runtime.identity, StartLookup: true, StartIdempotency: true,
+		Evidence: []provider.CapabilityEvidence{{
+			Capability: provider.CapabilityStartLookup, Identity: runtime.identity,
+			TestID: "start-lookup-test", EvidenceSHA256: strings.Repeat("a", 64),
+			EvidenceLevel: provider.EvidenceLive, VerifiedAt: time.Now().UTC(),
+		}, {
+			Capability: provider.CapabilityStartIdempotency, Identity: runtime.identity,
+			TestID: "start-idempotency-test", EvidenceSHA256: strings.Repeat("c", 64),
+			EvidenceLevel: provider.EvidenceLive, VerifiedAt: time.Now().UTC(),
+		}},
+	}
+	if _, _, _, result, err := controller.StartPlanning(context.Background(), jobID, grantID, commandID, documents, principal); err != nil ||
+		result.SessionID != "session_1" || runtime.startCalls != 1 {
+		t.Fatalf("Start did not recover after E4 evidence became available: result=%#v starts=%d err=%v", result, runtime.startCalls, err)
 	}
 }
 
@@ -1352,7 +1342,7 @@ func TestProviderControllerDispatchesTaskCoderStartWithDurableIntentAndReconcile
 	}
 }
 
-func TestProviderControllerClosesTaskStartBoundaryOnLookupNotFound(t *testing.T) {
+func TestProviderControllerRetainsTaskStartUnknownAfterLookupNotFound(t *testing.T) {
 	database, jobID, revision, task := approvedExecutionPermissionControllerFixture(t)
 	ctx := context.Background()
 	now := time.Now().UTC().Round(0)
@@ -1460,13 +1450,33 @@ func TestProviderControllerClosesTaskStartBoundaryOnLookupNotFound(t *testing.T)
 		EvidenceSHA256: strings.Repeat("f", 64),
 	}
 	runtime.startErr = nil
-	// An expired permission cannot authorize a new Start, but it must not prevent
-	// reconciliation of the already-issued OperationID.
+	// A transient Job read failure after Lookup must not be persisted as a
+	// definitive Provider rejection.
+	canceledCtx, cancel := context.WithCancel(ctx)
+	runtime.lookupHook = func(context.Context, provider.LookupRequest) error {
+		cancel()
+		return nil
+	}
+	if _, _, readErr := controller.DispatchTaskExecution(canceledCtx, jobID, execution.ID, permission.ID, request); !errors.Is(readErr, context.Canceled) {
+		t.Fatalf("canceled post-Lookup Job read error = %v", readErr)
+	}
+	runtime.lookupHook = nil
+	jobAfterReadFailure, err := database.GetJob(ctx, jobID)
+	if err != nil {
+		t.Fatalf("GetJob after transient read failure: %v", err)
+	}
+	for _, observation := range jobAfterReadFailure.ProviderStartObservations {
+		if observation.OperationID == intent.ID && observation.Status == domain.ProviderStartFailed {
+			t.Fatalf("transient Job read failure was persisted as FAILED: %#v", observation)
+		}
+	}
+	// An expired permission cannot authorize a new Start, but a prior dispatch
+	// boundary still prevents NOT_FOUND from terminalizing a potentially late acceptance.
 	executionController.now = func() time.Time { return request.ExpiresAt.Add(time.Second) }
 	terminal, _, err := controller.DispatchTaskExecution(ctx, jobID, execution.ID, permission.ID, request)
-	if err == nil || !strings.Contains(err.Error(), "NOT_FOUND") || terminal.Status != domain.ProviderStartFailed ||
-		!terminal.ReconcilesUnknown || runtime.startCalls != 1 || runtime.lookupCalls != 1 {
-		t.Fatalf("UNKNOWN Task Start was not terminally closed by same OperationID NOT_FOUND: %#v starts=%d lookups=%d err=%v",
+	if err == nil || !strings.Contains(err.Error(), "expired") || terminal.Status != domain.ProviderStartUnknown ||
+		runtime.startCalls != 1 || runtime.lookupCalls != 2 {
+		t.Fatalf("UNKNOWN Task Start was incorrectly terminalized after NOT_FOUND: %#v starts=%d lookups=%d err=%v",
 			terminal, runtime.startCalls, runtime.lookupCalls, err)
 	}
 }

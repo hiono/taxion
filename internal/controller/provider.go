@@ -412,6 +412,7 @@ func (c *ProviderController) DispatchTaskExecution(
 		return domain.ProviderStartObservation{}, provider.StartResult{}, provider.ErrUnsupportedCapability
 	}
 	lookupEvidenceSHA256 := ""
+	lookupNotFound := false
 	if canLookup {
 		lookupRequest := provider.LookupRequest{OperationID: intent.ID}
 		lookup, lookupErr := c.runtime.Lookup(ctx, lookupRequest)
@@ -431,24 +432,15 @@ func (c *ProviderController) DispatchTaskExecution(
 		}
 		lookupEvidenceSHA256 = lookup.EvidenceSHA256
 		if !lookup.Found && lookup.Status == provider.LookupStatusNotFound {
-			// A confirmed absence permits dispatch only while the original
-			// authority is current and Start idempotency is independently verified.
+			lookupNotFound = true
+			// NOT_FOUND does not prove that an earlier dispatch cannot still be
+			// accepted. Keep the immutable intent unresolved until E4 permits a
+			// same-OperationID retry.
 			if !canRetry {
 				observation, persistErr := c.recordTaskStartObservation(
-					ctx, job.ID, intent.ID, domain.ProviderStartFailed, "", "", lookup.EvidenceSHA256, false,
+					ctx, job.ID, intent.ID, domain.ProviderStartUnknown, "", "", lookup.EvidenceSHA256, false,
 				)
-				return observation, provider.StartResult{}, errors.Join(
-					errors.New("Task Provider Start lookup confirmed NOT_FOUND without verified idempotency"), persistErr,
-				)
-			}
-			if _, permissionErr := c.execution.ValidatePermission(ctx, permissionID, permissionRequest); permissionErr != nil {
-				observation, persistErr := c.recordTaskStartObservation(
-					ctx, job.ID, intent.ID, domain.ProviderStartFailed, "", "", lookup.EvidenceSHA256, false,
-				)
-				return observation, provider.StartResult{}, errors.Join(
-					errors.New("Task Provider Start lookup confirmed NOT_FOUND; expired authority prevents dispatch"),
-					permissionErr, persistErr,
-				)
+				return observation, provider.StartResult{}, errors.Join(provider.ErrUnsupportedCapability, persistErr)
 			}
 		}
 		if lookup.Found {
@@ -481,13 +473,43 @@ func (c *ProviderController) DispatchTaskExecution(
 	if !canRetry {
 		return domain.ProviderStartObservation{}, provider.StartResult{}, provider.ErrUnsupportedCapability
 	}
-	// Revalidate authority after the external lookup.
-	if _, err := c.execution.ValidatePermission(ctx, permissionID, permissionRequest); err != nil {
-		return domain.ProviderStartObservation{}, provider.StartResult{}, err
-	}
+	// Re-read the Job once after the external lookup. A storage failure must
+	// remain retryable and must not be persisted as a Provider rejection.
 	current, err := c.store.GetJob(ctx, jobID)
 	if err != nil {
 		return domain.ProviderStartObservation{}, provider.StartResult{}, err
+	}
+	var currentPermission domain.ExecutionPermission
+	permissionFound := false
+	for _, candidate := range current.ExecutionPermissions {
+		if candidate.ID == permissionID {
+			currentPermission, permissionFound = candidate, true
+			break
+		}
+	}
+	var permissionErr error
+	if !permissionFound {
+		permissionErr = store.ErrNotFound
+	} else {
+		permissionErr = currentPermission.ValidateFor(current, intent.ID, requestSHA256, c.now())
+	}
+	if permissionErr != nil {
+		if hasProviderStartDispatchBoundary(current, intent.ID) {
+			observation, persistErr := c.recordTaskStartObservation(
+				ctx, job.ID, intent.ID, domain.ProviderStartUnknown, "", "", lookupEvidenceSHA256, false,
+			)
+			return observation, provider.StartResult{}, errors.Join(permissionErr, persistErr)
+		}
+		if lookupNotFound {
+			observation, persistErr := c.recordTaskStartObservation(
+				ctx, job.ID, intent.ID, domain.ProviderStartFailed, "", "", lookupEvidenceSHA256, false,
+			)
+			return observation, provider.StartResult{}, errors.Join(
+				errors.New("Task Provider Start lookup confirmed NOT_FOUND; expired authority prevents dispatch"),
+				permissionErr, persistErr,
+			)
+		}
+		return domain.ProviderStartObservation{}, provider.StartResult{}, permissionErr
 	}
 	var currentExecution domain.RoleExecution
 	var currentIntent domain.ProviderStartIntent
@@ -971,7 +993,7 @@ func (c *ProviderController) reconcileStart(
 	if err != nil {
 		return receipt, execution, intent, provider.StartResult{}, err
 	}
-	_, hasPriorDispatchBoundary := latestStartObservation(initialJob, intent.ID)
+	hasPriorDispatchBoundary := hasProviderStartDispatchBoundary(initialJob, intent.ID)
 	capabilities, err := c.runtime.Capabilities(ctx)
 	if err != nil {
 		return receipt, execution, intent, provider.StartResult{}, err
@@ -1008,15 +1030,13 @@ func (c *ProviderController) reconcileStart(
 			}
 			lookupNotFound = true
 			lookupNotFoundEvidenceSHA256 = lookup.EvidenceSHA256
-			if hasPriorDispatchBoundary || !canRetry {
+			if !canRetry {
 				persistErr := c.recordStartObservation(
-					ctx, intent.JobID, intent.ID, domain.ProviderStartFailed, "", "", lookup.EvidenceSHA256, false, principal,
+					ctx, intent.JobID, intent.ID, domain.ProviderStartUnknown, "", "", lookup.EvidenceSHA256, false, principal,
 				)
-				reason := "Provider Start lookup confirmed NOT_FOUND after an earlier dispatch boundary"
-				if !hasPriorDispatchBoundary {
-					reason = "Provider Start lookup confirmed NOT_FOUND without verified idempotency"
-				}
-				return receipt, execution, intent, provider.StartResult{}, errors.Join(errors.New(reason), persistErr)
+				return receipt, execution, intent, provider.StartResult{}, errors.Join(
+					provider.ErrUnsupportedCapability, persistErr,
+				)
 			}
 		}
 		if lookup.Found {
@@ -1065,7 +1085,14 @@ func (c *ProviderController) reconcileStart(
 	if !found {
 		return receipt, execution, intent, provider.StartResult{}, errors.New("PlanningAuthorization was not found during Start recovery")
 	}
+	hasPriorDispatchBoundary = hasProviderStartDispatchBoundary(current, intent.ID)
 	if err := currentGrant.ValidateFor(current, principal.PrincipalID(), c.now()); err != nil {
+		if hasPriorDispatchBoundary {
+			persistErr := c.recordStartObservation(
+				ctx, intent.JobID, intent.ID, domain.ProviderStartUnknown, "", "", lookupNotFoundEvidenceSHA256, false, principal,
+			)
+			return receipt, execution, intent, provider.StartResult{}, errors.Join(err, persistErr)
+		}
 		if lookupNotFound {
 			persistErr := c.recordStartObservation(
 				ctx, intent.JobID, intent.ID, domain.ProviderStartFailed, "", "", lookupNotFoundEvidenceSHA256, false, principal,
@@ -1075,6 +1102,29 @@ func (c *ProviderController) reconcileStart(
 			)
 		}
 		return receipt, execution, intent, provider.StartResult{}, err
+	}
+	previous, hasPreviousObservation := latestStartObservation(current, intent.ID)
+	if hasPreviousObservation && previous.Status == domain.ProviderStartDispatching {
+		if !canRetry {
+			return receipt, execution, intent, provider.StartResult{}, provider.ErrUnsupportedCapability
+		}
+		if err := c.recordStartObservation(
+			ctx, intent.JobID, intent.ID, domain.ProviderStartUnknown, "", "", lookupNotFoundEvidenceSHA256, false, principal,
+		); err != nil {
+			return receipt, execution, intent, provider.StartResult{}, err
+		}
+	}
+	dispatchEvidenceSHA256 := ""
+	if hasPreviousObservation {
+		dispatchEvidenceSHA256 = providerCapabilityEvidenceSHA256(capabilities, provider.CapabilityStartIdempotency)
+		if !validProviderEvidenceSHA256(dispatchEvidenceSHA256) {
+			return receipt, execution, intent, provider.StartResult{}, provider.ErrUnsupportedCapability
+		}
+	}
+	if err := c.recordStartObservation(
+		ctx, intent.JobID, intent.ID, domain.ProviderStartDispatching, "", "", dispatchEvidenceSHA256, false, principal,
+	); err != nil {
+		return receipt, execution, intent, provider.StartResult{}, fmt.Errorf("persist recovered Provider Start dispatch boundary: %w", err)
 	}
 	result, err := c.runtime.Start(ctx, request)
 	if err != nil {
