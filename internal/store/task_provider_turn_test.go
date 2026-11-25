@@ -132,7 +132,7 @@ func TestTaskCoderTurnResumeAndStopFactsPersistAcrossRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, _, _, err = database.AddTaskTurnDispatchObservation(
+	_, _, _, _, err = database.AddTaskTurnDispatchObservation(
 		ctx, jobID, job.Revision, turnClaim.ID,
 		domain.TaskTurnDispatchObservationCommandID(turnClaim.ID, domain.TaskTurnDispatchObservationStarted, ""),
 		domain.TaskTurnDispatchObservationStarted, "", principal,
