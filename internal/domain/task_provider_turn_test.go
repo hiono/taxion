@@ -632,9 +632,7 @@ func TestPlanningResumeIntentRejectsRetryDispatchAfterPriorUnknown(t *testing.T)
 	job.Revision++
 	job.UpdatedAt = retryStarted.CreatedAt
 
-	if _, err := NewPlanningResumeIntent(job, execution.ID, principalID, "session_task",
-		"cmd_76767676767676767676767676767676", strings.Repeat("a", 64), true, now.Add(8*time.Minute));
-		err == nil || !strings.Contains(err.Error(), "task_turn_dispatch_in_progress") {
+	if _, err := NewPlanningResumeIntent(job, execution.ID, principalID, "session_task", "cmd_76767676767676767676767676767676", strings.Repeat("a", 64), true, now.Add(8*time.Minute)); err == nil || !strings.Contains(err.Error(), "task_turn_dispatch_in_progress") {
 		t.Fatalf("Resume intent during a retry dispatch = %v, want task_turn_dispatch_in_progress", err)
 	}
 }

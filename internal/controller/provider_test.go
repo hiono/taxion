@@ -1388,8 +1388,7 @@ func TestProviderControllerReconcilesTaskCoderStartUnknownBySameOperationID(t *t
 	if err != nil {
 		t.Fatalf("NewProviderControllerWithExecution: %v", err)
 	}
-	if observation, _, dispatchErr := controller.DispatchTaskExecution(ctx, jobID, execution.ID, permission.ID, request);
-		!errors.Is(dispatchErr, provider.ErrUnsupportedCapability) || observation.ID != "" || runtime.startCalls != 0 || runtime.lookupCalls != 0 {
+	if observation, _, dispatchErr := controller.DispatchTaskExecution(ctx, jobID, execution.ID, permission.ID, request); !errors.Is(dispatchErr, provider.ErrUnsupportedCapability) || observation.ID != "" || runtime.startCalls != 0 || runtime.lookupCalls != 0 {
 		t.Fatalf("Task Start without safe capabilities was not rejected before dispatch: %#v starts=%d lookups=%d err=%v",
 			observation, runtime.startCalls, runtime.lookupCalls, dispatchErr)
 	}
