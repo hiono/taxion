@@ -48,14 +48,15 @@ func (s *Store) AddDeliveryObservation(
 	reconcilesUnknown bool,
 ) (CommandReceipt, domain.DeliveryObservation, error) {
 	request := struct {
-		MessageID         string                `json:"message_id"`
-		CommandID         string                `json:"command_id"`
-		RequestObservationID string                `json:"request_observation_id,omitempty"`
+		MessageID             string                `json:"message_id"`
+		CommandID             string                `json:"command_id"`
+		RequestObservationID  string                `json:"request_observation_id,omitempty"`
 		Status                domain.DeliveryStatus `json:"status"`
-		EvidenceSHA256    string                `json:"evidence_sha256,omitempty"`
-		ReconcilesUnknown bool                  `json:"reconciles_unknown,omitempty"`
+		EvidenceSHA256        string                `json:"evidence_sha256,omitempty"`
+		ReconcilesUnknown     bool                  `json:"reconciles_unknown,omitempty"`
 	}{
-		MessageID: messageID, RequestObservationID: requestObservationID, CommandID: commandID, Status: status,
+		MessageID: messageID, CommandID: commandID,
+		RequestObservationID: requestObservationID, Status: status,
 		EvidenceSHA256: evidenceSHA256, ReconcilesUnknown: reconcilesUnknown,
 	}
 	return persistPlanningFact(
