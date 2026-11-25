@@ -193,10 +193,13 @@ func (c *ProviderController) ResumeTaskExecution(
 		return receipt, intent, domain.PlanningResumeObservation{}, provider.ResumeResult{}, provider.ErrResumeUnconfirmed
 	}
 	if !createdClaim {
-		// A replay must not dispatch while the original caller owns this claim.
-		// Otherwise the original caller could persist NOT_DISPATCHED after the
-		// replay has already attached the same Provider Session.
-		return receipt, intent, domain.PlanningResumeObservation{}, provider.ResumeResult{}, provider.ErrResumeUnconfirmed
+		// A replay may retry only after the prior attempt durably recorded UNKNOWN.
+		// Before that observation exists, the original claimant may still be
+		// validating pre-dispatch conditions and must retain exclusive ownership.
+		previous, found := latestProviderResumeObservation(claimedJob, intent.ID)
+		if !found || previous.Status != domain.PlanningResumeUnknown {
+			return receipt, intent, domain.PlanningResumeObservation{}, provider.ResumeResult{}, provider.ErrResumeUnconfirmed
+		}
 	}
 	_, claimedExecution, claimedPermission, claimedTask, claimedAssignment, claimedStart, claimedSession, err :=
 		c.taskProviderExecutionTarget(ctx, jobID, roleExecutionID, permissionID, permissionRequest, principal)
