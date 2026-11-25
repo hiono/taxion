@@ -785,9 +785,30 @@ func TestPlanningResumeAfterStopRecordsBoundaryDenial(t *testing.T) {
 	job.Revision++
 	job.UpdatedAt = turnObservation.CreatedAt
 
+	resume, err := NewPlanningResumeIntent(
+		job, executionID, principal, "session_1",
+		"cmd_11111111111111111111111111111111", strings.Repeat("c", 64), true, now.Add(2*time.Second),
+	)
+	if err != nil {
+		t.Fatalf("Planning Resume intent before Stop: %v", err)
+	}
+	job.PlanningResumeIntents = append(job.PlanningResumeIntents, resume)
+	job.Revision++
+	job.UpdatedAt = resume.CreatedAt
+	notDispatched, err := NewPlanningResumeObservation(
+		job, resume.ID, principal, "cmd_22222222222222222222222222222222",
+		PlanningResumeNotDispatched, strings.Repeat("d", 64), false, now.Add(3*time.Second),
+	)
+	if err != nil {
+		t.Fatalf("NOT_DISPATCHED Resume observation: %v", err)
+	}
+	job.PlanningResumeObservations = append(job.PlanningResumeObservations, notDispatched)
+	job.Revision++
+	job.UpdatedAt = notDispatched.CreatedAt
+
 	stop, err := NewProviderStopIntent(
 		job, executionID, principal, "session_1",
-		"cmd_dddddddddddddddddddddddddddddddd", ProviderStopReasonCancelled, now.Add(2*time.Second),
+		"cmd_33333333333333333333333333333333", ProviderStopReasonCancelled, now.Add(4*time.Second),
 	)
 	if err != nil {
 		t.Fatalf("Provider Stop intent: %v", err)
@@ -796,10 +817,16 @@ func TestPlanningResumeAfterStopRecordsBoundaryDenial(t *testing.T) {
 	job.Revision++
 	job.UpdatedAt = stop.CreatedAt
 
+	if _, err := NewPlanningResumeDispatchClaim(
+		job, resume.ID, principal.PrincipalID(), "cmd_44444444444444444444444444444444", now.Add(5*time.Second),
+	); err == nil {
+		t.Fatal("Resume dispatch claim was accepted after a Stop intent for the same Session")
+	}
+
 	sourceCommandID := "cmd_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
 	_, err = NewPlanningResumeIntent(
 		job, executionID, principal, "session_1", sourceCommandID,
-		strings.Repeat("c", 64), true, now.Add(3*time.Second),
+		strings.Repeat("e", 64), true, now.Add(6*time.Second),
 	)
 	var boundary *PlanningBoundaryError
 	if !errors.As(err, &boundary) || boundary.ReasonCode != "provider_session_stopped" {
@@ -807,7 +834,7 @@ func TestPlanningResumeAfterStopRecordsBoundaryDenial(t *testing.T) {
 	}
 	decision, err := NewPlanningBoundaryDecision(
 		job, executionID, principal, sourceCommandID,
-		PlanningBoundaryResume, boundary.ReasonCode, now.Add(3*time.Second),
+		PlanningBoundaryResume, boundary.ReasonCode, now.Add(6*time.Second),
 	)
 	if err != nil {
 		t.Fatalf("persist stopped-session boundary decision: %v", err)

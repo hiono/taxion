@@ -130,6 +130,9 @@ func NewPlanningResumeDispatchClaim(
 	if latest == nil || latest.ID != resume.ID {
 		return PlanningResumeDispatchClaim{}, errors.New("only the latest Resume intent for a Session may acquire dispatch")
 	}
+	if hasProviderStopIntentBeforeResumeDispatch(job, resume.RoleExecutionID, resume.ProviderSessionID, job.Revision+1) {
+		return PlanningResumeDispatchClaim{}, errors.New("Provider Resume Session is blocked by an existing Stop intent")
+	}
 	if _, active := ActivePlanningResumeDispatchClaimForSession(job, resume.RoleExecutionID, resume.ProviderSessionID); active {
 		return PlanningResumeDispatchClaim{}, errors.New("Provider Resume Session already has an active dispatch claim")
 	}
@@ -192,6 +195,9 @@ func (c PlanningResumeDispatchClaim) Validate(job Job) error {
 		c.CreatedAt.Before(resume.CreatedAt) {
 		return errors.New("PlanningResumeDispatchClaim does not match its Resume intent")
 	}
+	if hasProviderStopIntentBeforeResumeDispatch(job, c.RoleExecutionID, c.SessionID, c.CreatedRevision) {
+		return errors.New("PlanningResumeDispatchClaim is blocked by a prior Stop intent for the Session")
+	}
 	var latestResumeObservation *PlanningResumeObservation
 	for i := range job.PlanningResumeObservations {
 		observation := &job.PlanningResumeObservations[i]
@@ -223,6 +229,16 @@ func (c PlanningResumeDispatchClaim) Validate(job Job) error {
 		return errors.New("PlanningResumeDispatchClaim Principal does not match execution authority")
 	}
 	return nil
+}
+
+func hasProviderStopIntentBeforeResumeDispatch(job Job, roleExecutionID, sessionID string, revision uint64) bool {
+	for _, stop := range job.ProviderStopIntents {
+		if stop.RoleExecutionID == roleExecutionID && stop.SessionID == sessionID &&
+			stop.CreatedRevision < revision {
+			return true
+		}
+	}
+	return false
 }
 
 func NewPlanningResumeDispatchRelease(

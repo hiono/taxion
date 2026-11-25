@@ -188,7 +188,9 @@ func (c *ProviderController) ResumeTaskExecution(
 		if !createdClaim {
 			return domain.PlanningResumeObservation{}, errors.Join(provider.ErrResumeUnconfirmed, cause)
 		}
-		latestJob, readErr := c.store.GetJob(ctx, jobID)
+		recoveryCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		latestJob, readErr := c.store.GetJob(recoveryCtx, jobID)
 		if readErr != nil {
 			return domain.PlanningResumeObservation{}, errors.Join(cause, readErr)
 		}
@@ -198,7 +200,7 @@ func (c *ProviderController) ResumeTaskExecution(
 		}
 		evidence := providerResumeNotDispatchedEvidence(intent.ID, cause)
 		observation, persistErr := c.recordResumeObservation(
-			ctx, jobID, intent.ID, domain.PlanningResumeFailed, evidence, provider.ResumeResult{}, principal,
+			recoveryCtx, jobID, intent.ID, domain.PlanningResumeFailed, evidence, provider.ResumeResult{}, principal,
 		)
 		if persistErr != nil {
 			return observation, errors.Join(cause, persistErr)
@@ -351,7 +353,9 @@ func (c *ProviderController) releasePlanningResumeDispatchClaim(
 	outcome string,
 	principal auth.AuthenticatedPrincipal,
 ) error {
-	job, err := c.store.GetJob(ctx, jobID)
+	releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	job, err := c.store.GetJob(releaseCtx, jobID)
 	if err != nil {
 		return err
 	}
@@ -359,8 +363,6 @@ func (c *ProviderController) releasePlanningResumeDispatchClaim(
 	if !active || claim.ResumeID != intent.ID {
 		return nil
 	}
-	releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-	defer cancel()
 	_, _, err = c.store.ReleasePlanningResumeDispatchClaim(releaseCtx, jobID, claim.ID, principal, outcome)
 	return err
 }

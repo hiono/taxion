@@ -2001,7 +2001,6 @@ func providerResumePreDispatchEvidence(operationID string, err error) (string, b
 	return preDispatch.EvidenceSHA256, true
 }
 
-
 func hasProviderStartDispatchBoundary(job domain.Job, operationID string) bool {
 	for _, observation := range job.ProviderStartObservations {
 		if observation.OperationID == operationID && observation.Status == domain.ProviderStartDispatching {
