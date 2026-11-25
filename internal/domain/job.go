@@ -57,8 +57,8 @@ type Job struct {
 	PlanningResumeIntents                 []PlanningResumeIntent      `json:"planning_resume_intents,omitempty"`
 	PlanningResumeObservations            []PlanningResumeObservation `json:"planning_resume_observations,omitempty"`
 	PlanningBoundaryDecisions             []PlanningBoundaryDecision  `json:"planning_boundary_decisions,omitempty"`
-	JobMessages []JobMessage `json:"job_messages,omitempty"`
-	DeliveryObservations []DeliveryObservation `json:"delivery_observations,omitempty"`
+	JobMessages                           []JobMessage                `json:"job_messages,omitempty"`
+	DeliveryObservations                  []DeliveryObservation       `json:"delivery_observations,omitempty"`
 }
 
 type IntakeProvenance struct {

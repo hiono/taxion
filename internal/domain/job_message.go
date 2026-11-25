@@ -178,6 +178,15 @@ func (m JobMessage) Validate(job Job) error {
 	if m.Sender == m.Recipient || !validMessageKind(m.Kind) || m.Kind == MessageKindHandoff {
 		return errors.New("JobMessage actors or kind are invalid")
 	}
+	for _, actor := range []ActorRef{m.Sender, m.Recipient} {
+		if actor.Kind != ActorPlanner && actor.Kind != ActorCoder && actor.Kind != ActorReviewer {
+			continue
+		}
+		execution, _ := roleExecutionByID(job, actor.ID)
+		if execution.CreatedRevision >= m.CreatedRevision {
+			return errors.New("JobMessage references a RoleExecution created after the message")
+		}
+	}
 	if !utf8.ValidString(m.Body) || strings.TrimSpace(m.Body) == "" || len(m.Body) > maxJobMessageBodyBytes {
 		return errors.New("JobMessage body is invalid")
 	}
@@ -192,6 +201,10 @@ func (m JobMessage) Validate(job Job) error {
 			return errors.New("ANSWER must reference its QUESTION")
 		}
 		return nil
+	}
+	root, rootFound := jobMessageByID(job, m.ThreadID)
+	if !rootFound || root.ID != root.ThreadID || root.ReplyToMessageID != "" || root.CreatedRevision >= m.CreatedRevision {
+		return errors.New("JobMessage thread root is invalid")
 	}
 	repliedTo, found := jobMessageByID(job, m.ReplyToMessageID)
 	if !found || repliedTo.CreatedRevision >= m.CreatedRevision ||
@@ -312,6 +325,9 @@ func (d DeliveryObservation) Validate(job Job) error {
 	if !found || message.Recipient != d.Recipient {
 		return errors.New("DeliveryObservation does not match its JobMessage recipient")
 	}
+	if message.CreatedRevision >= d.CreatedRevision {
+		return errors.New("DeliveryObservation predates its JobMessage")
+	}
 	if d.ObservedBy != (ActorRef{Kind: ActorOrchestrator, ID: OrchestratorActorID}) {
 		return errors.New("DeliveryObservation must be recorded by the Taxion Orchestrator")
 	}
@@ -320,6 +336,9 @@ func (d DeliveryObservation) Validate(job Job) error {
 	}
 	if d.Status == DeliveryRequested && (d.EvidenceSHA256 != "" || d.ReconcilesUnknown) {
 		return errors.New("REQUESTED delivery cannot contain result evidence")
+	}
+	if d.ReconcilesUnknown && d.Status != DeliveryAccepted && d.Status != DeliveryFailed {
+		return errors.New("only terminal delivery observations can reconcile UNKNOWN")
 	}
 	return nil
 }
