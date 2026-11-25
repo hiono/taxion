@@ -546,7 +546,6 @@ func TestManagerAdoptRejectsSubmoduleAssumeUnchangedIndex(t *testing.T) {
 	}
 }
 
-
 func TestHashTrackedWorktreeFilesRejectsParentSymlinkEscape(t *testing.T) {
 	repository := initRepository(t)
 	nested := filepath.Join(repository, "nested")
@@ -864,7 +863,6 @@ func TestManagerRequiresPersistentReservationForAdoptedWorktree(t *testing.T) {
 		t.Fatalf("Verify without reservation error = %v", err)
 	}
 }
-
 
 func TestManagerAdoptionReservationsRejectNestedWorktreePaths(t *testing.T) {
 	repository := initRepository(t)

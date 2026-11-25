@@ -64,7 +64,6 @@ func openWorktreeIndexLockFile(path string) (*os.File, error) {
 	return file, nil
 }
 
-
 func (l *adoptionFileLock) release() {
 	if l == nil || l.file == nil {
 		return
