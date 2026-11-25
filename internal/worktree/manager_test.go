@@ -1116,7 +1116,6 @@ func TestHashTrackedWorktreeFilesIncludesUnstagedDeletion(t *testing.T) {
 	}
 }
 
-
 type countingReader struct {
 	reads int
 }
