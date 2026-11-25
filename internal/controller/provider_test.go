@@ -1142,10 +1142,9 @@ func TestProviderControllerDoesNotBlindlyRetryWhenNoSafeStartCapabilityExists(t 
 		t.Fatalf("GetJob: %v", err)
 	}
 	if runtime.startCalls != 1 || runtime.lookupCalls != 0 ||
-		len(job.ProviderStartObservations) != 3 ||
+		len(job.ProviderStartObservations) != 2 ||
 		job.ProviderStartObservations[0].Status != domain.ProviderStartDispatching ||
-		job.ProviderStartObservations[1].Status != domain.ProviderStartUnknown ||
-		job.ProviderStartObservations[2].Status != domain.ProviderStartUnknown {
+		job.ProviderStartObservations[1].Status != domain.ProviderStartUnknown {
 		t.Fatalf("unsafe retry occurred: starts=%d lookups=%d observations=%#v", runtime.startCalls, runtime.lookupCalls, job.ProviderStartObservations)
 	}
 }
