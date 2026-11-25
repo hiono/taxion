@@ -153,7 +153,7 @@ func TestProviderStopIntentAndObservationPersistAtomically(t *testing.T) {
 		!finalObservation.ReconcilesUnknown || finalObservation.CreatedRevision != finalReceipt.Revision {
 		t.Fatalf("reconcile UNKNOWN Stop observation: %#v %#v %v", finalReceipt, finalObservation, err)
 	}
-	if domain.ProviderStopObservationCommandID(stopIntent.OperationID, true, true, finalEvidence, true) != finalCommandID {
+	if domain.ProviderStopObservationCommandID(stopIntent.OperationID, "", "cmd_15151515151515151515151515151515", true, true, finalEvidence, true) != finalCommandID {
 		t.Fatal("Provider Stop observation command identity is not deterministic")
 	}
 	job, err = database.GetJob(ctx, jobID)
