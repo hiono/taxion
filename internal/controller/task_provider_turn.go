@@ -482,11 +482,25 @@ func (c *ProviderController) dispatchTaskTurn(
 		if persistErr != nil {
 			return receipt, turn, observation, provider.TurnResult{}, errors.Join(provider.ErrProviderInvalidResult, persistErr)
 		}
+		evidenceSHA256 := providerTurnUnknownReturnedEvidence(turn.OperationID, claim.ID)
+		_, _, dispatchErr := c.recordTaskTurnDispatchObservation(
+			ctx, current.ID, claim.ID, domain.TaskTurnDispatchObservationUnknownReturned, evidenceSHA256, principal,
+		)
+		if dispatchErr != nil {
+			return receipt, turn, observation, provider.TurnResult{}, errors.Join(provider.ErrProviderInvalidResult, dispatchErr)
+		}
 		return receipt, turn, observation, provider.TurnResult{}, provider.ErrProviderInvalidResult
 	}
 	receipt, turn, observation, result, finalizeErr := c.finalizeTaskTurn(
 		ctx, receipt, current, turn, claim.ID, result, "", "", permissionRequest, principal,
 	)
+	if observation.Status == domain.TaskTurnUnknown {
+		evidenceSHA256 := providerTurnUnknownReturnedEvidence(turn.OperationID, claim.ID)
+		_, _, dispatchErr := c.recordTaskTurnDispatchObservation(
+			ctx, current.ID, claim.ID, domain.TaskTurnDispatchObservationUnknownReturned, evidenceSHA256, principal,
+		)
+		finalizeErr = errors.Join(finalizeErr, dispatchErr)
+	}
 	if observation.Status == domain.TaskTurnCompleted || observation.Status == domain.TaskTurnFailed {
 		finalizeErr = errors.Join(finalizeErr, c.releaseTaskTurnDispatchClaim(ctx, current.ID, turn, observation, principal))
 	}

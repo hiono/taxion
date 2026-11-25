@@ -705,7 +705,7 @@ func NewPlanningResumeIntent(job Job, roleExecutionID, principalID, providerSess
 		)
 		if !observed || latestTurnObservation.Status != TaskTurnUnknown ||
 			!hasStarted || latestTurnObservation.CreatedRevision <= started.CreatedRevision ||
-			!hasReturnedUnknown || returnedUnknown.CreatedRevision <= latestTurnObservation.CreatedRevision {
+			!hasReturnedUnknown || returnedUnknown.CreatedRevision <= started.CreatedRevision {
 			return PlanningResumeIntent{}, &PlanningBoundaryError{
 				Boundary: PlanningBoundaryResume, ReasonCode: "task_turn_dispatch_in_progress",
 				Cause: errors.New("Provider Resume requires the original Task Turn dispatch call to have returned UNKNOWN"),
