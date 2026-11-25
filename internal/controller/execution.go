@@ -27,6 +27,10 @@ type TaskWorktreeAdopter interface {
 	Adopt(context.Context, string, domain.Task, string) (domain.WorktreeSnapshot, error)
 }
 
+type TaskWorktreeAdoptionReservationReleaser interface {
+	ReleaseAdoptionReservation(context.Context, string, domain.Task, string) error
+}
+
 type ExecutionEffectAssessor interface {
 	Assess(context.Context, domain.ExecutionPermissionRequest, string) (domain.ExecutionEffectAssessment, error)
 }
@@ -201,6 +205,45 @@ func (c *ExecutionController) StartTaskExecution(
 		ctx, job.Revision, request.JobID, request.TaskID, permissionID, commandID, permission.RequestSHA256, snapshot,
 	)
 	if err != nil {
+		if snapshot.Origin == domain.WorktreeOriginAdopted && request.WorktreePath != "" {
+			persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+			defer cancel()
+			persisted, readErr := c.store.GetJob(persistCtx, request.JobID)
+			if readErr != nil {
+				return store.CommandReceipt{}, domain.RoleExecution{}, domain.ProviderStartIntent{},
+					errors.Join(err, fmt.Errorf("read back adopted Worktree Start after persistence error: %w", readErr))
+			}
+			executionPersisted, assignmentPersisted := false, false
+			expectedExecutionID := domain.RoleExecutionID(commandID)
+			for _, candidate := range persisted.RoleExecutions {
+				if candidate.ID == expectedExecutionID && candidate.TaskID == task.ID &&
+					candidate.ExecutionPermissionID == permissionID {
+					executionPersisted = true
+					break
+				}
+			}
+			for _, candidate := range persisted.WorktreeAssignments {
+				if candidate.TaskID == task.ID && candidate.OwnerRoleExecutionID == expectedExecutionID &&
+					candidate.WorktreePath == snapshot.WorktreePath {
+					assignmentPersisted = true
+					break
+				}
+			}
+			if executionPersisted != assignmentPersisted {
+				return store.CommandReceipt{}, domain.RoleExecution{}, domain.ProviderStartIntent{},
+					errors.Join(err, errors.New("Task Start persistence is partial; adopted Worktree reservation was retained"))
+			}
+			if !executionPersisted {
+				if releaser, ok := c.worktrees.(TaskWorktreeAdoptionReservationReleaser); ok {
+					if releaseErr := releaser.ReleaseAdoptionReservation(
+						persistCtx, request.JobID, task, snapshot.WorktreePath,
+					); releaseErr != nil {
+						return store.CommandReceipt{}, domain.RoleExecution{}, domain.ProviderStartIntent{},
+							errors.Join(err, fmt.Errorf("release uncommitted adopted Worktree reservation: %w", releaseErr))
+					}
+				}
+			}
+		}
 		return store.CommandReceipt{}, domain.RoleExecution{}, domain.ProviderStartIntent{}, err
 	}
 	return receipt, start.RoleExecution, start.ProviderStartIntent, nil

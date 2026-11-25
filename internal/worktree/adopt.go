@@ -192,6 +192,114 @@ func (m *Manager) Adopt(ctx context.Context, jobID string, task domain.Task, wor
 	return snapshot, nil
 }
 
+
+func (m *Manager) ReleaseAdoptionReservation(
+	ctx context.Context, jobID string, task domain.Task, worktreePath string,
+) error {
+	if m == nil || ctx == nil || !validPathIdentity(jobID) || !validPathIdentity(task.ID) {
+		return errors.New("Worktree adoption reservation release requires complete identities")
+	}
+	unlock, err := m.lock(ctx)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	if len(task.TargetRepositories) != 1 {
+		return errors.New("Worktree adoption reservation release requires exactly one approved repository")
+	}
+	repositoryID := task.TargetRepositories[0]
+	repositoryPath, trusted := m.repositories[repositoryID]
+	if !trusted {
+		return errors.New("Worktree adoption reservation release requires a trusted repository")
+	}
+	unlockRepository, err := m.lockRepository(ctx, repositoryID)
+	if err != nil {
+		return err
+	}
+	defer unlockRepository()
+	if !filepath.IsAbs(worktreePath) || filepath.Clean(worktreePath) != worktreePath {
+		return errors.New("released Worktree path must be absolute and canonical")
+	}
+	canonical, err := canonicalDirectory(worktreePath, false)
+	if err != nil || canonical != worktreePath {
+		return errors.New("released Worktree path is missing, non-canonical, or traverses a symbolic link")
+	}
+	if worktreePath == repositoryPath || pathWithin(repositoryPath, worktreePath) ||
+		pathWithin(worktreePath, repositoryPath) || pathWithin(m.root, worktreePath) ||
+		pathWithin(worktreePath, m.root) {
+		return errors.New("released Worktree path overlaps the trusted repository or managed workspace")
+	}
+	top, err := gitOutput(ctx, worktreePath, "rev-parse", "--show-toplevel")
+	if err != nil || filepath.Clean(top) != worktreePath {
+		return errors.New("released path is not a Git Worktree root")
+	}
+	gitDir, err := gitOutput(ctx, worktreePath, "rev-parse", "--absolute-git-dir")
+	if err != nil {
+		return errors.New("released Worktree has no linked Git metadata")
+	}
+	resolvedGitDir, err := filepath.EvalSymlinks(gitDir)
+	if err != nil {
+		return errors.New("released Worktree metadata cannot be resolved")
+	}
+	commonGitDir, err := gitOutput(ctx, repositoryPath, "rev-parse", "--git-common-dir")
+	if err != nil {
+		return errors.New("trusted repository common Git metadata cannot be resolved")
+	}
+	if !filepath.IsAbs(commonGitDir) {
+		commonGitDir = filepath.Join(repositoryPath, commonGitDir)
+	}
+	commonGitDir, err = filepath.EvalSymlinks(commonGitDir)
+	if err != nil || !pathWithin(filepath.Join(commonGitDir, "worktrees"), resolvedGitDir) {
+		return errors.New("released Worktree is not linked to the approved trusted repository")
+	}
+	record, err := readBaselineRecord(adoptionRegistrationPath(m.root, jobID, task.ID) + ".baseline.json")
+	if err != nil {
+		return fmt.Errorf("read adopted Worktree baseline before reservation release: %w", err)
+	}
+	if record.JobID != jobID || record.TaskID != task.ID || record.RepositoryID != repositoryID ||
+		record.RepositoryPath != repositoryPath || record.WorktreePath != worktreePath ||
+		record.Origin != domain.WorktreeOriginAdopted || !validCommit(record.BaselineCommit) ||
+		!validSHA256(record.InitialStateSHA256) {
+		return errors.New("adopted Worktree baseline does not match reservation release identity")
+	}
+	directory, err := m.adoptionReservationDirectory(repositoryID, false)
+	if err != nil {
+		return err
+	}
+	reservation := adoptionReservation{
+		JobID: jobID, TaskID: task.ID, RepositoryID: repositoryID,
+		WorktreePath: worktreePath, GitDir: resolvedGitDir, WorkspaceRoot: m.root,
+	}
+	paths := adoptionReservationPaths(directory, reservation)
+	present := make([]string, 0, len(paths))
+	for _, path := range paths {
+		data, readErr := os.ReadFile(path)
+		if errors.Is(readErr, os.ErrNotExist) {
+			continue
+		}
+		if readErr != nil {
+			return fmt.Errorf("read Worktree adoption reservation before release: %w", readErr)
+		}
+		var existing adoptionReservation
+		if err := json.Unmarshal(data, &existing); err != nil || existing != reservation {
+			return errors.New("Worktree adoption reservation identity changed; refusing release")
+		}
+		present = append(present, path)
+	}
+	for _, path := range present {
+		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("remove uncommitted Worktree adoption reservation: %w", err)
+		}
+	}
+	if len(present) != 0 {
+		if err := syncDirectory(directory); err != nil {
+			return fmt.Errorf("sync Worktree adoption reservation release: %w", err)
+		}
+	}
+	return nil
+}
+
+
 func adoptionRegistrationPath(root, jobID, taskID string) string {
 	key := sha256.Sum256([]byte(jobID + "\x00" + taskID))
 	return filepath.Join(root, hex.EncodeToString(key[:]))
