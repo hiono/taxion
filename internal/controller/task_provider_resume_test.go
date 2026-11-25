@@ -334,12 +334,20 @@ func TestTaskProviderResumePersistsDefinitiveFailureAndAllowsStop(t *testing.T) 
 	if err != nil {
 		t.Fatalf("GetJob after definitive Resume failure: %v", err)
 	}
-	if len(job.PlanningResumeIntents) != 1 || len(job.PlanningResumeObservations) != 1 {
-		t.Fatalf("definitive Resume failure facts = intents:%d observations:%d",
-			len(job.PlanningResumeIntents), len(job.PlanningResumeObservations))
+	if len(job.PlanningResumeIntents) != 1 || len(job.PlanningResumeObservations) != 1 ||
+		len(job.PlanningResumeDispatchClaims) != 1 || len(job.PlanningResumeDispatchReleases) != 1 {
+		t.Fatalf("definitive Resume failure facts = intents:%d observations:%d claims:%d releases:%d",
+			len(job.PlanningResumeIntents), len(job.PlanningResumeObservations),
+			len(job.PlanningResumeDispatchClaims), len(job.PlanningResumeDispatchReleases))
 	}
 	intent := job.PlanningResumeIntents[0]
 	observation := job.PlanningResumeObservations[0]
+	claim := job.PlanningResumeDispatchClaims[0]
+	release := job.PlanningResumeDispatchReleases[0]
+	if release.ClaimID != claim.ID || release.Outcome != domain.PlanningResumeDispatchReleasedFailed {
+		t.Fatalf("definitive Resume failure did not release its original claim before replay: claim=%#v release=%#v",
+			claim, release)
+	}
 	if !errors.Is(resumeErr, failure) || observation.Status != domain.PlanningResumeFailed ||
 		observation.ResumeID != intent.ID || returnedObservation.ID != observation.ID ||
 		f.runtime.resumeCalls != 1 {
