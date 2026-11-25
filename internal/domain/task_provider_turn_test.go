@@ -75,7 +75,7 @@ func appendTaskTurnDispatchObservationForTest(
 }
 
 func TestTaskTurnIntentUsesExecutionPermissionAndAcceptedSession(t *testing.T) {
-	job, execution, _, now := taskTurnFixture(t)
+	job, execution, permission, now := taskTurnFixture(t)
 	turn, err := NewTaskTurnIntent(job, execution.ID, permission.ID, "session_task",
 		"cmd_d3030303030303030303030303030303", strings.Repeat("c", 64), 80, now)
 	if err != nil {
@@ -422,7 +422,7 @@ func TestTaskTurnDispatchCannotReleaseClaimAfterUnknownObservationAsDefinitiveFa
 }
 
 func TestProviderStartDispatchBoundaryRequiresUnexpiredPermission(t *testing.T) {
-	job, execution, permission, now := taskTurnFixture(t)
+	job, execution, _, now := taskTurnFixture(t)
 	job.ProviderStartObservations = nil
 	job.Revision--
 	for _, intent := range job.ProviderStartIntents {
@@ -460,7 +460,8 @@ func TestProviderStartDispatchBoundaryRequiresUnexpiredPermission(t *testing.T) 
 		"cmd_62626262626262626262626262626262", ProviderStartDispatching, "", "", "", false,
 		expiredPermission.ExpiresAt.Add(time.Second)); err == nil {
 		t.Fatal("expired ExecutionPermission crossed the Provider Start dispatch boundary")
-	}\n}
+	}
+}
 
 func TestTaskTurnDispatchClaimRequiresLatestResumeAttached(t *testing.T) {
 	job, execution, permission, now := taskTurnFixture(t)
