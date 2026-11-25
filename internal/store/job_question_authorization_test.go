@@ -91,7 +91,7 @@ func TestJobQuestionAuthorizationStorePersistsAndReplays(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetJob before QUESTION: %v", err)
 	}
-	var plannerStart ProviderStartIntent
+	var plannerStart domain.ProviderStartIntent
 	var plannerSession string
 	for _, start := range job.ProviderStartIntents {
 		if start.RoleExecutionID == planner.ID {
