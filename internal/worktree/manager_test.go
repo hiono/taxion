@@ -1016,3 +1016,17 @@ func TestManagerOrphanedReservationCleanupPreservesCommittedAdoption(t *testing.
 		}
 	}
 }
+
+func TestHashTrackedWorktreeFilesIncludesUnstagedDeletion(t *testing.T) {
+	repository := initRepository(t)
+	if err := os.Remove(filepath.Join(repository, "README.md")); err != nil {
+		t.Fatalf("remove tracked file: %v", err)
+	}
+	hash := sha256.New()
+	if err := hashTrackedWorktreeFiles(context.Background(), repository, hash); err != nil {
+		t.Fatalf("hash tracked Worktree with unstaged deletion: %v", err)
+	}
+	if got := len(hash.Sum(nil)); got != sha256.Size {
+		t.Fatalf("tracked Worktree digest size = %d, want %d", got, sha256.Size)
+	}
+}
