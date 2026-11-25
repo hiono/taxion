@@ -170,6 +170,9 @@ func TestJobQuestionAuthorizationRejectsScopeAndBudgetExpansion(t *testing.T) {
 		},
 		Budget: PlanningBudget{MaxTurns: 1, MaxTokens: 100}, Deadline: contract.Deadline.Add(-time.Minute),
 	}
+	if _, err := NewJobQuestionAuthorization(job, base, now.Add(3*time.Minute)); err != nil {
+		t.Fatalf("unmodified JobQuestionAuthorization request is invalid: %v", err)
+	}
 	tests := []struct {
 		name   string
 		mutate func(*JobQuestionAuthorizationRequest)
@@ -178,6 +181,7 @@ func TestJobQuestionAuthorizationRejectsScopeAndBudgetExpansion(t *testing.T) {
 			r.RepositoryID = "repo_foreign"
 		}},
 		{name: "foreign Provider", mutate: func(r *JobQuestionAuthorizationRequest) { r.ProviderID = "provider.foreign" }},
+		{name: "configuration differs from approved contract", mutate: func(r *JobQuestionAuthorizationRequest) { r.ConfigurationSHA256 = strings.Repeat("e", 64) }},
 		{name: "foreign session", mutate: func(r *JobQuestionAuthorizationRequest) { r.ProviderSessionID = "session_foreign" }},
 		{name: "configuration differs from approved contract", mutate: func(r *JobQuestionAuthorizationRequest) { r.ConfigurationSHA256 = strings.Repeat("0", 64) }},
 		{name: "budget exceeds contract", mutate: func(r *JobQuestionAuthorizationRequest) { r.Budget.MaxTokens = contract.Budget.MaxTokens + 1 }},
