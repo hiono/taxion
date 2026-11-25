@@ -893,3 +893,14 @@ func TestStopRequestRequiresDispatchFencingTokenOnlyWhenRequired(t *testing.T) {
 		t.Fatal("Stop request requiring fencing accepted a zero token")
 	}
 }
+
+func TestSafeAdapterErrorTreatsAdapterCredentialLeaseCleanupFailureAsAmbiguous(t *testing.T) {
+	err := safeAdapterError(errors.Join(ErrCredentialUnavailable, ErrCredentialLeaseCleanupFailed))
+	if !errors.Is(err, ErrCredentialUnavailable) || !errors.Is(err, ErrCredentialLeaseCleanupFailed) {
+		t.Fatalf("credential cleanup failure identity was lost: %v", err)
+	}
+	var operationError *OperationError
+	if !errors.As(err, &operationError) || operationError.Class != FailureAmbiguous || operationError.Code != OperationCodeUnknown {
+		t.Fatalf("adapter credential cleanup failure was not treated as ambiguous: %v", err)
+	}
+}
