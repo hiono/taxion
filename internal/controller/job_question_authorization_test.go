@@ -11,11 +11,11 @@ import (
 )
 
 type replayQuestionAuthorizationStore struct {
-	receipt      store.CommandReceipt
+	receipt       store.CommandReceipt
 	authorization domain.JobQuestionAuthorization
-	found        bool
-	getCalls     int
-	addCalls     int
+	found         bool
+	getCalls      int
+	addCalls      int
 }
 
 func (s *replayQuestionAuthorizationStore) GetJob(context.Context, string) (domain.Job, error) {
@@ -40,18 +40,18 @@ func TestJobQuestionAuthorizationControllerReplaysBeforeResolvingBoundary(t *tes
 	deadline := time.Date(2026, 11, 26, 12, 0, 0, 0, time.UTC)
 	budget := domain.PlanningBudget{MaxTurns: 1, MaxTokens: 100}
 	receipt := store.CommandReceipt{
-		CommandID: "cmd_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-		JobID: "job_replay",
-		Revision: 8,
+		CommandID:     "cmd_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		JobID:         "job_replay",
+		Revision:      8,
 		PayloadSHA256: "payload",
-		CreatedAt: deadline.Add(-time.Hour),
+		CreatedAt:     deadline.Add(-time.Hour),
 	}
 	authorization := domain.JobQuestionAuthorization{
-		JobID: "job_replay",
-		CommandID: receipt.CommandID,
+		JobID:             "job_replay",
+		CommandID:         receipt.CommandID,
 		QuestionMessageID: "message_question",
-		Budget: budget,
-		Deadline: deadline,
+		Budget:            budget,
+		Deadline:          deadline,
 	}
 	authorizationStore := &replayQuestionAuthorizationStore{
 		receipt: receipt, authorization: authorization, found: true,
