@@ -491,7 +491,7 @@ func (c *ProviderController) DispatchTaskExecution(
 	if !permissionFound {
 		permissionErr = store.ErrNotFound
 	} else {
-		permissionErr = currentPermission.ValidateFor(current, intent.ID, requestSHA256, c.now())
+		permissionErr = currentPermission.ValidateFor(current, intent.ID, requestSHA256, c.execution.now())
 	}
 	if permissionErr != nil {
 		if hasProviderStartDispatchBoundary(current, intent.ID) {

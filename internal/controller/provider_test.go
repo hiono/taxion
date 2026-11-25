@@ -1028,10 +1028,10 @@ func TestProviderControllerReconcilesUnknownAfterLookupNotFoundWithIdempotentRet
 		if err != nil {
 			return err
 		}
-		if len(job.ProviderStartObservations) != 4 {
+		if len(job.ProviderStartObservations) != 3 {
 			return errors.New("retry dispatch boundary was not persisted before Provider Start")
 		}
-		last := job.ProviderStartObservations[3]
+		last := job.ProviderStartObservations[2]
 		if last.Status != domain.ProviderStartDispatching || !last.ReconcilesUnknown ||
 			!validProviderEvidenceSHA256(last.EvidenceSHA256) || request.OperationID != domain.ProviderStartOperationID(commandID) {
 			return errors.New("retry dispatch boundary is not bound to the original idempotent OperationID")
@@ -1051,7 +1051,7 @@ func TestProviderControllerReconcilesUnknownAfterLookupNotFoundWithIdempotentRet
 		t.Fatalf("GetJob after recovery: %v", err)
 	}
 	want := []string{
-		domain.ProviderStartDispatching, domain.ProviderStartUnknown, domain.ProviderStartUnknown,
+		domain.ProviderStartDispatching, domain.ProviderStartUnknown,
 		domain.ProviderStartDispatching, domain.ProviderStartAccepted,
 	}
 	if len(job.ProviderStartObservations) != len(want) {
@@ -1062,7 +1062,7 @@ func TestProviderControllerReconcilesUnknownAfterLookupNotFoundWithIdempotentRet
 			t.Fatalf("Start observation %d = %s, want %s: %#v", i, job.ProviderStartObservations[i].Status, status, job.ProviderStartObservations)
 		}
 	}
-	if !job.ProviderStartObservations[3].ReconcilesUnknown || !job.ProviderStartObservations[4].ReconcilesUnknown {
+	if !job.ProviderStartObservations[2].ReconcilesUnknown || !job.ProviderStartObservations[3].ReconcilesUnknown {
 		t.Fatalf("idempotent redispatch did not reconcile UNKNOWN: %#v", job.ProviderStartObservations)
 	}
 }
