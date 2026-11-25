@@ -269,6 +269,12 @@ func NewJobContractAmendmentRevision(
 	if job.State != JobActive {
 		return JobContractRevision{}, errors.New("JobContract amendment requires an ACTIVE Job")
 	}
+	for _, start := range job.ProviderStartIntents {
+		if observation, found := latestProviderStartObservation(job, start.ID); found &&
+			(observation.Status == ProviderStartDispatching || observation.Status == ProviderStartUnknown) {
+			return JobContractRevision{}, errors.New("JobContract amendment is blocked while a Provider Start dispatch is unresolved")
+		}
+	}
 	if !validCommandID(commandID) || now.IsZero() {
 		return JobContractRevision{}, errors.New("JobContract amendment command identity and timestamp are required")
 	}

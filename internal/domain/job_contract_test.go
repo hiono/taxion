@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hiono/taxion/internal/auth"
 	"github.com/hiono/taxion/internal/identity"
 )
 
@@ -206,6 +207,40 @@ func TestJobContractRevisionRejectsExpiredPlanningAuthorization(t *testing.T) {
 		job, "cmd_17171717171717171717171717171717", execution.ID, sourceResult.ID, sourceResult.ContentSHA256, contract, expiredAt,
 	); err == nil {
 		t.Fatal("JobContract proposal succeeded after PlanningAuthorization deadline")
+	}
+}
+
+func TestJobContractAmendmentRejectsUnresolvedProviderStartDispatch(t *testing.T) {
+	job, execution, _, now := taskTurnFixture(t)
+	found := false
+	for i := range job.ProviderStartObservations {
+		observation := &job.ProviderStartObservations[i]
+		if observation.OperationID != execution.ProviderStartOperationID {
+			continue
+		}
+		observation.Status = ProviderStartDispatching
+		observation.ProviderSessionID = ""
+		observation.ReceiptID = ""
+		observation.EvidenceSHA256 = ""
+		observation.ReconcilesUnknown = false
+		found = true
+		break
+	}
+	if !found {
+		t.Fatal("Task Coder Start observation was not found")
+	}
+	if err := job.Validate(); err != nil {
+		t.Fatalf("Job with unresolved Start dispatch: %v", err)
+	}
+	latest := job.JobContractRevisions[len(job.JobContractRevisions)-1]
+	contract := validJobContract(now.Add(2 * time.Hour))
+	contract.Purpose = "Amended while Provider Start is unresolved"
+	if _, err := NewJobContractAmendmentRevision(
+		job, "cmd_71717171717171717171717171717171",
+		latest.Revision, latest.CanonicalHash, "test concurrent amendment",
+		auth.AuthenticatedPrincipal{}, contract, now.Add(5*time.Minute),
+	); err == nil || !strings.Contains(err.Error(), "Provider Start dispatch is unresolved") {
+		t.Fatalf("JobContract amendment was not rejected by the unresolved Start dispatch: %v", err)
 	}
 }
 
