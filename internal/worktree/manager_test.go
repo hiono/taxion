@@ -914,7 +914,6 @@ func TestManagerAdoptionReservationsRejectNestedWorktreePaths(t *testing.T) {
 	}
 }
 
-
 func TestManagerReleaseAdoptionReservationAllowsAnotherTaskAfterUncommittedStart(t *testing.T) {
 	repository := initRepository(t)
 	workspace := filepath.Join(canonicalTempDir(t), "managed-worktrees")
@@ -954,7 +953,6 @@ func TestManagerReleaseAdoptionReservationAllowsAnotherTaskAfterUncommittedStart
 		t.Fatal("Task A reclaimed a Worktree whose state changed after its failed Start")
 	}
 }
-
 
 func TestManagerAdoptionReservationsAreUniqueByTaskAndGitAdminDirectory(t *testing.T) {
 	repository := initRepository(t)
