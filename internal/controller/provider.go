@@ -475,7 +475,7 @@ func (c *ProviderController) DispatchTaskExecution(
 	}
 	// Re-read the Job once after the external lookup. A storage failure must
 	// remain retryable and must not be persisted as a Provider rejection.
-	current, err := c.store.GetJob(ctx, jobID)
+	current, err = c.store.GetJob(ctx, jobID)
 	if err != nil {
 		return domain.ProviderStartObservation{}, provider.StartResult{}, err
 	}
