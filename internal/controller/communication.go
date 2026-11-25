@@ -93,7 +93,7 @@ func (c *CommunicationController) SendFromRole(
 		return outcome, err
 	}
 	messageRequest := domain.JobMessageRequest{
-		Sender: domain.ActorRef{Kind: actorKind, ID: execution.ID},
+		Sender:    domain.ActorRef{Kind: actorKind, ID: execution.ID},
 		Recipient: request.Recipient, Kind: request.Kind,
 		ThreadID: request.ThreadID, ReplyToMessageID: request.ReplyToMessageID,
 		BatchID: request.BatchID, Body: request.Body,
@@ -121,7 +121,7 @@ func (c *CommunicationController) SendFromHuman(
 		return outcome, errors.New("HUMAN message Principal does not own the Job")
 	}
 	messageRequest := domain.JobMessageRequest{
-		Sender: domain.ActorRef{Kind: domain.ActorHuman, ID: principal.PrincipalID()},
+		Sender:    domain.ActorRef{Kind: domain.ActorHuman, ID: principal.PrincipalID()},
 		Recipient: request.Recipient, Kind: request.Kind,
 		ThreadID: request.ThreadID, ReplyToMessageID: request.ReplyToMessageID,
 		BatchID: request.BatchID, Body: request.Body,
