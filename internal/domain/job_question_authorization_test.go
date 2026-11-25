@@ -78,7 +78,7 @@ func TestJobQuestionAuthorizationBindsOneApprovedQuestionAndPlannerSession(t *te
 		JobID: job.ID, CommandID: "cmd_73737373737373737373737373737373",
 		QuestionMessageID: message.ID, PlannerRoleExecutionID: planner.ID,
 		ProviderSessionID: startObservation.ProviderSessionID,
-		RepositoryID: contract.TargetRepositories[0], PlanningRepositoryID: planningGrant.RepositoryID,
+		RepositoryID:      contract.TargetRepositories[0], PlanningRepositoryID: planningGrant.RepositoryID,
 		ProviderID:        planningGrant.ProviderID, AccountID: planningGrant.AccountID,
 		ConfigurationSHA256: planningGrant.ConfigurationSHA256,
 		ReadOnlyBoundary: PlanningReadOnlyBoundary{
@@ -163,7 +163,7 @@ func TestJobQuestionAuthorizationRejectsScopeAndBudgetExpansion(t *testing.T) {
 		JobID: job.ID, CommandID: "cmd_76767676767676767676767676767676",
 		QuestionMessageID: message.ID, PlannerRoleExecutionID: planner.ID,
 		ProviderSessionID: startObservation.ProviderSessionID,
-		RepositoryID: contract.TargetRepositories[0], PlanningRepositoryID: grant.RepositoryID, ProviderID: grant.ProviderID,
+		RepositoryID:      contract.TargetRepositories[0], PlanningRepositoryID: grant.RepositoryID, ProviderID: grant.ProviderID,
 		AccountID: grant.AccountID, ConfigurationSHA256: grant.ConfigurationSHA256,
 		ReadOnlyBoundary: PlanningReadOnlyBoundary{
 			Mode: PlanningReadOnlyBoundarySnapshot, Reference: "question_snapshot_2", SHA256: strings.Repeat("d", 64),
