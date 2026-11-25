@@ -1206,12 +1206,22 @@ func TestHashTrackedWorktreeFilesIncludesUnstagedDeletion(t *testing.T) {
 	if err := os.Remove(filepath.Join(secondRepository, "second.txt")); err != nil {
 		t.Fatalf("remove second tracked file: %v", err)
 	}
+	firstRoot, err := os.OpenRoot(firstRepository)
+	if err != nil {
+		t.Fatalf("open first Worktree root: %v", err)
+	}
+	defer firstRoot.Close()
 	firstHash := sha256.New()
-	if err := hashTrackedWorktreeFiles(context.Background(), firstRepository, firstHash); err != nil {
+	if err := hashTrackedWorktreeFiles(context.Background(), firstRepository, firstRoot, firstHash); err != nil {
 		t.Fatalf("hash first Worktree with unstaged deletion: %v", err)
 	}
+	secondRoot, err := os.OpenRoot(secondRepository)
+	if err != nil {
+		t.Fatalf("open second Worktree root: %v", err)
+	}
+	defer secondRoot.Close()
 	secondHash := sha256.New()
-	if err := hashTrackedWorktreeFiles(context.Background(), secondRepository, secondHash); err != nil {
+	if err := hashTrackedWorktreeFiles(context.Background(), secondRepository, secondRoot, secondHash); err != nil {
 		t.Fatalf("hash second Worktree with unstaged deletion: %v", err)
 	}
 	if got := len(firstHash.Sum(nil)); got != sha256.Size {

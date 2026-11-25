@@ -232,7 +232,6 @@ func TestJobContractAmendmentRejectsUnresolvedProviderStartDispatch(t *testing.T
 	if err := job.Validate(); err != nil {
 		t.Fatalf("Job with unresolved Start dispatch: %v", err)
 	}
-	latest := job.JobContractRevisions[len(job.JobContractRevisions)-1]
 	contract := validJobContract(now.Add(2 * time.Hour))
 	contract.Purpose = "Amended while Provider Start is unresolved"
 	amendment := func(candidate Job) error {
