@@ -130,11 +130,11 @@ func (c *JobQuestionAuthorizationController) Authorize(
 	request := domain.JobQuestionAuthorizationRequest{
 		JobID: job.ID, CommandID: commandID, QuestionMessageID: question.ID,
 		PlannerRoleExecutionID: planner.ID, ProviderSessionID: accepted.ProviderSessionID,
-		ProviderID:   start.ProviderID, AccountID: start.AccountID,
+		ProviderID: start.ProviderID, AccountID: start.AccountID,
 		ConfigurationSHA256: start.ConfigurationSHA256, RepositoryID: readOnlyContext.RepositoryID,
 		PlanningRepositoryID: planningGrant.RepositoryID,
-		ReadOnlyBoundary: readOnlyContext.Boundary,
-		Budget: budget, Deadline: deadline.UTC().Round(0),
+		ReadOnlyBoundary:     readOnlyContext.Boundary,
+		Budget:               budget, Deadline: deadline.UTC().Round(0),
 	}
 	return c.store.AddJobQuestionAuthorization(ctx, job.ID, job.Revision, request)
 }
