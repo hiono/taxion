@@ -423,30 +423,13 @@ func TestTaskTurnDispatchCannotReleaseClaimAfterUnknownObservationAsDefinitiveFa
 
 func TestProviderStartDispatchBoundaryRequiresUnexpiredPermission(t *testing.T) {
 	job, execution, _, now := taskTurnFixture(t)
-	job.PlanningTurnIntents = nil
-	job.PlanningTurnObservations = nil
-	job.PlanningEffectDecisions = nil
-	job.PlanningResumeIntents = nil
-	job.PlanningResumeObservations = nil
-	job.PlanningResumeDispatchClaims = nil
-	job.PlanningResumeDispatchReleases = nil
-	job.PlanningBoundaryDecisions = nil
-	job.ProviderEventObservations = nil
-	job.ProviderStopIntents = nil
-	job.ProviderStopObservations = nil
-	job.ProviderStopDispatchClaims = nil
-	job.ProviderStopDispatchStarts = nil
-	job.ProviderStopDispatchReleases = nil
-	job.ProviderResultObservations = nil
-	job.ProviderUsageObservations = nil
-	job.ProviderStartObservations = nil
-	job.Revision--
-	for _, intent := range job.ProviderStartIntents {
-		if intent.ID == execution.ProviderStartOperationID {
-			job.UpdatedAt = intent.CreatedAt
-			break
+	observations := job.ProviderStartObservations[:0]
+	for _, observation := range job.ProviderStartObservations {
+		if observation.OperationID != execution.ProviderStartOperationID {
+			observations = append(observations, observation)
 		}
 	}
+	job.ProviderStartObservations = observations
 	if err := job.Validate(); err != nil {
 		t.Fatalf("Job without Start observation: %v", err)
 	}
@@ -472,30 +455,13 @@ func TestProviderStartDispatchBoundaryRequiresUnexpiredPermission(t *testing.T) 
 	expiredJob.PlanningResumeDispatchClaims = nil
 	expiredJob.PlanningResumeDispatchReleases = nil
 	expiredJob.PlanningBoundaryDecisions = nil
-	expiredJob.PlanningTurnIntents = nil
-	expiredJob.PlanningTurnObservations = nil
-	expiredJob.PlanningEffectDecisions = nil
-	expiredJob.PlanningResumeIntents = nil
-	expiredJob.PlanningResumeObservations = nil
-	expiredJob.PlanningResumeDispatchClaims = nil
-	expiredJob.PlanningResumeDispatchReleases = nil
-	expiredJob.PlanningBoundaryDecisions = nil
-	expiredJob.ProviderEventObservations = nil
-	expiredJob.ProviderStopIntents = nil
-	expiredJob.ProviderStopObservations = nil
-	expiredJob.ProviderStopDispatchClaims = nil
-	expiredJob.ProviderStopDispatchStarts = nil
-	expiredJob.ProviderStopDispatchReleases = nil
-	expiredJob.ProviderResultObservations = nil
-	expiredJob.ProviderUsageObservations = nil
-	expiredJob.ProviderStartObservations = nil
-	expiredJob.Revision--
-	for _, intent := range expiredJob.ProviderStartIntents {
-		if intent.ID == expiredExecution.ProviderStartOperationID {
-			expiredJob.UpdatedAt = intent.CreatedAt
-			break
+	expiredObservations := expiredJob.ProviderStartObservations[:0]
+	for _, observation := range expiredJob.ProviderStartObservations {
+		if observation.OperationID != expiredExecution.ProviderStartOperationID {
+			expiredObservations = append(expiredObservations, observation)
 		}
 	}
+	expiredJob.ProviderStartObservations = expiredObservations
 	if _, err := NewProviderStartObservation(expiredJob, expiredExecution.ProviderStartOperationID, "",
 		"cmd_62626262626262626262626262626262", ProviderStartDispatching, "", "", "", false,
 		expiredPermission.ExpiresAt.Add(time.Second)); err == nil {
