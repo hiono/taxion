@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -9,6 +10,22 @@ import (
 	"github.com/hiono/taxion/internal/domain"
 	"github.com/hiono/taxion/internal/provider"
 )
+
+type fakeQuestionReadOnlyContextResolver struct {
+	result QuestionReadOnlyContext
+	err    error
+	calls  int
+}
+
+func (r *fakeQuestionReadOnlyContextResolver) ResolveReadOnlyBoundary(
+	_ context.Context,
+	_ domain.Job,
+	_ domain.JobMessage,
+	_ domain.RoleExecution,
+) (QuestionReadOnlyContext, error) {
+	r.calls++
+	return r.result, r.err
+}
 
 func TestCommunicationControllerPersistsCoderPlannerQuestionAndAnswer(t *testing.T) {
 	database, jobID, revision, task := approvedExecutionPermissionControllerFixture(t)
@@ -111,6 +128,52 @@ func TestCommunicationControllerPersistsCoderPlannerQuestionAndAnswer(t *testing
 		question.Message.Sender.ID != coderExecution.ID ||
 		question.Message.Recipient.ID != plannerExecution.ID {
 		t.Fatalf("Coder QUESTION identity was not preserved: %#v", question.Message)
+	}
+
+	resolver := &fakeQuestionReadOnlyContextResolver{
+		result: QuestionReadOnlyContext{
+			RepositoryID: revision.Contract.TargetRepositories[0],
+			Boundary: domain.PlanningReadOnlyContext{
+				Mode: domain.PlanningReadOnlyBoundarySnapshot,
+				Reference: "question_snapshot_controller",
+				SHA256: strings.Repeat("c", 64),
+			},
+		},
+	}
+	questionAuthorizer, err := NewJobQuestionAuthorizationController(database, resolver)
+	if err != nil {
+		t.Fatalf("NewJobQuestionAuthorizationController: %v", err)
+	}
+	questionCommandID := "cmd_56565656565656565656565656565656"
+	questionBudget := domain.PlanningBudget{MaxTurns: 1, MaxTokens: 50}
+	questionDeadline := revision.Contract.Deadline.Add(-time.Minute)
+	questionReceipt, questionGrant, err := questionAuthorizer.Authorize(
+		context.Background(), jobID, question.Message.ID, questionCommandID,
+		questionBudget, questionDeadline,
+	)
+	if err != nil {
+		t.Fatalf("Authorize JobQuestionAuthorization: %v", err)
+	}
+	if questionGrant.RepositoryID != revision.Contract.TargetRepositories[0] ||
+		questionGrant.QuestionMessageID != question.Message.ID || resolver.calls != 1 {
+		t.Fatalf("JobQuestionAuthorization lost its scope or resolver was not called once: %#v calls=%d", questionGrant, resolver.calls)
+	}
+	resolver.err = errors.New("read-only context resolver unavailable")
+	retryReceipt, retryGrant, err := questionAuthorizer.Authorize(
+		context.Background(), jobID, question.Message.ID, questionCommandID,
+		questionBudget, questionDeadline,
+	)
+	if err != nil || retryReceipt != questionReceipt || retryGrant.ID != questionGrant.ID || resolver.calls != 1 {
+		t.Fatalf("JobQuestionAuthorization retry did not replay without resolving context: receipt=%#v grant=%#v calls=%d err=%v",
+			retryReceipt, retryGrant, resolver.calls, err)
+	}
+	changedBudget := questionBudget
+	changedBudget.MaxTokens++
+	if _, _, err := questionAuthorizer.Authorize(
+		context.Background(), jobID, question.Message.ID, questionCommandID,
+		changedBudget, questionDeadline,
+	); err == nil {
+		t.Fatal("JobQuestionAuthorization accepted a reused CommandID with changed caller inputs")
 	}
 
 	answer, err := communication.SendFromRole(context.Background(), RoleMessageRequest{
