@@ -118,7 +118,7 @@ Capabilityは個別に扱う。未検証のCapabilityを利用可能と推定し
 5. UNKNOWNは同じOperationID / TurnIDに対するlookup、event replay、final result retrieval等の証拠でのみ解消する。
 6. 同じidentityに対するidempotencyが実証されていない場合はblind replayしない。
 7. Start / SendのUNKNOWNを新しいOperationID / TurnIDで再送しない。
-8. E4 SendIdempotency evidenceは、Provider identity / OperationID / SessionID / TurnIDを冪等性キーとする。同じキーのSend要求は一つのProvider operationへ収束させ、同一receipt / resultを返す。PromptSHA256などの不変payloadは冪等性キーとは分離して照合し、同じキーでpayloadが異なる要求は拒否する。active TaskTurn dispatch claimの回復で曖昧なSendを再dispatchできるのは、同一OperationID / TurnIDに対する検証済みE4 Send Lookup NOT_FOUNDとE4 SendIdempotencyの両方が確認され、両方の証拠digestをrelease factへ保存する場合に限る。SendLookup単独、SendIdempotency単独、またはLookup UNKNOWNでは再dispatchを許可せず、claimを保持する。Runtime.SendのFailureDefinitiveは、Provider operationが開始されていないことを保証する独立した回復経路として扱う。
+8. 新しいTask Turn intentの受入れには、E4 Send LookupとE4 SendIdempotencyの両方を要求する。E4 SendIdempotency evidenceは、Provider identity / OperationID / SessionID / TurnIDを冪等性キーとする。同じキーのSend要求は一つのProvider operationへ収束させ、同一receipt / resultを返す。PromptSHA256などの不変payloadは冪等性キーとは分離して照合し、同じキーでpayloadが異なる要求は拒否する。active TaskTurn dispatch claimの回復で曖昧なSendを再dispatchできるのは、同一OperationID / TurnIDに対する検証済みE4 Send Lookup NOT_FOUNDとE4 SendIdempotencyの両方が確認され、両方の証拠digestをrelease factへ保存する場合に限る。SendLookup単独、SendIdempotency単独、またはLookup UNKNOWNでは再dispatchを許可せず、claimを保持する。Runtime.SendのFailureDefinitiveは、Provider operationが開始されていないことを保証する独立した回復経路として扱う。
 9. Runtime.SendのFailureDefinitiveは、当該呼出しがProvider operationを開始していないことを保証する。Controllerは当該Dispatch ClaimだけをFailureDefinitive evidence digest付きで解放し、UNKNOWN observationを追加せず、同じimmutable Turn intent / OperationIDの再試行を許可する。FailureAmbiguousまたは分類不能エラーはUNKNOWNとして扱い、Claimを保持する。
 10. 未解決operationがある間は、次のturn、停止済み判定、Worktree release、Job完了へ進めない。
 

@@ -250,7 +250,7 @@ Reviewer Startは、ADR-408 / ADR-507に従うimmutable Worktree snapshotとread
 ### 8.2 Send（実装済み）
 
 1. 最新Job、grant、RoleExecution、accepted Session、turn budget、deadlineを検証する。
-2. 新しいTurn intentを保存する前に、E4 Send LookupまたはSend Idempotencyに加え、Final Output、Usage Identity、Usage CompletenessのE4 capability evidenceを確認する。既存intentのterminal observation replayではProvider capabilityを要求しない。
+2. 新しいTurn intentを保存する前に、E4 Send LookupとE4 Send Idempotencyの両方に加え、Final Output、Usage Identity、Usage CompletenessのE4 capability evidenceを確認する。LookupなしではUsage取得失敗後に同じTurnを再送せずに終端化できないため、Send Idempotency単独では新しいTurnを許可しない。既存intentのterminal observation replayではProvider capabilityを要求しない。
 3. immutable Turn intentとCommand receiptを同一transactionで保存する。
 4. commit確認後に最新Jobとauthorityを再検証し、Worktree検証後にも同じTurnの履歴を再評価する。未dispatch条件が崩れている場合はSendせず、Lookup / idempotencyによる再照合へ移行する。
 5. Dispatch Claim取得後にJobを再読込し、exact claim、permission、Task、Worktree、Stop intent、Resume状態を再検証する。

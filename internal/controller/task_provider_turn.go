@@ -577,29 +577,6 @@ func (c *ProviderController) reconcileTaskTurn(
 		}
 		lookupEvidence = lookup.EvidenceSHA256
 	}
-	if !canLookup && canRetry {
-		idempotencyEvidence := providerCapabilityEvidenceSHA256(capabilities, provider.CapabilitySendIdempotency)
-		if !validProviderEvidenceSHA256(idempotencyEvidence) {
-			return receipt, turn, domain.TaskTurnObservation{}, provider.TurnResult{}, provider.ErrUnsupportedCapability
-		}
-		request.RequireIdempotency = true
-		result, sendErr := c.runtime.Send(ctx, request)
-		if sendErr != nil {
-			observation, persistErr := c.recordTaskTurnObservation(ctx, job.ID, turn.ID, claimID, domain.TaskTurnUnknown, 0, "", false)
-			return receipt, turn, observation, provider.TurnResult{}, errors.Join(sendErr, persistErr)
-		}
-		if result.OperationID != turn.OperationID || result.TurnID != turn.ID || result.SessionID != turn.ProviderSessionID {
-			observation, persistErr := c.recordTaskTurnObservation(ctx, job.ID, turn.ID, claimID, domain.TaskTurnUnknown, 0, "", false)
-			return receipt, turn, observation, provider.TurnResult{}, errors.Join(provider.ErrProviderInvalidResult, persistErr)
-		}
-		receipt, turn, observation, result, finalizeErr := c.finalizeTaskTurn(
-			ctx, receipt, job, turn, claimID, result, "", "", permissionRequest, principal,
-		)
-		if observation.Status == domain.TaskTurnCompleted || observation.Status == domain.TaskTurnFailed {
-			finalizeErr = errors.Join(finalizeErr, c.releaseTaskTurnDispatchClaim(ctx, job.ID, turn, observation, principal))
-		}
-		return receipt, turn, observation, result, finalizeErr
-	}
 	if canLookup {
 		if _, _, persistErr := c.recordTaskTurnDispatchObservation(ctx, job.ID, claimID,
 			domain.TaskTurnDispatchObservationLookupNotFound, lookupEvidence, principal); persistErr != nil {

@@ -114,16 +114,27 @@ func TestProviderControllerSendTaskExecutionPersistsResultAndCompleteUsage(t *te
 	}
 	completeCapabilities := runtime.capabilities
 	runtime.capabilities.SendLookup = false
-	runtime.capabilities.SendIdempotency = false
 	if _, _, _, _, err := providerController.SendTaskExecution(
 		ctx, jobID, execution.ID, permission.ID, "cmd_c1010101010101010101010101010101",
-		"Capability preflight must precede intent persistence.", permissionRequest, 100, principal,
+		"Send Idempotency without Lookup must not permit a new Turn.", permissionRequest, 100, principal,
 	); !errors.Is(err, provider.ErrUnsupportedCapability) {
-		t.Fatalf("Send without E4 Lookup or Idempotency was not rejected: %v", err)
+		t.Fatalf("Send with E4 Idempotency but without E4 Lookup was not rejected: %v", err)
 	}
 	job, err := database.GetJob(ctx, jobID)
 	if err != nil || len(job.TaskTurnIntents) != 0 {
-		t.Fatalf("missing Send capability persisted a Turn intent: intents=%d err=%v", len(job.TaskTurnIntents), err)
+		t.Fatalf("Lookup-less Send capability persisted a Turn intent: intents=%d err=%v", len(job.TaskTurnIntents), err)
+	}
+	runtime.capabilities = completeCapabilities
+	runtime.capabilities.SendIdempotency = false
+	if _, _, _, _, err := providerController.SendTaskExecution(
+		ctx, jobID, execution.ID, permission.ID, "cmd_c1020202020202020202020202020202",
+		"Send Lookup without Idempotency must not permit a new Turn.", permissionRequest, 100, principal,
+	); !errors.Is(err, provider.ErrUnsupportedCapability) {
+		t.Fatalf("Send with E4 Lookup but without E4 Idempotency was not rejected: %v", err)
+	}
+	job, err = database.GetJob(ctx, jobID)
+	if err != nil || len(job.TaskTurnIntents) != 0 {
+		t.Fatalf("Idempotency-less Send capability persisted a Turn intent: intents=%d err=%v", len(job.TaskTurnIntents), err)
 	}
 	runtime.capabilities = completeCapabilities
 	runtime.capabilities.FinalOutputRetrieval = false
