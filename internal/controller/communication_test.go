@@ -254,8 +254,7 @@ func TestCommunicationControllerRecordsAndReconcilesDeliveryObservation(t *testi
 
 	_, unknown, err := communication.RecordDeliveryObservation(
 		context.Background(), jobID, message.Message.ID,
-		"cmd_83838383838383838383838383838383",
-		1,
+		message.Delivery.ID, "cmd_83838383838383838383838383838383",
 		domain.DeliveryUnknown, "", false,
 	)
 	if err != nil {
@@ -267,8 +266,7 @@ func TestCommunicationControllerRecordsAndReconcilesDeliveryObservation(t *testi
 
 	_, _, err = communication.RecordDeliveryObservation(
 		context.Background(), jobID, message.Message.ID,
-		"cmd_84848484848484848484848484848484",
-		1,
+		message.Delivery.ID, "cmd_84848484848484848484848484848484",
 		domain.DeliveryAccepted, strings.Repeat("a", 64), false,
 	)
 	if err == nil {
@@ -277,8 +275,7 @@ func TestCommunicationControllerRecordsAndReconcilesDeliveryObservation(t *testi
 
 	_, accepted, err := communication.RecordDeliveryObservation(
 		context.Background(), jobID, message.Message.ID,
-		"cmd_85858585858585858585858585858585",
-		1,
+		message.Delivery.ID, "cmd_85858585858585858585858585858585",
 		domain.DeliveryAccepted, strings.Repeat("b", 64), true,
 	)
 	if err != nil {
