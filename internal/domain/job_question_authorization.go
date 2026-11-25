@@ -61,7 +61,7 @@ func NewJobQuestionAuthorization(job Job, request JobQuestionAuthorizationReques
 		!validPlanningIdentity(request.QuestionMessageID) ||
 		!validPlanningIdentity(request.PlannerRoleExecutionID) ||
 		!validPlanningIdentity(request.ProviderSessionID) ||
-		!validPlanningIdentity(request.RepositoryID) ||
+		!validRepositoryIdentity(request.RepositoryID) ||
 		!validRepositoryIdentity(request.PlanningRepositoryID) ||
 		!validPlanningIdentity(request.ProviderID) || !validPlanningIdentity(request.AccountID) ||
 		!validSHA256(request.ConfigurationSHA256) || !validPlanningIdentity(request.ReadOnlyBoundary.Reference) ||
@@ -163,7 +163,7 @@ func (a JobQuestionAuthorization) Validate(job Job) error {
 	if !validCommandID(a.CommandID) || a.ID != JobQuestionAuthorizationID(a.CommandID) ||
 		a.JobID != job.ID || !validPlanningIdentity(a.JobApprovalID) || a.ContractRevision == 0 ||
 		!validPlanningIdentity(a.QuestionMessageID) || !validPlanningIdentity(a.PlannerRoleExecutionID) ||
-		!validPlanningIdentity(a.ProviderSessionID) || !validPlanningIdentity(a.RepositoryID) ||
+		!validPlanningIdentity(a.ProviderSessionID) || !validRepositoryIdentity(a.RepositoryID) ||
 		!validRepositoryIdentity(a.PlanningRepositoryID) || !validPlanningIdentity(a.ProviderID) || !validPlanningIdentity(a.AccountID) ||
 		!validSHA256(a.ConfigurationSHA256) ||
 		!validPlanningIdentity(a.ReadOnlyBoundary.Reference) || !validSHA256(a.ReadOnlyBoundary.SHA256) ||
