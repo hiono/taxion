@@ -121,7 +121,7 @@ func TestLegacyTaskRoleExecutionWithoutWorktreeRemainsReadable(t *testing.T) {
 		WorktreePath:   filepath.Join(legacyRoot, "worktrees", "legacy-task"),
 		BaselineCommit: strings.Repeat("a", 40),
 		Origin:         WorktreeOriginTaxionCreated, InitialStateSHA256: strings.Repeat("b", 64),
-		HeadMode:       WorktreeHeadDetached,
+		HeadMode: WorktreeHeadDetached,
 	}
 	start, err := NewTaskRoleExecutionStart(
 		job, task.ID, permission.ID, "cmd_88888888888888888888888888888888",
