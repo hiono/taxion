@@ -638,7 +638,6 @@ func hashTrackedWorktreeFiles(ctx context.Context, path string, root *os.Root, h
 		}
 		writeDigestPart(hash, []byte(relative))
 		writeDigestPart(hash, []byte(mode))
-		writeDigestPart(hash, []byte(fmt.Sprintf("%o", uint32(info.Mode()))))
 		switch mode {
 		case "120000":
 			if info.Mode()&os.ModeSymlink == 0 {
@@ -652,6 +651,7 @@ func hashTrackedWorktreeFiles(ctx context.Context, path string, root *os.Root, h
 			if err != nil || !os.SameFile(info, after) || after.Mode()&os.ModeSymlink == 0 {
 				return errors.New("tracked Worktree symlink changed while its state was captured")
 			}
+			writeDigestPart(hash, []byte(fmt.Sprintf("%o", uint32(info.Mode()))))
 			writeDigestPart(hash, []byte(target))
 		case "100644", "100755":
 			if !info.Mode().IsRegular() {
@@ -661,10 +661,7 @@ func hashTrackedWorktreeFiles(ctx context.Context, path string, root *os.Root, h
 			if err != nil {
 				return fmt.Errorf("open tracked Worktree file %q within its root: %w", relative, err)
 			}
-			if !os.SameFile(info, openedInfo) {
-				_ = file.Close()
-				return errors.New("tracked Worktree file changed before it could be opened")
-			}
+			writeDigestPart(hash, []byte(fmt.Sprintf("%o", uint32(openedInfo.Mode()))))
 			if _, err := fmt.Fprintf(hash, "%d:", openedInfo.Size()); err != nil {
 				_ = file.Close()
 				return err
