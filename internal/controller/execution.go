@@ -269,10 +269,21 @@ func (c *ExecutionController) CaptureTaskOutput(
 	if err != nil {
 		return store.CommandReceipt{}, domain.JobOutput{}, err
 	}
+	var producer domain.RoleExecution
+	producerFound := false
+	for _, candidate := range job.RoleExecutions {
+		if candidate.ID == roleExecutionID {
+			producer, producerFound = candidate, true
+			break
+		}
+	}
+	if !producerFound {
+		return store.CommandReceipt{}, domain.JobOutput{}, errors.New("Task output producer Task was not found")
+	}
 	var task domain.Task
 	taskFound := false
 	for _, candidate := range job.Tasks {
-		if candidate.ID == roleExecutionTaskID(job, roleExecutionID) {
+		if candidate.ID == producer.TaskID {
 			task, taskFound = candidate, true
 			break
 		}

@@ -376,23 +376,12 @@ func (c *ProviderController) dispatchTaskTurn(
 		return receipt, turn, domain.TaskTurnObservation{}, provider.TurnResult{},
 			errors.Join(errors.New("Task Send authority or Worktree changed during final verification"), finalErr, releaseErr)
 	}
-	finalClaim, finalClaimActive := domain.ActiveTaskTurnDispatchClaim(finalJob, turn.OperationID)
-	if !finalClaimActive || finalClaim.ID != claim.ID {
-		return receipt, turn, domain.TaskTurnObservation{}, provider.TurnResult{}, provider.ErrStopUnconfirmed
-	}
-	if err := finalPermission.ValidateFor(finalJob, finalPermission.OperationID, finalPermission.RequestSHA256, c.now()); err != nil {
-		releaseErr := c.releaseTaskTurnDispatchClaimBeforeSend(ctx, latest.ID, turn, claim.ID, principal)
-		return receipt, turn, domain.TaskTurnObservation{}, provider.TurnResult{}, errors.Join(err, releaseErr)
-	}
-	for _, stopIntent := range finalJob.ProviderStopIntents {
-		if stopIntent.RoleExecutionID == turn.RoleExecutionID && stopIntent.SessionID == turn.ProviderSessionID {
-			releaseErr := c.releaseTaskTurnDispatchClaimBeforeSend(ctx, latest.ID, turn, claim.ID, principal)
-			return receipt, turn, domain.TaskTurnObservation{}, provider.TurnResult{},
-				errors.Join(errors.New("Task Provider Send is blocked by a Stop intent saved during final verification"), releaseErr)
-		}
-	}
 	postClaimJob, postExecution, postPermission, postTask, postAssignment, postSession =
 		finalJob, finalExecution, finalPermission, finalTask, finalAssignment, finalSession
+	activeClaim, active := domain.ActiveTaskTurnDispatchClaim(postClaimJob, turn.OperationID)
+	if !active || activeClaim.ID != claim.ID {
+		return receipt, turn, domain.TaskTurnObservation{}, provider.TurnResult{}, provider.ErrStopUnconfirmed
+	}
 	// ExecutionPermission is operation-scoped and must still be valid after the
 	// final Worktree verification, immediately before the Provider side effect.
 	if err := postPermission.ValidateFor(postClaimJob, postPermission.OperationID, postPermission.RequestSHA256, c.now()); err != nil {
@@ -411,10 +400,6 @@ func (c *ProviderController) dispatchTaskTurn(
 			return receipt, turn, domain.TaskTurnObservation{}, provider.TurnResult{}, releaseErr
 		}
 		return c.reconcileTaskTurn(ctx, receipt, postClaimJob, turn, request, permissionRequest, principal, capabilities)
-	}
-	activeClaim, active := domain.ActiveTaskTurnDispatchClaim(postClaimJob, turn.OperationID)
-	if !active || activeClaim.ID != claim.ID {
-		return receipt, turn, domain.TaskTurnObservation{}, provider.TurnResult{}, provider.ErrStopUnconfirmed
 	}
 	if resumeStatus, found := domain.LatestPlanningResumeStatus(postClaimJob, turn.RoleExecutionID); found &&
 		resumeStatus != domain.PlanningResumeAttached {
