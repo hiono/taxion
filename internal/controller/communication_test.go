@@ -30,12 +30,12 @@ func TestCommunicationControllerPersistsRoleQuestionAndAnswer(t *testing.T) {
 		domain.PlanningAuthorizationRequest{
 			ProviderID: runtime.identity.ProviderID, AccountID: runtime.identity.AccountID,
 			ConfigurationSHA256: runtime.identity.ConfigurationSHA256,
-			RepositoryID: "https://github.com/example/project@" + strings.Repeat("b", 40),
+			RepositoryID:        "https://github.com/example/project@" + strings.Repeat("b", 40),
 			ReadOnlyBoundary: domain.PlanningReadOnlyBoundary{
 				Mode: domain.PlanningReadOnlyBoundarySnapshot, Reference: "snapshot_1",
 				SHA256: sha256String(documents[0].Content),
 			},
-			Budget: domain.PlanningBudget{MaxTurns: 3, MaxTokens: 1000},
+			Budget:    domain.PlanningBudget{MaxTurns: 3, MaxTokens: 1000},
 			Deadline: now.Add(time.Hour),
 		}, now)
 	if err != nil {
@@ -49,7 +49,7 @@ func TestCommunicationControllerPersistsRoleQuestionAndAnswer(t *testing.T) {
 	secondStartCommand := "cmd_33333333333333333333333333333333"
 	runtime.startResult = provider.StartResult{
 		OperationID: domain.ProviderStartOperationID(secondStartCommand),
-		SessionID: "session_2", ReceiptID: "receipt_2", EvidenceSHA256: strings.Repeat("e", 64),
+		SessionID:    "session_2", ReceiptID: "receipt_2", EvidenceSHA256: strings.Repeat("e", 64),
 	}
 	_, secondExecution, _, secondStart, err := providerController.StartPlanning(
 		context.Background(), jobID, secondGrant.ID, secondStartCommand, documents, principal,
@@ -66,8 +66,8 @@ func TestCommunicationControllerPersistsRoleQuestionAndAnswer(t *testing.T) {
 		JobID: jobID, RoleExecutionID: firstExecution.ID, ProviderSessionID: firstStart.SessionID,
 		CommandID: "cmd_44444444444444444444444444444444",
 		Recipient: domain.ActorRef{Kind: domain.ActorPlanner, ID: secondExecution.ID},
-		Kind: domain.MessageKindQuestion,
-		Body: "この制約の優先順位を確認してください。\n既存のContextは維持してください。",
+		Kind:       domain.MessageKindQuestion,
+		Body:       "この制約の優先順位を確認してください。\n既存のContextは維持してください。",
 	})
 	if err != nil {
 		t.Fatalf("SendFromRole QUESTION: %v", err)
@@ -82,7 +82,7 @@ func TestCommunicationControllerPersistsRoleQuestionAndAnswer(t *testing.T) {
 		JobID: jobID, RoleExecutionID: secondExecution.ID, ProviderSessionID: secondStart.SessionID,
 		CommandID: "cmd_55555555555555555555555555555555",
 		Recipient: domain.ActorRef{Kind: domain.ActorPlanner, ID: firstExecution.ID},
-		Kind: domain.MessageKindAnswer, ReplyToMessageID: question.Message.ID,
+		Kind:       domain.MessageKindAnswer, ReplyToMessageID: question.Message.ID,
 		Body: "優先順位は安全性、次に完遂性です。",
 	})
 	if err != nil {
@@ -121,7 +121,7 @@ func TestCommunicationControllerRejectsUnboundRoleSession(t *testing.T) {
 		JobID: jobID, RoleExecutionID: execution.ID, ProviderSessionID: "session_forged",
 		CommandID: "cmd_77777777777777777777777777777777",
 		Recipient: domain.ActorRef{Kind: domain.ActorHuman, ID: principal.PrincipalID()},
-		Kind: domain.MessageKindMessage, Body: "must be rejected",
+		Kind:       domain.MessageKindMessage, Body: "must be rejected",
 	})
 	if err == nil {
 		t.Fatal("CommunicationController accepted an unbound Provider Session")
