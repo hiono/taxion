@@ -839,7 +839,7 @@ func TestRuntimePreservesIncompleteUsageWithoutFinalizingIt(t *testing.T) {
 func TestWithCredentialReportsAcquireAndLeaseCleanupFailureWithoutCallingProvider(t *testing.T) {
 	lease := &failingCloseLease{}
 	called := false
-	_, err := withCredential(context.Background(), failingAcquireBroker{lease: lease}, testIdentity(),
+	_, err := withCredential(context.Background(), &failingAcquireBroker{lease: lease}, testIdentity(),
 		func(CredentialLease) (struct{}, error) {
 			called = true
 			return struct{}{}, nil

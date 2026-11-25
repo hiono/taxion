@@ -331,7 +331,12 @@ func (m *Manager) cleanupFailedPrepare(
 		}
 	}
 	if reservation != nil && worktreeRemoved && baselineRemoved {
-		cleanupErr = errors.Join(cleanupErr, m.removeOrphanedAdoptionReservation(*reservation))
+		directory, directoryErr := m.adoptionReservationDirectory(reservation.RepositoryID, false)
+		if directoryErr != nil {
+			cleanupErr = errors.Join(cleanupErr, directoryErr)
+		} else {
+			cleanupErr = errors.Join(cleanupErr, m.removeOrphanedAdoptionReservation(*reservation, directory))
+		}
 	}
 	return cleanupErr
 }

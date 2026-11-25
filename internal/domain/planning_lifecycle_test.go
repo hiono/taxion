@@ -818,7 +818,7 @@ func TestPlanningResumeAfterStopRecordsBoundaryDenial(t *testing.T) {
 	job.UpdatedAt = stop.CreatedAt
 
 	if _, err := NewPlanningResumeDispatchClaim(
-		job, resume.ID, principal.PrincipalID(), "cmd_44444444444444444444444444444444", now.Add(5*time.Second),
+		job, resume.ID, principal, "cmd_44444444444444444444444444444444", now.Add(5*time.Second),
 	); err == nil {
 		t.Fatal("Resume dispatch claim was accepted after a Stop intent for the same Session")
 	}
