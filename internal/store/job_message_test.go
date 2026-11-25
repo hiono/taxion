@@ -85,7 +85,7 @@ func TestJobMessageAndDeliveryStoreCommandsAreIdempotent(t *testing.T) {
 
 	requestCommand := "cmd_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
 	requestReceipt, requested, err := database.AddDeliveryObservation(
-		ctx, job.ID, job.Revision, message.ID, requestCommand, 1, domain.DeliveryRequested, "", false,
+		ctx, job.ID, job.Revision, message.ID, "", requestCommand, domain.DeliveryRequested, "", false,
 	)
 	if err != nil || requested.Status != domain.DeliveryRequested {
 		t.Fatalf("AddDeliveryObservation REQUESTED: %#v %v", requestReceipt, err)
@@ -95,7 +95,7 @@ func TestJobMessageAndDeliveryStoreCommandsAreIdempotent(t *testing.T) {
 		t.Fatalf("GetJob after REQUESTED: %v", err)
 	}
 	unknownReceipt, unknown, err := database.AddDeliveryObservation(
-		ctx, job.ID, job.Revision, message.ID, "cmd_ffffffffffffffffffffffffffffffff", 1, domain.DeliveryUnknown, "", false,
+		ctx, job.ID, job.Revision, message.ID, requested.ID, "cmd_ffffffffffffffffffffffffffffffff", domain.DeliveryUnknown, "", false,
 	)
 	if err != nil || unknown.Status != domain.DeliveryUnknown || unknown.Attempt != 1 {
 		t.Fatalf("AddDeliveryObservation UNKNOWN: %#v %#v %v", unknownReceipt, unknown, err)
@@ -105,7 +105,7 @@ func TestJobMessageAndDeliveryStoreCommandsAreIdempotent(t *testing.T) {
 		t.Fatalf("GetJob after UNKNOWN: %v", err)
 	}
 	_, accepted, err := database.AddDeliveryObservation(
-		ctx, job.ID, job.Revision, message.ID, "cmd_11111111111111111111111111111111", 1,
+		ctx, job.ID, job.Revision, message.ID, requested.ID, "cmd_11111111111111111111111111111111",
 		domain.DeliveryAccepted, strings.Repeat("1", 64), true,
 	)
 	if err != nil || accepted.Status != domain.DeliveryAccepted || !accepted.ReconcilesUnknown {
