@@ -355,7 +355,7 @@ func NewProviderStopDispatchReleaseAt(
 		}
 	} else if outcome == ProviderStopDispatchReleasedDefinitiveFailure {
 		if start, started := ProviderStopDispatchStartedForClaim(job, claim.ID); started &&
-			!providerStopDefinitiveFailureObserved(job, claim.OperationID, start.CreatedRevision, job.Revision+1, evidenceSHA256) {
+			!providerStopDefinitiveFailureObserved(job, claim.ID, claim.OperationID, start.CreatedRevision, job.Revision+1, evidenceSHA256) {
 			return ProviderStopDispatchRelease{}, errors.New("started Provider Stop dispatch definitive failure requires matching persisted evidence")
 		}
 	}
@@ -431,6 +431,15 @@ func (r ProviderStopDispatchRelease) Validate(job Job) error {
 		}
 	}
 	return nil
+}
+
+func providerStopDispatchClaimByID(job Job, claimID string) (ProviderStopDispatchClaim, bool) {
+	for _, claim := range job.ProviderStopDispatchClaims {
+		if claim.ID == claimID {
+			return claim, true
+		}
+	}
+	return ProviderStopDispatchClaim{}, false
 }
 
 func ActiveProviderStopDispatchClaim(job Job, operationID string) (ProviderStopDispatchClaim, bool) {
