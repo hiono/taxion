@@ -16,7 +16,7 @@ import (
 type CommunicationStore interface {
 	GetJob(context.Context, string) (domain.Job, error)
 	AddJobMessage(context.Context, string, uint64, string, domain.JobMessageRequest) (store.CommandReceipt, domain.JobMessage, error)
-	AddDeliveryObservation(context.Context, string, uint64, string, string, uint32, domain.DeliveryStatus, string, bool) (store.CommandReceipt, domain.DeliveryObservation, error)
+	AddDeliveryObservation(context.Context, string, uint64, string, string, string, domain.DeliveryStatus, string, bool) (store.CommandReceipt, domain.DeliveryObservation, error)
 }
 
 type RoleMessageRequest struct {
@@ -181,7 +181,7 @@ func (c *CommunicationController) ensureRequestedDelivery(
 		}
 		commandID := deliveryRequestCommandID(message.CommandID)
 		receipt, observation, err := c.store.AddDeliveryObservation(
-			ctx, jobID, job.Revision, message.ID, commandID, 1, domain.DeliveryRequested, "", false,
+			ctx, jobID, job.Revision, message.ID, "", commandID, domain.DeliveryRequested, "", false,
 		)
 		if errors.Is(err, store.ErrIdempotencyConflict) && attempt == 0 {
 			continue
@@ -198,13 +198,12 @@ func (c *CommunicationController) ensureRequestedDelivery(
 // It records delivery evidence only; it does not dispatch or retry the message.
 func (c *CommunicationController) RecordDeliveryObservation(
 	ctx context.Context,
-	jobID, messageID, commandID string,
-	attempt uint32,
+	jobID, messageID, requestObservationID, commandID string,
 	status domain.DeliveryStatus,
 	evidenceSHA256 string,
 	reconcilesUnknown bool,
 ) (store.CommandReceipt, domain.DeliveryObservation, error) {
-	return c.recordDeliveryObservation(ctx, jobID, messageID, commandID, status, evidenceSHA256, reconcilesUnknown)
+	return c.recordDeliveryObservation(ctx, jobID, messageID, requestObservationID, commandID, status, evidenceSHA256, reconcilesUnknown)
 }
 
 func (c *CommunicationController) recordDeliveryObservation(
@@ -222,7 +221,7 @@ func (c *CommunicationController) recordDeliveryObservation(
 		return store.CommandReceipt{}, domain.DeliveryObservation{}, err
 	}
 	return c.store.AddDeliveryObservation(
-		ctx, jobID, job.Revision, messageID, commandID, attempt, status, evidenceSHA256, reconcilesUnknown,
+		ctx, jobID, job.Revision, messageID, requestObservationID, commandID, status, evidenceSHA256, reconcilesUnknown,
 	)
 }
 
