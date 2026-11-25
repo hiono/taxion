@@ -966,6 +966,14 @@ func TestTaskTurnUnknownReturnedIsRecordedForRetryClaim(t *testing.T) {
 	job.Revision++
 	job.UpdatedAt = claimB.CreatedAt
 	appendTaskTurnDispatchObservationForTest(t, &job, claimB, TaskTurnDispatchObservationStarted, "", now.Add(84*time.Second))
+	retryUnknown, err := NewTaskTurnObservationForClaim(job, turn.ID, claimB.ID,
+		"cmd_d8484848484848484848484848484848", TaskTurnUnknown, 0, "", false, now.Add(84*time.Second+time.Millisecond))
+	if err != nil {
+		t.Fatalf("record retry claim's UNKNOWN observation: %v", err)
+	}
+	job.TaskTurnObservations = append(job.TaskTurnObservations, retryUnknown)
+	job.Revision++
+	job.UpdatedAt = retryUnknown.CreatedAt
 	returnedEvidence := strings.Repeat("9", 64)
 	returned, err := NewTaskTurnDispatchObservation(
 		job, claimB.ID, principalID,
@@ -980,5 +988,9 @@ func TestTaskTurnUnknownReturnedIsRecordedForRetryClaim(t *testing.T) {
 	job.UpdatedAt = returned.CreatedAt
 	if err := job.Validate(); err != nil {
 		t.Fatalf("Job with claim-specific UNKNOWN_RETURNED did not validate: %v", err)
+	}
+	if _, err := NewPlanningResumeIntent(job, execution.ID, principalID, "session_task",
+		"cmd_d8585858585858585858585858585858", strings.Repeat("a", 64), true, now.Add(86*time.Second)); err != nil {
+		t.Fatalf("Resume rejected after retry claim's own UNKNOWN and UNKNOWN_RETURNED facts: %v", err)
 	}
 }

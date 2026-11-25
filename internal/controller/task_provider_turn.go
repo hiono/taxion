@@ -975,25 +975,31 @@ func (c *ProviderController) recordTaskTurnObservation(
 	previous, found := latestTaskTurnObservation(job, turnID)
 	if found {
 		if previous.Status == domain.TaskTurnUnknown && status == domain.TaskTurnUnknown {
-			return previous, nil
-		}
-		if previous.Status != domain.TaskTurnUnknown {
-			if previous.Status == status && previous.TokensUsed == tokensUsed && previous.EvidenceSHA256 == evidenceSHA256 {
+			if previous.DispatchClaimID == claimID {
+				return previous, nil
+			}
+			// UNKNOWN is a Turn-level state, but every retry claim must record
+			// its own returned-call observation before Resume is permitted.
+			reconcilesUnknown = false
+		} else if previous.Status != domain.TaskTurnUnknown {
+			if previous.Status == status && previous.TokensUsed == tokensUsed && previous.EvidenceSHA256 == evidenceSHA256 &&
+				previous.DispatchClaimID == claimID {
 				return previous, nil
 			}
 			return domain.TaskTurnObservation{}, errors.New("Task Turn already has a terminal observation")
+		} else {
+			reconcilesUnknown = true
 		}
-		reconcilesUnknown = true
 	}
-	commandID := taskTurnObservationCommandID(turnID, status, tokensUsed, evidenceSHA256, reconcilesUnknown)
+	commandID := taskTurnObservationCommandID(turnID, claimID, status, tokensUsed, evidenceSHA256, reconcilesUnknown)
 	_, observation, err := c.store.AddTaskTurnObservationForClaim(
 		ctx, jobID, job.Revision, turnID, claimID, commandID, status, tokensUsed, evidenceSHA256, reconcilesUnknown,
 	)
 	return observation, err
 }
 
-func taskTurnObservationCommandID(turnID, status string, tokensUsed uint64, evidenceSHA256 string, reconcilesUnknown bool) string {
-	return "cmd_" + sha256String(fmt.Sprintf("taxion:task-turn-observation:%s:%s:%d:%s:%t", turnID, status, tokensUsed, evidenceSHA256, reconcilesUnknown))[:32]
+func taskTurnObservationCommandID(turnID, claimID, status string, tokensUsed uint64, evidenceSHA256 string, reconcilesUnknown bool) string {
+	return "cmd_" + sha256String(fmt.Sprintf("taxion:task-turn-observation:%s:%s:%s:%d:%s:%t", turnID, claimID, status, tokensUsed, evidenceSHA256, reconcilesUnknown))[:32]
 }
 
 func taskTurnHasObservation(job domain.Job, turnID string) bool {

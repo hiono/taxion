@@ -281,8 +281,15 @@ func newTaskTurnObservation(
 	if !exists && reconcilesUnknown {
 		return TaskTurnObservation{}, errors.New("first observation cannot reconcile UNKNOWN")
 	}
-	if exists && (previous.Status != TaskTurnUnknown || status == TaskTurnUnknown || !reconcilesUnknown) {
-		return TaskTurnObservation{}, errors.New("only same-Turn UNKNOWN may be reconciled by terminal evidence")
+	if exists {
+		if status == TaskTurnUnknown {
+			if previous.Status != TaskTurnUnknown || reconcilesUnknown || claimID == "" ||
+				claimID == previous.DispatchClaimID {
+				return TaskTurnObservation{}, errors.New("retry UNKNOWN requires a distinct dispatch claim after prior UNKNOWN")
+			}
+		} else if previous.Status != TaskTurnUnknown || !reconcilesUnknown {
+			return TaskTurnObservation{}, errors.New("only same-Turn UNKNOWN may be reconciled by terminal evidence")
+		}
 	}
 	if job.Revision >= uint64(^uint64(0)>>1) {
 		return TaskTurnObservation{}, errors.New("Job revision exhausted")
@@ -469,14 +476,18 @@ func validateTaskProviderTurnFacts(job Job) error {
 				continue
 			}
 			previous := observations[index-1]
-			if previous.Status != TaskTurnUnknown || observation.Status == TaskTurnUnknown ||
-				!observation.ReconcilesUnknown || observation.CreatedRevision <= previous.CreatedRevision ||
+			if previous.Status != TaskTurnUnknown ||
+				observation.CreatedRevision <= previous.CreatedRevision ||
 				observation.CreatedAt.Before(previous.CreatedAt) {
-				return fmt.Errorf("%w: invalid Task Turn reconciliation for %s", ErrInvalidJob, turnID)
+				return fmt.Errorf("%w: invalid Task Turn reconciliation order for %s", ErrInvalidJob, turnID)
 			}
-		}
-		if len(observations) > 2 || (len(observations) == 2 && observations[0].Status != TaskTurnUnknown) {
-			return fmt.Errorf("%w: invalid Task Turn observation history for %s", ErrInvalidJob, turnID)
+			if observation.Status == TaskTurnUnknown {
+				if observation.ReconcilesUnknown || observation.DispatchClaimID == previous.DispatchClaimID {
+					return fmt.Errorf("%w: repeated Task Turn UNKNOWN must belong to a new dispatch claim for %s", ErrInvalidJob, turnID)
+				}
+			} else if !observation.ReconcilesUnknown {
+				return fmt.Errorf("%w: terminal Task Turn observation must reconcile UNKNOWN for %s", ErrInvalidJob, turnID)
+			}
 		}
 	}
 	return nil

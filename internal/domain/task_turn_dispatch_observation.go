@@ -89,8 +89,9 @@ func (o TaskTurnDispatchObservation) Validate(job Job) error {
 				latest = candidate
 			}
 		}
-		if latest == nil || latest.Status != TaskTurnUnknown {
-			return errors.New("returned UNKNOWN must follow the latest UNKNOWN observation for the same Turn")
+		if latest == nil || latest.Status != TaskTurnUnknown || latest.DispatchClaimID != claim.ID ||
+			latest.CreatedRevision <= start.CreatedRevision {
+			return errors.New("returned UNKNOWN requires a claim-scoped UNKNOWN observation after dispatch start")
 		}
 	default:
 		return errors.New("unsupported Task Turn dispatch observation status")
