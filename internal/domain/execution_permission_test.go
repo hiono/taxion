@@ -12,6 +12,7 @@ func approvedJobForExecutionPermission(t *testing.T) (Job, time.Time) {
 	t.Helper()
 	job, execution, result, baseTime := jobWithAcceptedPlanner(t)
 	contract := validJobContract(baseTime)
+	contract.ConfigurationSHA256 = job.PlanningAuthorizations[0].ConfigurationSHA256
 	revision, err := NewJobContractRevision(
 		job, "cmd_44444444444444444444444444444444", execution.ID,
 		result.ID, result.ContentSHA256, contract, baseTime.Add(6*time.Minute),

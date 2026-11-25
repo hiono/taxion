@@ -20,6 +20,7 @@ func TestJobQuestionAuthorizationStorePersistsAndReplays(t *testing.T) {
 		t.Fatalf("GetJob before JobContract revision: %v", err)
 	}
 	contract := validStoreJobContract()
+	contract.ConfigurationSHA256 = job.PlanningAuthorizations[0].ConfigurationSHA256
 	_, revision, err := database.AddJobContractRevision(
 		ctx, job.ID, job.Revision, "cmd_81818181818181818181818181818181",
 		planner.ID, sourceResult.ID, sourceResult.ContentSHA256, contract,

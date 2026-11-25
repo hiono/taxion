@@ -79,6 +79,7 @@ func NewJobQuestionAuthorization(job Job, request JobQuestionAuthorizationReques
 		return JobQuestionAuthorization{}, errors.New("JobQuestionAuthorization requires the exact latest JobApproval")
 	}
 	if !repositoryInJobContract(latest.Contract, request.RepositoryID) ||
+		request.ConfigurationSHA256 != latest.Contract.ConfigurationSHA256 ||
 		request.Deadline.After(latest.Contract.Deadline) ||
 		!request.Deadline.After(now) ||
 		request.Budget.MaxTurns > latest.Contract.Budget.MaxTurns ||
@@ -120,7 +121,9 @@ func NewJobQuestionAuthorization(job Job, request JobQuestionAuthorizationReques
 	}
 	if !startFound || start.ProviderID != request.ProviderID || start.AccountID != request.AccountID ||
 		start.ConfigurationSHA256 != request.ConfigurationSHA256 ||
-		planningGrant.RepositoryID != request.PlanningRepositoryID {
+		planningGrant.RepositoryID != request.PlanningRepositoryID ||
+		request.Deadline.After(start.Deadline) || !now.Before(start.Deadline) ||
+		providerStopIntentExists(job, planner.ID, request.ProviderSessionID, job.Revision+1) {
 		return JobQuestionAuthorization{}, errors.New("JobQuestionAuthorization Provider or repository identity differs from the accepted Planner execution")
 	}
 	startObservation, observed := latestProviderStartObservation(job, start.ID)
@@ -178,6 +181,7 @@ func (a JobQuestionAuthorization) Validate(job Job) error {
 		}
 	}
 	if revision == nil || !repositoryInJobContract(revision.Contract, a.RepositoryID) ||
+		a.ConfigurationSHA256 != revision.Contract.ConfigurationSHA256 ||
 		a.Deadline.After(revision.Contract.Deadline) ||
 		a.Budget.MaxTurns > revision.Contract.Budget.MaxTurns ||
 		a.Budget.MaxTokens > revision.Contract.Budget.MaxTokens {
@@ -213,7 +217,9 @@ func (a JobQuestionAuthorization) Validate(job Job) error {
 		}
 	}
 	if !startFound || start.ProviderID != a.ProviderID || start.AccountID != a.AccountID ||
-		start.ConfigurationSHA256 != a.ConfigurationSHA256 {
+		start.ConfigurationSHA256 != a.ConfigurationSHA256 || a.IssuedAt.After(start.Deadline) ||
+		a.Deadline.After(start.Deadline) ||
+		providerStopIntentExists(job, planner.ID, a.ProviderSessionID, a.CreatedRevision) {
 		return errors.New("JobQuestionAuthorization Provider identity does not match the Planner Start")
 	}
 	startObservation, observed := latestProviderStartObservation(job, start.ID)
@@ -242,7 +248,8 @@ func (a JobQuestionAuthorization) ValidateFor(
 		plannerRoleExecutionID != a.PlannerRoleExecutionID ||
 		providerSessionID != a.ProviderSessionID ||
 		now.IsZero() || now.Before(a.IssuedAt) || !now.Before(a.Deadline) ||
-		!now.Before(latest.Contract.Deadline) {
+		!now.Before(latest.Contract.Deadline) ||
+		providerStopIntentExists(job, a.PlannerRoleExecutionID, a.ProviderSessionID, job.Revision+1) {
 		return errors.New("JobQuestionAuthorization is stale, expired, or bound to another question or Session")
 	}
 	return nil

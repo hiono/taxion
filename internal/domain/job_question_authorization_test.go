@@ -179,6 +179,7 @@ func TestJobQuestionAuthorizationRejectsScopeAndBudgetExpansion(t *testing.T) {
 		}},
 		{name: "foreign Provider", mutate: func(r *JobQuestionAuthorizationRequest) { r.ProviderID = "provider.foreign" }},
 		{name: "foreign session", mutate: func(r *JobQuestionAuthorizationRequest) { r.ProviderSessionID = "session_foreign" }},
+		{name: "configuration differs from approved contract", mutate: func(r *JobQuestionAuthorizationRequest) { r.ConfigurationSHA256 = strings.Repeat("0", 64) }},
 		{name: "budget exceeds contract", mutate: func(r *JobQuestionAuthorizationRequest) { r.Budget.MaxTokens = contract.Budget.MaxTokens + 1 }},
 		{name: "deadline exceeds contract", mutate: func(r *JobQuestionAuthorizationRequest) { r.Deadline = contract.Deadline.Add(time.Minute) }},
 		{name: "mutable context", mutate: func(r *JobQuestionAuthorizationRequest) { r.ReadOnlyBoundary.Mode = "mutable" }},
