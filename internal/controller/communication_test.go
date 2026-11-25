@@ -201,7 +201,7 @@ func TestCommunicationControllerRecordsAndReconcilesDeliveryObservation(t *testi
 		t.Fatalf("UNKNOWN delivery observation = %#v, want attempt 1", unknown)
 	}
 
-	_, err = communication.RecordDeliveryObservation(
+	_, _, err = communication.RecordDeliveryObservation(
 		context.Background(), jobID, message.Message.ID,
 		"cmd_84848484848484848484848484848484",
 		domain.DeliveryAccepted, strings.Repeat("a", 64), false,
