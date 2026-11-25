@@ -237,7 +237,9 @@ func (r *Runtime) Resume(ctx context.Context, request ResumeRequest) (ResumeResu
 		!capabilities.HasEvidenceAtLeast(CapabilityResumeIdempotency, EvidenceLive) {
 		return ResumeResult{}, NewPreDispatchError(request.OperationID, ErrUnsupportedCapability)
 	}
+	adapterCalled := false
 	result, err := withCredential(ctx, r.broker, r.identity, func(lease CredentialLease) (ResumeResult, error) {
+		adapterCalled = true
 		result, err := r.adapter.Resume(ctx, request, lease)
 		if err != nil {
 			return ResumeResult{}, err
@@ -252,6 +254,9 @@ func (r *Runtime) Resume(ctx context.Context, request ResumeRequest) (ResumeResu
 		return result, nil
 	})
 	if err != nil {
+		if !adapterCalled {
+			return ResumeResult{}, NewPreDispatchError(request.OperationID, err)
+		}
 		return ResumeResult{}, safeAdapterError(err)
 	}
 	if result.OperationID != request.OperationID || result.SessionID != request.SessionID ||

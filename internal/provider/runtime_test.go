@@ -539,6 +539,24 @@ func TestRuntimeResumeRequiresVerifiedIdempotencyForTaskReattachment(t *testing.
 	}
 }
 
+func TestRuntimeResumeClassifiesCredentialAcquisitionFailureAsPreDispatch(t *testing.T) {
+	adapter := newTestAdapter(CapabilitySessionReattach, CapabilityResumeIdempotency)
+	runtime, err := newTestRuntime(adapter, failingAcquireBroker{})
+	if err != nil {
+		t.Fatalf("NewRuntime: %v", err)
+	}
+	request := validResumeRequest()
+	request.RequireIdempotency = true
+	_, err = runtime.Resume(context.Background(), request)
+	var preDispatch *PreDispatchError
+	if !errors.As(err, &preDispatch) || preDispatch.OperationID != request.OperationID {
+		t.Fatalf("credential acquisition failure was not classified as pre-dispatch: %v", err)
+	}
+	if adapter.resumeCalls != 0 {
+		t.Fatalf("Adapter was called after credential acquisition failed: %d", adapter.resumeCalls)
+	}
+}
+
 func TestRuntimeSanitizesAdapterErrors(t *testing.T) {
 	adapter := newTestAdapter(CapabilityStartIdempotency)
 	adapter.startErr = errors.New("request failed with Bearer secret-value")
