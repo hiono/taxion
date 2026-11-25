@@ -184,9 +184,33 @@ func (c *ProviderController) ResumeTaskExecution(
 	if err != nil {
 		return receipt, intent, domain.PlanningResumeObservation{}, provider.ResumeResult{}, err
 	}
+	recordClaimedFailure := func(cause error) (domain.PlanningResumeObservation, error) {
+		if !createdClaim {
+			return domain.PlanningResumeObservation{}, errors.Join(provider.ErrResumeUnconfirmed, cause)
+		}
+		latestJob, readErr := c.store.GetJob(ctx, jobID)
+		if readErr != nil {
+			return domain.PlanningResumeObservation{}, errors.Join(cause, readErr)
+		}
+		if previous, found := latestProviderResumeObservation(latestJob, intent.ID); found &&
+			previous.Status == domain.PlanningResumeUnknown && previous.DispatchClaimID == claim.ID {
+			return previous, errors.Join(provider.ErrResumeUnconfirmed, cause)
+		}
+		evidence := providerResumeNotDispatchedEvidence(intent.ID, cause)
+		observation, persistErr := c.recordResumeObservation(
+			ctx, jobID, intent.ID, domain.PlanningResumeFailed, evidence, provider.ResumeResult{}, principal,
+		)
+		if persistErr != nil {
+			return observation, errors.Join(cause, persistErr)
+		}
+		releaseErr := c.releasePlanningResumeDispatchClaim(ctx, jobID, intent, domain.PlanningResumeDispatchReleasedFailed, principal)
+		return observation, errors.Join(cause, releaseErr)
+	}
 	claimedJob, err := c.store.GetJob(ctx, jobID)
 	if err != nil {
-		return receipt, intent, domain.PlanningResumeObservation{}, provider.ResumeResult{}, err
+		cause := fmt.Errorf("read Job after acquiring Task Resume dispatch claim: %w", err)
+		observation, persistErr := recordClaimedFailure(cause)
+		return receipt, intent, observation, provider.ResumeResult{}, errors.Join(cause, persistErr)
 	}
 	activeClaim, active := domain.ActivePlanningResumeDispatchClaim(claimedJob, intent.OperationID)
 	if !active || activeClaim.ID != claim.ID {
@@ -203,28 +227,6 @@ func (c *ProviderController) ResumeTaskExecution(
 	}
 	_, claimedExecution, claimedPermission, claimedTask, claimedAssignment, claimedStart, claimedSession, err :=
 		c.taskProviderExecutionTarget(ctx, jobID, roleExecutionID, permissionID, permissionRequest, principal)
-	recordClaimedFailure := func(cause error) (domain.PlanningResumeObservation, error) {
-		if !createdClaim {
-			return domain.PlanningResumeObservation{}, errors.Join(provider.ErrResumeUnconfirmed, cause)
-		}
-		latestJob, readErr := c.store.GetJob(ctx, jobID)
-		if readErr != nil {
-			return domain.PlanningResumeObservation{}, errors.Join(cause, readErr)
-		}
-		if previous, found := latestProviderResumeObservation(latestJob, intent.ID); found &&
-			previous.Status == domain.PlanningResumeUnknown {
-			return previous, errors.Join(provider.ErrResumeUnconfirmed, cause)
-		}
-		evidence := providerResumeNotDispatchedEvidence(intent.ID, cause)
-		observation, persistErr := c.recordResumeObservation(
-			ctx, jobID, intent.ID, domain.PlanningResumeFailed, evidence, provider.ResumeResult{}, principal,
-		)
-		if persistErr != nil {
-			return observation, errors.Join(cause, persistErr)
-		}
-		releaseErr := c.releasePlanningResumeDispatchClaim(ctx, jobID, intent, domain.PlanningResumeDispatchReleasedFailed, principal)
-		return observation, errors.Join(cause, releaseErr)
-	}
 	if err != nil || claimedJob.ID != latest.ID || claimedExecution.ID != execution.ID ||
 		claimedPermission.ID != permission.ID || claimedTask.ID != task.ID ||
 		claimedAssignment != assignment || claimedStart.ID != start.ID || claimedSession != sessionID {
@@ -250,7 +252,9 @@ func (c *ProviderController) ResumeTaskExecution(
 	}
 	latestClaimedJob, err := c.store.GetJob(ctx, jobID)
 	if err != nil {
-		return receipt, intent, domain.PlanningResumeObservation{}, provider.ResumeResult{}, err
+		cause := fmt.Errorf("read Job before Task Resume dispatch: %w", err)
+		observation, persistErr := recordClaimedFailure(cause)
+		return receipt, intent, observation, provider.ResumeResult{}, errors.Join(cause, persistErr)
 	}
 	activeClaim, active = domain.ActivePlanningResumeDispatchClaim(latestClaimedJob, intent.OperationID)
 	if !active || activeClaim.ID != claim.ID {
