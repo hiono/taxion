@@ -1008,7 +1008,7 @@ func TestProviderControllerPersistsDefinitiveStartFailureWithoutLookupOrReplay(t
 	}
 }
 
-func TestProviderControllerReconcilesUnknownToFailedAfterDefinitiveRetry(t *testing.T) {
+func TestProviderControllerReconcilesUnknownToFailedAfterLookupNotFound(t *testing.T) {
 	runtime := &fakePlanningProviderRuntime{
 		startErr: &provider.OperationError{Class: provider.FailureAmbiguous, Code: provider.OperationCodeTimeout},
 	}
@@ -1022,10 +1022,10 @@ func TestProviderControllerReconcilesUnknownToFailedAfterDefinitiveRetry(t *test
 		Found: false, OperationID: domain.ProviderStartOperationID(commandID),
 		Status: provider.LookupStatusNotFound, EvidenceSHA256: strings.Repeat("f", 64),
 	}
-	runtime.startErr = &provider.OperationError{Class: provider.FailureDefinitive, Code: provider.OperationCodeInvalidRequest}
+	runtime.startErr = nil
 	_, _, _, _, err = controller.StartPlanning(context.Background(), jobID, grantID, commandID, documents, principal)
-	if err == nil {
-		t.Fatal("definitive retry failure was not returned")
+	if err == nil || !strings.Contains(err.Error(), "NOT_FOUND") {
+		t.Fatalf("Provider Start NOT_FOUND was not terminally recorded: %v", err)
 	}
 	job, err := database.GetJob(context.Background(), jobID)
 	if err != nil {
@@ -1042,8 +1042,8 @@ func TestProviderControllerReconcilesUnknownToFailedAfterDefinitiveRetry(t *test
 	if err == nil || !strings.Contains(err.Error(), "definitively rejected") {
 		t.Fatalf("retry after terminal FAILED observation = %v", err)
 	}
-	if runtime.startCalls != 2 || runtime.lookupCalls != 1 {
-		t.Fatalf("terminal failure was replayed: starts=%d lookups=%d", runtime.startCalls, runtime.lookupCalls)
+	if runtime.startCalls != 1 || runtime.lookupCalls != 1 {
+		t.Fatalf("Provider Start was resent after confirmed NOT_FOUND: starts=%d lookups=%d", runtime.startCalls, runtime.lookupCalls)
 	}
 }
 
@@ -1353,7 +1353,7 @@ func TestProviderControllerDispatchesTaskCoderStartWithDurableIntentAndReconcile
 	}
 }
 
-func TestProviderControllerReconcilesTaskCoderStartUnknownBySameOperationID(t *testing.T) {
+func TestProviderControllerClosesTaskStartBoundaryOnLookupNotFound(t *testing.T) {
 	database, jobID, revision, task := approvedExecutionPermissionControllerFixture(t)
 	ctx := context.Background()
 	now := time.Now().UTC().Round(0)
@@ -1425,6 +1425,22 @@ func TestProviderControllerReconcilesTaskCoderStartUnknownBySameOperationID(t *t
 		}
 	}
 	runtime.capabilities = provider.Capabilities{
+		Identity: runtime.identity, StartIdempotency: true, TaskWorktree: true,
+		Evidence: []provider.CapabilityEvidence{{
+			Capability: provider.CapabilityStartIdempotency, Identity: runtime.identity,
+			TestID: "task-start-test", EvidenceSHA256: strings.Repeat("e", 64),
+			EvidenceLevel: provider.EvidenceLive, VerifiedAt: now,
+		}, {
+			Capability: provider.CapabilityTaskWorktree, Identity: runtime.identity,
+			TestID: "task-worktree-test", EvidenceSHA256: strings.Repeat("b", 64),
+			EvidenceLevel: provider.EvidenceLive, VerifiedAt: now,
+		}},
+	}
+	unknown, _, err := controller.DispatchTaskExecution(ctx, jobID, execution.ID, permission.ID, request)
+	if err == nil || unknown.Status != domain.ProviderStartUnknown || runtime.startCalls != 1 || runtime.lookupCalls != 0 {
+		t.Fatalf("ambiguous Task Start was not retained as UNKNOWN: %#v starts=%d err=%v", unknown, runtime.startCalls, err)
+	}
+	runtime.capabilities = provider.Capabilities{
 		Identity: runtime.identity, StartLookup: true, StartIdempotency: true, TaskWorktree: true,
 		Evidence: []provider.CapabilityEvidence{{
 			Capability: provider.CapabilityStartLookup, Identity: runtime.identity,
@@ -1440,23 +1456,19 @@ func TestProviderControllerReconcilesTaskCoderStartUnknownBySameOperationID(t *t
 			EvidenceLevel: provider.EvidenceLive, VerifiedAt: now,
 		}},
 	}
-	unknown, _, err := controller.DispatchTaskExecution(ctx, jobID, execution.ID, permission.ID, request)
-	if err == nil || unknown.Status != domain.ProviderStartUnknown || runtime.startCalls != 1 {
-		t.Fatalf("ambiguous Task Start was not retained as UNKNOWN: %#v starts=%d err=%v", unknown, runtime.startCalls, err)
-	}
 	runtime.lookupResult = provider.LookupResult{
-		Found: true, OperationID: intent.ID, Status: "RUNNING",
-		ReceiptID: "receipt_1", SessionID: "session_1", EvidenceSHA256: strings.Repeat("e", 64),
+		Found: false, OperationID: intent.ID, Status: provider.LookupStatusNotFound,
+		EvidenceSHA256: strings.Repeat("f", 64),
 	}
 	runtime.startErr = nil
 	// An expired permission cannot authorize a new Start, but it must not prevent
 	// reconciliation of the already-issued OperationID.
 	executionController.now = func() time.Time { return request.ExpiresAt.Add(time.Second) }
-	accepted, result, err := controller.DispatchTaskExecution(ctx, jobID, execution.ID, permission.ID, request)
-	if err != nil || accepted.Status != domain.ProviderStartAccepted || !accepted.ReconcilesUnknown ||
-		result.OperationID != intent.ID || runtime.startCalls != 1 || runtime.lookupCalls != 2 {
-		t.Fatalf("UNKNOWN Task Start was not reconciled by same OperationID Lookup: %#v %#v starts=%d lookups=%d err=%v",
-			accepted, result, runtime.startCalls, runtime.lookupCalls, err)
+	terminal, _, err := controller.DispatchTaskExecution(ctx, jobID, execution.ID, permission.ID, request)
+	if err == nil || !strings.Contains(err.Error(), "NOT_FOUND") || terminal.Status != domain.ProviderStartFailed ||
+		!terminal.ReconcilesUnknown || runtime.startCalls != 1 || runtime.lookupCalls != 1 {
+		t.Fatalf("UNKNOWN Task Start was not terminally closed by same OperationID NOT_FOUND: %#v starts=%d lookups=%d err=%v",
+			terminal, runtime.startCalls, runtime.lookupCalls, err)
 	}
 }
 
@@ -1518,7 +1530,7 @@ func (v *failOnSecondTaskWorktreeVerification) Verify(context.Context, string, d
 	return nil
 }
 
-func TestProviderControllerRevalidatesTaskWorktreeAfterLookupBeforeStart(t *testing.T) {
+func TestProviderControllerRevalidatesTaskWorktreeBeforeStartWithoutLookup(t *testing.T) {
 	database, jobID, revision, task := approvedExecutionPermissionControllerFixture(t)
 	ctx := context.Background()
 	now := time.Now().UTC().Round(0)
@@ -1558,10 +1570,8 @@ func TestProviderControllerRevalidatesTaskWorktreeAfterLookupBeforeStart(t *test
 		},
 	}
 	runtime.capabilities = provider.Capabilities{
-		Identity: runtime.identity, StartLookup: true, StartIdempotency: true, TaskWorktree: true,
+		Identity: runtime.identity, StartIdempotency: true, TaskWorktree: true,
 		Evidence: []provider.CapabilityEvidence{
-			{Capability: provider.CapabilityStartLookup, Identity: runtime.identity, TestID: "task-start-test",
-				EvidenceSHA256: strings.Repeat("a", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
 			{Capability: provider.CapabilityStartIdempotency, Identity: runtime.identity, TestID: "task-start-test",
 				EvidenceSHA256: strings.Repeat("b", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
 			{Capability: provider.CapabilityTaskWorktree, Identity: runtime.identity, TestID: "task-worktree-test",
@@ -1577,7 +1587,7 @@ func TestProviderControllerRevalidatesTaskWorktreeAfterLookupBeforeStart(t *test
 	if err == nil || !strings.Contains(err.Error(), "immediately before Provider Start") {
 		t.Fatalf("changed Worktree was not rejected before Provider Start: %v", err)
 	}
-	if verifier.verifyCalls != 2 || runtime.lookupCalls != 1 || runtime.startCalls != 0 {
+	if verifier.verifyCalls != 2 || runtime.lookupCalls != 0 || runtime.startCalls != 0 {
 		t.Fatalf("Worktree revalidation / Provider calls = verifies:%d lookups:%d starts:%d",
 			verifier.verifyCalls, runtime.lookupCalls, runtime.startCalls)
 	}

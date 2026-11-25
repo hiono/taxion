@@ -399,7 +399,6 @@ func (c *ProviderController) DispatchTaskExecution(
 		return domain.ProviderStartObservation{}, provider.StartResult{}, provider.ErrUnsupportedCapability
 	}
 	lookupEvidenceSHA256 := ""
-	lookupNotFoundEvidenceSHA256 := ""
 	if canLookup {
 		lookupRequest := provider.LookupRequest{OperationID: intent.ID}
 		lookup, lookupErr := c.runtime.Lookup(ctx, lookupRequest)
@@ -419,7 +418,12 @@ func (c *ProviderController) DispatchTaskExecution(
 		}
 		lookupEvidenceSHA256 = lookup.EvidenceSHA256
 		if !lookup.Found && lookup.Status == provider.LookupStatusNotFound {
-			lookupNotFoundEvidenceSHA256 = lookup.EvidenceSHA256
+			observation, persistErr := c.recordTaskStartObservation(
+				ctx, job.ID, intent.ID, domain.ProviderStartFailed, "", "", lookup.EvidenceSHA256, false,
+			)
+			return observation, provider.StartResult{}, errors.Join(
+				errors.New("Task Provider Start lookup confirmed NOT_FOUND"), persistErr,
+			)
 		}
 		if lookup.Found {
 			switch lookup.Status {
@@ -453,12 +457,6 @@ func (c *ProviderController) DispatchTaskExecution(
 	}
 	// Revalidate authority after the external lookup.
 	if _, err := c.execution.ValidatePermission(ctx, permissionID, permissionRequest); err != nil {
-		if lookupNotFoundEvidenceSHA256 != "" && hasProviderStartDispatchBoundary(job, intent.ID) {
-			observation, persistErr := c.recordTaskStartObservation(
-				ctx, jobID, intent.ID, domain.ProviderStartFailed, "", "", lookupNotFoundEvidenceSHA256, false,
-			)
-			return observation, provider.StartResult{}, errors.Join(err, persistErr)
-		}
 		return domain.ProviderStartObservation{}, provider.StartResult{}, err
 	}
 	current, err := c.store.GetJob(ctx, jobID)
@@ -949,7 +947,6 @@ func (c *ProviderController) reconcileStart(
 	}
 	canLookup := capabilities.HasEvidenceAtLeast(provider.CapabilityStartLookup, provider.EvidenceLive)
 	canRetry := capabilities.HasEvidenceAtLeast(provider.CapabilityStartIdempotency, provider.EvidenceLive)
-	lookupNotFoundEvidenceSHA256 := ""
 	if canLookup {
 		lookupRequest := provider.LookupRequest{OperationID: intent.ID}
 		lookup, lookupErr := c.runtime.Lookup(ctx, lookupRequest)
@@ -972,7 +969,12 @@ func (c *ProviderController) reconcileStart(
 				}
 				return receipt, execution, intent, provider.StartResult{}, errors.New("Provider Start lookup did not confirm NOT_FOUND")
 			}
-			lookupNotFoundEvidenceSHA256 = lookup.EvidenceSHA256
+			persistErr := c.recordStartObservation(
+				ctx, intent.JobID, intent.ID, domain.ProviderStartFailed, "", "", lookup.EvidenceSHA256, false, principal,
+			)
+			return receipt, execution, intent, provider.StartResult{}, errors.Join(
+				errors.New("Provider Start lookup confirmed NOT_FOUND"), persistErr,
+			)
 		}
 		if lookup.Found {
 			if lookup.Status == provider.LookupStatusFailed {
@@ -1021,12 +1023,6 @@ func (c *ProviderController) reconcileStart(
 		return receipt, execution, intent, provider.StartResult{}, errors.New("PlanningAuthorization was not found during Start recovery")
 	}
 	if err := currentGrant.ValidateFor(current, principal.PrincipalID(), c.now()); err != nil {
-		if lookupNotFoundEvidenceSHA256 != "" && hasProviderStartDispatchBoundary(current, intent.ID) {
-			persistErr := c.recordStartObservation(
-				ctx, intent.JobID, intent.ID, domain.ProviderStartFailed, "", "", lookupNotFoundEvidenceSHA256, false, principal,
-			)
-			return receipt, execution, intent, provider.StartResult{}, errors.Join(err, persistErr)
-		}
 		return receipt, execution, intent, provider.StartResult{}, err
 	}
 	result, err := c.runtime.Start(ctx, request)
