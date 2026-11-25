@@ -141,9 +141,9 @@ func TestDeliveryObservationRequiresExplicitUnknownReconciliation(t *testing.T) 
 func TestDeliveryObservationBindsResultToLatestRequestedAttempt(t *testing.T) {
 	job, planner := jobWithPlannerForMessageTest(t)
 	message, err := NewJobMessage(job, "cmd_10101010101010101010101010101010", JobMessageRequest{
-		Sender: ActorRef{Kind: ActorPlanner, ID: planner.ID},
+		Sender:    ActorRef{Kind: ActorPlanner, ID: planner.ID},
 		Recipient: ActorRef{Kind: ActorHuman, ID: job.IntakeProvenance.PrincipalID},
-		Kind: MessageKindQuestion, Body: "再送結果の対象attemptを確認してください。",
+		Kind:      MessageKindQuestion, Body: "再送結果の対象attemptを確認してください。",
 	}, job.UpdatedAt.Add(time.Second))
 	if err != nil {
 		t.Fatalf("NewJobMessage: %v", err)
