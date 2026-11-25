@@ -1388,14 +1388,24 @@ func TestProviderControllerReconcilesTaskCoderStartUnknownBySameOperationID(t *t
 	if err != nil {
 		t.Fatalf("NewProviderControllerWithExecution: %v", err)
 	}
+	jobBeforeDispatch, err := database.GetJob(ctx, jobID)
+	if err != nil {
+		t.Fatalf("GetJob before capability rejection: %v", err)
+	}
+	initialObservationCount := len(jobBeforeDispatch.ProviderStartObservations)
 	if observation, _, dispatchErr := controller.DispatchTaskExecution(ctx, jobID, execution.ID, permission.ID, request); !errors.Is(dispatchErr, provider.ErrUnsupportedCapability) || observation.ID != "" || runtime.startCalls != 0 || runtime.lookupCalls != 0 {
 		t.Fatalf("Task Start without safe capabilities was not rejected before dispatch: %#v starts=%d lookups=%d err=%v",
 			observation, runtime.startCalls, runtime.lookupCalls, dispatchErr)
 	}
 	jobWithoutDispatch, err := database.GetJob(ctx, jobID)
-	if err != nil || len(jobWithoutDispatch.ProviderStartObservations) != 0 {
-		t.Fatalf("pre-dispatch capability rejection persisted an UNKNOWN observation: %#v %v",
+	if err != nil || len(jobWithoutDispatch.ProviderStartObservations) != initialObservationCount {
+		t.Fatalf("pre-dispatch capability rejection appended an observation: %#v %v",
 			jobWithoutDispatch.ProviderStartObservations, err)
+	}
+	for _, observation := range jobWithoutDispatch.ProviderStartObservations {
+		if observation.OperationID == intent.ID {
+			t.Fatalf("pre-dispatch capability rejection persisted an operation observation: %#v", observation)
+		}
 	}
 	runtime.capabilities = provider.Capabilities{
 		Identity: runtime.identity, StartLookup: true, StartIdempotency: true, TaskWorktree: true,
