@@ -109,6 +109,16 @@ func TestCommunicationControllerPersistsCoderPlannerQuestionAndAnswer(t *testing
 	if plannerSession == "" {
 		t.Fatal("accepted Planner Provider Session was not found")
 	}
+	var plannerStart domain.ProviderStartIntent
+	for _, candidate := range job.ProviderStartIntents {
+		if candidate.RoleExecutionID == plannerExecution.ID {
+			plannerStart = candidate
+			break
+		}
+	}
+	if plannerStart.ID == "" {
+		t.Fatal("Planner Provider Start intent was not found")
+	}
 
 	communication, err := NewCommunicationController(database)
 	if err != nil {
@@ -146,7 +156,10 @@ func TestCommunicationControllerPersistsCoderPlannerQuestionAndAnswer(t *testing
 	}
 	questionCommandID := "cmd_56565656565656565656565656565656"
 	questionBudget := domain.PlanningBudget{MaxTurns: 1, MaxTokens: 50}
-	questionDeadline := revision.Contract.Deadline.Add(-time.Minute)
+	questionDeadline := plannerStart.Deadline.Add(-time.Minute)
+	if revision.Contract.Deadline.Before(questionDeadline) {
+		questionDeadline = revision.Contract.Deadline.Add(-time.Minute)
+	}
 	questionReceipt, questionGrant, err := questionAuthorizer.Authorize(
 		context.Background(), jobID, question.Message.ID, questionCommandID,
 		questionBudget, questionDeadline,
