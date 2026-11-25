@@ -36,10 +36,10 @@ func TestJobMessagePreservesNaturalLanguageAndQuestionCorrelation(t *testing.T) 
 	job, planner := jobWithPlannerForMessageTest(t)
 	principalID := job.IntakeProvenance.PrincipalID
 	question, err := NewJobMessage(job, "cmd_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", JobMessageRequest{
-		Sender: ActorRef{Kind: ActorPlanner, ID: planner.ID},
-		Recipient: ActorRef{Kind: ActorHuman, ID: principalID},
-		Kind: MessageKindQuestion,
-		Body: "この仕様の優先順位について確認してください。\n制約は維持します。",
+		Sender:    ActorRef{Kind: ActorPlanner, ID: planner.ID},
+		Recipient:        ActorRef{Kind: ActorHuman, ID: principalID},
+		Kind:             MessageKindQuestion,
+		Body:             "この仕様の優先順位について確認してください。\n制約は維持します。",
 	}, job.UpdatedAt.Add(time.Second))
 	if err != nil {
 		t.Fatalf("NewJobMessage QUESTION: %v", err)
@@ -49,11 +49,11 @@ func TestJobMessagePreservesNaturalLanguageAndQuestionCorrelation(t *testing.T) 
 	job.UpdatedAt = question.CreatedAt
 
 	answer, err := NewJobMessage(job, "cmd_cccccccccccccccccccccccccccccccc", JobMessageRequest{
-		Sender: ActorRef{Kind: ActorHuman, ID: principalID},
-		Recipient: ActorRef{Kind: ActorPlanner, ID: planner.ID},
-		Kind: MessageKindAnswer,
+		Sender:    ActorRef{Kind: ActorHuman, ID: principalID},
+		Recipient:        ActorRef{Kind: ActorPlanner, ID: planner.ID},
+		Kind:             MessageKindAnswer,
 		ReplyToMessageID: question.ID,
-		Body: "優先順位は安全性、次に完遂性です。",
+		Body:             "優先順位は安全性、次に完遂性です。",
 	}, job.UpdatedAt.Add(time.Second))
 	if err != nil {
 		t.Fatalf("NewJobMessage ANSWER: %v", err)
@@ -74,20 +74,20 @@ func TestJobMessageRejectsForgedActorsAndInvalidReplies(t *testing.T) {
 	job, planner := jobWithPlannerForMessageTest(t)
 	recipient := ActorRef{Kind: ActorHuman, ID: job.IntakeProvenance.PrincipalID}
 	if _, err := NewJobMessage(job, "cmd_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", JobMessageRequest{
-		Sender: ActorRef{Kind: ActorHuman, ID: "human_forged"},
-		Recipient: recipient, Kind: MessageKindMessage, Body: "forged",
+		Sender:    ActorRef{Kind: ActorHuman, ID: "human_forged"},
+		Recipient:        recipient, Kind: MessageKindMessage, Body: "forged",
 	}, job.UpdatedAt.Add(time.Second)); err == nil {
 		t.Fatal("JobMessage accepted a forged HUMAN Principal")
 	}
 	if _, err := NewJobMessage(job, "cmd_cccccccccccccccccccccccccccccccc", JobMessageRequest{
-		Sender: ActorRef{Kind: ActorPlanner, ID: planner.ID},
-		Recipient: recipient, Kind: MessageKindAnswer, Body: "unrelated answer",
+		Sender:    ActorRef{Kind: ActorPlanner, ID: planner.ID},
+		Recipient:        recipient, Kind: MessageKindAnswer, Body: "unrelated answer",
 	}, job.UpdatedAt.Add(time.Second)); err == nil {
 		t.Fatal("JobMessage accepted an ANSWER without a QUESTION")
 	}
 	if _, err := NewJobMessage(job, "cmd_dddddddddddddddddddddddddddddddd", JobMessageRequest{
-		Sender: ActorRef{Kind: ActorPlanner, ID: planner.ID},
-		Recipient: recipient, Kind: MessageKindHandoff, Body: "handoff",
+		Sender:    ActorRef{Kind: ActorPlanner, ID: planner.ID},
+		Recipient:        recipient, Kind: MessageKindHandoff, Body: "handoff",
 	}, job.UpdatedAt.Add(time.Second)); err == nil {
 		t.Fatal("generic JobMessage command accepted HANDOFF")
 	}
@@ -96,9 +96,9 @@ func TestJobMessageRejectsForgedActorsAndInvalidReplies(t *testing.T) {
 func TestDeliveryObservationRequiresExplicitUnknownReconciliation(t *testing.T) {
 	job, planner := jobWithPlannerForMessageTest(t)
 	message, err := NewJobMessage(job, "cmd_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", JobMessageRequest{
-		Sender: ActorRef{Kind: ActorPlanner, ID: planner.ID},
-		Recipient: ActorRef{Kind: ActorHuman, ID: job.IntakeProvenance.PrincipalID},
-		Kind: MessageKindQuestion, Body: "確認してください。",
+		Sender:    ActorRef{Kind: ActorPlanner, ID: planner.ID},
+		Recipient:        ActorRef{Kind: ActorHuman, ID: job.IntakeProvenance.PrincipalID},
+		Kind:             MessageKindQuestion, Body: "確認してください。",
 	}, job.UpdatedAt.Add(time.Second))
 	if err != nil {
 		t.Fatalf("NewJobMessage: %v", err)
