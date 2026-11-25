@@ -255,7 +255,7 @@ Reviewer Startは、ADR-408 / ADR-507に従うimmutable Worktree snapshotとread
 4. commit確認後に最新Jobとauthorityを再検証し、Worktree検証後にも同じTurnの履歴を再評価する。未dispatch条件が崩れている場合はSendせず、Lookup / idempotencyによる再照合へ移行する。
 5. Dispatch Claim取得後にJobを再読込し、exact claim、permission、Task、Worktree、Stop intent、Resume状態を再検証する。
 6. 同一OperationID / TurnIDを使い、E4 LookupのNOT_FOUNDとSend Idempotencyが両方検証された場合だけ曖昧な送信を再試行する。NOT_FOUND単独ではClaimを解放しない。
-7. terminal responseはPlanningTurnObservationへ保存し、terminal resultとUsageは別々のObservationとして取得・保存する。LookupのResult digestがある場合は、ResultをJobAggregateへ保存する前に一致を検証する。
+7. terminal responseはTaskTurnObservationへ保存し、terminal resultとUsageは別々のObservationとして取得・保存する。LookupのResult digestがある場合は、ResultをJobAggregateへ保存する前に一致を検証する。
 8. UNKNOWNは同じTurnIDで照合し、新しいTurnIDで再送しない。Lookupでterminal statusが見つかった場合もUsage Complete=trueを確認するまでturnを確定しない。
 9. Runtime.SendがFailureDefinitiveを返した場合は、当該Dispatch Claimに属する証拠だけで解放する。FailureAmbiguousまたは分類不能なエラーではUNKNOWN observationとClaimを保持する。
 
