@@ -120,10 +120,8 @@ func (o *JobOutput) bindSources(job Job) error {
 		turn.ProviderSessionID == "" || !observed || turnObservation.Status != TaskTurnCompleted {
 		return errors.New("JobOutput requires a completed Coder Turn and its exclusively assigned Task Worktree")
 	}
-	for _, candidate := range job.TaskTurnIntents {
-		if candidate.RoleExecutionID == execution.ID && candidate.CreatedRevision > o.CreatedRevision {
-			return errors.New("JobOutput cannot precede a later Coder Turn")
-		}
+	if err := validateJobOutputLatestTurn(job, execution.ID, turn); err != nil {
+		return err
 	}
 	var result ProviderResultObservation
 	resultFound := false
@@ -254,4 +252,13 @@ func validGitObjectID(value string) bool {
 	}
 	_, err := hex.DecodeString(value)
 	return err == nil && value == strings.ToLower(value)
+}
+
+func validateJobOutputLatestTurn(job Job, roleExecutionID string, turn TaskTurnIntent) error {
+	for _, candidate := range job.TaskTurnIntents {
+		if candidate.RoleExecutionID == roleExecutionID && candidate.CreatedRevision > turn.CreatedRevision {
+			return errors.New("JobOutput must belong to the latest Coder Turn")
+		}
+	}
+	return nil
 }
