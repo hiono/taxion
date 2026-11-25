@@ -14,7 +14,7 @@ func TestJobQuestionAuthorizationStorePersistsAndReplays(t *testing.T) {
 	database, path := newTestStore(t)
 	ctx := context.Background()
 	principal := newAuthenticatedTestPrincipal(t)
-	planner, _, sourceResult := createJobContractPlanner(t, database, "job_question_authorization_store")
+	planner, _, sourceResult := createJobContractPlanner(t, database, "job_question_authorization_store", principal)
 	job, err := database.GetJob(ctx, "job_question_authorization_store")
 	if err != nil {
 		t.Fatalf("GetJob before JobContract revision: %v", err)
