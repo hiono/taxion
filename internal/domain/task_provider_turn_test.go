@@ -140,6 +140,12 @@ func TestTaskTurnUnknownReconciliationAndCumulativeBudget(t *testing.T) {
 	job.TaskTurnObservations = append(job.TaskTurnObservations, unknown)
 	job.Revision++
 	job.UpdatedAt = unknown.CreatedAt
+	if _, err := NewPlanningResumeIntent(
+		job, execution.ID, principalID, "session_task",
+		"cmd_d9191919191919191919191919191919", strings.Repeat("4", 64), true, now.Add(90*time.Second),
+	); err == nil || !strings.Contains(err.Error(), "task_turn_dispatch_in_progress") {
+		t.Fatalf("Resume was accepted while a Task Turn dispatch claim remained active: %v", err)
+	}
 	if _, err := NewTaskTurnIntent(job, execution.ID, permission.ID, "session_task",
 		"cmd_d9090909090909090909090909090909", strings.Repeat("2", 64), 1, now.Add(2*time.Minute)); err == nil {
 		t.Fatal("new Turn started while prior Turn UNKNOWN")

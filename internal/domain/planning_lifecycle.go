@@ -695,14 +695,11 @@ func NewPlanningResumeIntent(job Job, roleExecutionID, principalID, providerSess
 			continue
 		}
 		claim, active := ActiveTaskTurnDispatchClaim(job, turn.OperationID)
-		if !active {
-			continue
-		}
-		latestTurnObservation, observed := latestTaskTurnObservation(job, turn.ID)
-		started, hasStarted := taskTurnDispatchObservationForClaim(job, claim.ID, TaskTurnDispatchObservationStarted)
-		if !observed || latestTurnObservation.Status != TaskTurnUnknown ||
-			!hasStarted || latestTurnObservation.CreatedRevision <= started.CreatedRevision {
-			return PlanningResumeIntent{}, &PlanningBoundaryError{Boundary: PlanningBoundaryResume, ReasonCode: "task_turn_dispatch_in_progress", Cause: errors.New("Provider Resume is allowed during an active Task Turn dispatch only after that claim has recorded an UNKNOWN outcome")}
+		if active {
+			return PlanningResumeIntent{}, &PlanningBoundaryError{
+				Boundary: PlanningBoundaryResume, ReasonCode: "task_turn_dispatch_in_progress",
+				Cause: errors.New("Provider Resume requires all Task Turn dispatch claims for the Session to be released"),
+			}
 		}
 	}
 	for _, previous := range job.PlanningResumeIntents {

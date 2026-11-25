@@ -501,11 +501,13 @@ func (c *ProviderController) reconcileTaskTurn(
 		return receipt, turn, domain.TaskTurnObservation{}, provider.TurnResult{}, provider.ErrStopUnconfirmed
 	}
 	claimID := claim.ID
+	latestTurnObservation, hasTurnObservation := latestTaskTurnObservation(job, turn.ID)
+	hasUnknownTurnObservation := hasTurnObservation && latestTurnObservation.Status == domain.TaskTurnUnknown
 	for _, failureStatus := range []string{
 		domain.TaskTurnDispatchObservationPreAdapterRejection,
 		domain.TaskTurnDispatchObservationDefinitiveFailure,
 	} {
-		if failure, found := taskTurnDispatchObservation(job, claimID, failureStatus); found {
+		if failure, found := taskTurnDispatchObservation(job, claimID, failureStatus); found && !hasUnknownTurnObservation {
 			_, _, releaseErr := c.store.ReleaseTaskTurnDispatchClaim(
 				ctx, job.ID, claimID, principal,
 				domain.TaskTurnDispatchReleasedDefinitiveFailure, failure.EvidenceSHA256, "",
