@@ -143,12 +143,21 @@ func TestProviderResultAndUsageFactsPersistAtomicallyAndRestore(t *testing.T) {
 		roleExecutionID, turn.OperationID, turn.ID, sessionID, "usage_turn_2", 22, true, strings.Repeat("3", 64), principal); err != nil {
 		t.Fatalf("Planner Turn rejected a second complete UsageID: %v", err)
 	}
+	job, err = database.GetJob(ctx, jobID)
+	if err != nil {
+		t.Fatalf("GetJob before Provider Result rejection checks: %v", err)
+	}
 	if _, _, err := database.AddProviderResultObservation(ctx, jobID, job.Revision,
 		roleExecutionID, turn.OperationID, turn.ID, sessionID, "different final", resultDigest("different final"), true, evidence, principal); err == nil {
 		t.Fatal("Provider Result accepted a second terminal result for the same Turn")
 	}
+	job, err = database.GetJob(ctx, jobID)
+	if err != nil {
+		t.Fatalf("GetJob before Final=false rejection check: %v", err)
+	}
+	nonFinalContent := "non-final provider output"
 	if _, _, err := database.AddProviderResultObservation(ctx, jobID, job.Revision,
-		roleExecutionID, turn.OperationID, turn.ID, sessionID, content, contentSHA, false, evidence, principal); err == nil {
+		roleExecutionID, turn.OperationID, turn.ID, sessionID, nonFinalContent, resultDigest(nonFinalContent), false, evidence, principal); err == nil {
 		t.Fatal("Provider Result accepted Final=false")
 	}
 	job, err = database.GetJob(ctx, jobID)

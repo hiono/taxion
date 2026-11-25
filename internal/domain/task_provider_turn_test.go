@@ -917,3 +917,68 @@ func TestProviderStartHasDispatchBoundaryDistinguishesLookupUnknown(t *testing.T
 		t.Fatal("lookup UNKNOWN without a dispatch boundary was treated as an issued Start")
 	}
 }
+
+func TestTaskTurnUnknownReturnedIsRecordedForRetryClaim(t *testing.T) {
+	job, execution, _, now := taskTurnFixture(t)
+	turn, err := NewTaskTurnIntent(job, execution.ID, execution.ExecutionPermissionID, "session_task",
+		"cmd_d7171717171717171717171717171717", strings.Repeat("1", 64), 80, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	job.TaskTurnIntents = append(job.TaskTurnIntents, turn)
+	job.Revision++
+	job.UpdatedAt = turn.CreatedAt
+	principalID := job.JobApprovals[len(job.JobApprovals)-1].ApproverPrincipalID
+	claimA, err := NewTaskTurnDispatchClaim(job, turn.ID, principalID,
+		"cmd_d8181818181818181818181818181818", now.Add(time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	job.TaskTurnDispatchClaims = append(job.TaskTurnDispatchClaims, claimA)
+	job.Revision++
+	job.UpdatedAt = claimA.CreatedAt
+	appendTaskTurnDispatchObservationForTest(t, &job, claimA, TaskTurnDispatchObservationStarted, "", now.Add(70*time.Second))
+	unknown, err := NewTaskTurnObservationForClaim(job, turn.ID, claimA.ID,
+		"cmd_d82828282828282828282828282828282", TaskTurnUnknown, 0, "", false, now.Add(80*time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	job.TaskTurnObservations = append(job.TaskTurnObservations, unknown)
+	job.Revision++
+	job.UpdatedAt = unknown.CreatedAt
+	lookupEvidence := strings.Repeat("8", 64)
+	appendTaskTurnDispatchObservationForTest(t, &job, claimA, TaskTurnDispatchObservationLookupNotFound, lookupEvidence, now.Add(81*time.Second))
+	releaseA, err := NewTaskTurnDispatchRelease(job, claimA.ID, principalID,
+		TaskTurnDispatchReleaseCommandID(claimA.ID, TaskTurnDispatchReleasedIdempotentRetry),
+		TaskTurnDispatchReleasedIdempotentRetry, strings.Repeat("7", 64), lookupEvidence, now.Add(82*time.Second))
+	if err != nil {
+		t.Fatalf("release first UNKNOWN claim for idempotent retry: %v", err)
+	}
+	job.TaskTurnDispatchReleases = append(job.TaskTurnDispatchReleases, releaseA)
+	job.Revision++
+	job.UpdatedAt = releaseA.CreatedAt
+	claimB, err := NewTaskTurnDispatchClaim(job, turn.ID, principalID,
+		"cmd_d8383838383838383838383838383838", now.Add(83*time.Second))
+	if err != nil {
+		t.Fatalf("create retry claim: %v", err)
+	}
+	job.TaskTurnDispatchClaims = append(job.TaskTurnDispatchClaims, claimB)
+	job.Revision++
+	job.UpdatedAt = claimB.CreatedAt
+	appendTaskTurnDispatchObservationForTest(t, &job, claimB, TaskTurnDispatchObservationStarted, "", now.Add(84*time.Second))
+	returnedEvidence := strings.Repeat("9", 64)
+	returned, err := NewTaskTurnDispatchObservation(
+		job, claimB.ID, principalID,
+		TaskTurnDispatchObservationCommandID(claimB.ID, TaskTurnDispatchObservationUnknownReturned, returnedEvidence),
+		TaskTurnDispatchObservationUnknownReturned, returnedEvidence, now.Add(85*time.Second),
+	)
+	if err != nil {
+		t.Fatalf("record retry claim's returned UNKNOWN using the prior Turn observation: %v", err)
+	}
+	job.TaskTurnDispatchObservations = append(job.TaskTurnDispatchObservations, returned)
+	job.Revision++
+	job.UpdatedAt = returned.CreatedAt
+	if err := job.Validate(); err != nil {
+		t.Fatalf("Job with claim-specific UNKNOWN_RETURNED did not validate: %v", err)
+	}
+}
