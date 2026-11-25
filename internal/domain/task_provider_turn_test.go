@@ -431,6 +431,14 @@ func TestProviderStartDispatchBoundaryRequiresUnexpiredPermission(t *testing.T) 
 	job.PlanningResumeDispatchClaims = nil
 	job.PlanningResumeDispatchReleases = nil
 	job.PlanningBoundaryDecisions = nil
+	job.ProviderEventObservations = nil
+	job.ProviderStopIntents = nil
+	job.ProviderStopObservations = nil
+	job.ProviderStopDispatchClaims = nil
+	job.ProviderStopDispatchStarts = nil
+	job.ProviderStopDispatchReleases = nil
+	job.ProviderResultObservations = nil
+	job.ProviderUsageObservations = nil
 	job.ProviderStartObservations = nil
 	job.Revision--
 	for _, intent := range job.ProviderStartIntents {
@@ -464,6 +472,22 @@ func TestProviderStartDispatchBoundaryRequiresUnexpiredPermission(t *testing.T) 
 	expiredJob.PlanningResumeDispatchClaims = nil
 	expiredJob.PlanningResumeDispatchReleases = nil
 	expiredJob.PlanningBoundaryDecisions = nil
+	expiredJob.PlanningTurnIntents = nil
+	expiredJob.PlanningTurnObservations = nil
+	expiredJob.PlanningEffectDecisions = nil
+	expiredJob.PlanningResumeIntents = nil
+	expiredJob.PlanningResumeObservations = nil
+	expiredJob.PlanningResumeDispatchClaims = nil
+	expiredJob.PlanningResumeDispatchReleases = nil
+	expiredJob.PlanningBoundaryDecisions = nil
+	expiredJob.ProviderEventObservations = nil
+	expiredJob.ProviderStopIntents = nil
+	expiredJob.ProviderStopObservations = nil
+	expiredJob.ProviderStopDispatchClaims = nil
+	expiredJob.ProviderStopDispatchStarts = nil
+	expiredJob.ProviderStopDispatchReleases = nil
+	expiredJob.ProviderResultObservations = nil
+	expiredJob.ProviderUsageObservations = nil
 	expiredJob.ProviderStartObservations = nil
 	expiredJob.Revision--
 	for _, intent := range expiredJob.ProviderStartIntents {
@@ -564,6 +588,52 @@ func TestPlanningResumeIntentRejectsActiveTaskTurnDispatch(t *testing.T) {
 	if _, err := NewPlanningResumeIntent(job, execution.ID, principalID, "session_task",
 		"cmd_43434343434343434343434343434343", strings.Repeat("6", 64), true, now.Add(2*time.Minute)); err == nil {
 		t.Fatal("Resume intent was created while a Task Turn dispatch claim was active")
+	}
+}
+
+func TestPlanningResumeIntentAllowsRecoveryOfUnknownTaskTurn(t *testing.T) {
+	job, execution, permission, now := taskTurnFixture(t)
+	turn, err := NewTaskTurnIntent(job, execution.ID, permission.ID, "session_task",
+		"cmd_65656565656565656565656565656565", strings.Repeat("7", 64), 40, now)
+	if err != nil {
+		t.Fatalf("NewTaskTurnIntent: %v", err)
+	}
+	job.TaskTurnIntents = append(job.TaskTurnIntents, turn)
+	job.Revision++
+	job.UpdatedAt = turn.CreatedAt
+	principalID := job.JobApprovals[len(job.JobApprovals)-1].ApproverPrincipalID
+	claim, err := NewTaskTurnDispatchClaim(job, turn.ID, principalID,
+		"cmd_66666666666666666666666666666666", now.Add(time.Minute))
+	if err != nil {
+		t.Fatalf("NewTaskTurnDispatchClaim: %v", err)
+	}
+	job.TaskTurnDispatchClaims = append(job.TaskTurnDispatchClaims, claim)
+	job.Revision++
+	job.UpdatedAt = claim.CreatedAt
+	started, err := NewTaskTurnDispatchObservation(job, claim.ID, principalID,
+		TaskTurnDispatchObservationCommandID(claim.ID, TaskTurnDispatchObservationStarted, ""),
+		TaskTurnDispatchObservationStarted, "", now.Add(2*time.Minute))
+	if err != nil {
+		t.Fatalf("Task Turn dispatch STARTED: %v", err)
+	}
+	job.TaskTurnDispatchObservations = append(job.TaskTurnDispatchObservations, started)
+	job.Revision++
+	job.UpdatedAt = started.CreatedAt
+	unknown, err := NewTaskTurnObservationForClaim(job, turn.ID, claim.ID,
+		"cmd_67676767676767676767676767676767", TaskTurnUnknown, 0, "", false, now.Add(3*time.Minute))
+	if err != nil {
+		t.Fatalf("Task Turn UNKNOWN: %v", err)
+	}
+	job.TaskTurnObservations = append(job.TaskTurnObservations, unknown)
+	job.Revision++
+	job.UpdatedAt = unknown.CreatedAt
+	resume, err := NewPlanningResumeIntent(job, execution.ID, principalID, "session_task",
+		"cmd_68686868686868686868686868686868", strings.Repeat("8", 64), true, now.Add(4*time.Minute))
+	if err != nil {
+		t.Fatalf("Resume for UNKNOWN Task Turn recovery: %v", err)
+	}
+	if resume.ProviderSessionID != turn.ProviderSessionID {
+		t.Fatalf("Resume changed the Provider Session: %#v", resume)
 	}
 }
 

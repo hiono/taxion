@@ -691,10 +691,15 @@ func NewPlanningResumeIntent(job Job, roleExecutionID, principalID, providerSess
 		return PlanningResumeIntent{}, &PlanningBoundaryError{Boundary: PlanningBoundaryResume, ReasonCode: "resume_dispatch_in_progress", Cause: errors.New("Provider Resume dispatch is already in progress for this Session")}
 	}
 	for _, turn := range job.TaskTurnIntents {
-		if turn.RoleExecutionID == execution.ID && turn.ProviderSessionID == providerSessionID {
-			if _, active := ActiveTaskTurnDispatchClaim(job, turn.OperationID); active {
-				return PlanningResumeIntent{}, &PlanningBoundaryError{Boundary: PlanningBoundaryResume, ReasonCode: "task_turn_dispatch_in_progress", Cause: errors.New("Provider Resume is blocked while a Task Turn dispatch is active for this Session")}
-			}
+		if turn.RoleExecutionID != execution.ID || turn.ProviderSessionID != providerSessionID {
+			continue
+		}
+		if _, active := ActiveTaskTurnDispatchClaim(job, turn.OperationID); !active {
+			continue
+		}
+		latestTurnObservation, observed := latestTaskTurnObservation(job, turn.ID)
+		if !observed || latestTurnObservation.Status != TaskTurnUnknown {
+			return PlanningResumeIntent{}, &PlanningBoundaryError{Boundary: PlanningBoundaryResume, ReasonCode: "task_turn_dispatch_in_progress", Cause: errors.New("Provider Resume is allowed during an active Task Turn dispatch only to recover an UNKNOWN turn on the same Session")}
 		}
 	}
 	for _, previous := range job.PlanningResumeIntents {
