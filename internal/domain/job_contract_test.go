@@ -261,7 +261,6 @@ func TestJobContractAmendmentRejectsUnresolvedProviderStartDispatch(t *testing.T
 	}
 }
 
-
 // jobContractAmendmentRevisionErrorForTest exercises the accepted Start boundary
 // without requiring a constructible authenticated principal in this package.
 func jobContractAmendmentRevisionErrorForTest(job Job, now time.Time) error {

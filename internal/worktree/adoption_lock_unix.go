@@ -46,7 +46,6 @@ func openWorktreeIndexLockFile(path string) (*os.File, error) {
 	return os.Open(path)
 }
 
-
 func openRegularWorktreeFile(root *os.Root, rootPath, relative string) (*os.File, os.FileInfo, error) {
 	if root == nil || relative == "" || filepath.IsAbs(relative) || filepath.Clean(relative) != relative {
 		return nil, nil, errors.New("Worktree file path must be relative to its root")
