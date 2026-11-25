@@ -182,7 +182,7 @@ func (c Capabilities) SupportsSafeStart() bool {
 }
 
 func (c Capabilities) SupportsSafeSend() bool {
-	return c.HasEvidenceAtLeast(CapabilitySendIdempotency, EvidenceLive) &&
+	return c.HasEvidenceAtLeast(CapabilitySendIdempotency, EvidenceLive) ||
 		c.HasEvidenceAtLeast(CapabilitySendLookup, EvidenceLive)
 }
 

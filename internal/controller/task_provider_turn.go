@@ -118,7 +118,8 @@ func (c *ProviderController) SendTaskExecution(
 }
 
 func taskTurnCapabilitiesVerified(capabilities provider.Capabilities) bool {
-	return capabilities.SupportsSafeSend() &&
+	return capabilities.HasEvidenceAtLeast(provider.CapabilitySendLookup, provider.EvidenceLive) &&
+		capabilities.HasEvidenceAtLeast(provider.CapabilitySendIdempotency, provider.EvidenceLive) &&
 		capabilities.HasEvidenceAtLeast(provider.CapabilityFinalOutput, provider.EvidenceLive) &&
 		capabilities.HasEvidenceAtLeast(provider.CapabilityUsageIdentity, provider.EvidenceLive) &&
 		capabilities.HasEvidenceAtLeast(provider.CapabilityUsageCompleteness, provider.EvidenceLive)
