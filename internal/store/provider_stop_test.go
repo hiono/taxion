@@ -104,7 +104,7 @@ func TestProviderStopIntentAndObservationPersistAtomically(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetJob before UNKNOWN Stop observation: %v", err)
 	}
-	unknownCommandID := domain.ProviderStopObservationCommandID(stopIntent.OperationID, false, false, "", false)
+	unknownCommandID := domain.ProviderStopObservationCommandID(stopIntent.OperationID, "", "cmd_14141414141414141414141414141414", false, false, "", false)
 	unknownReceipt, unknown, err := database.AddProviderStopObservation(
 		ctx, jobID, job.Revision, stopIntent.ID, unknownCommandID, false, false, "", false, principal,
 	)
@@ -116,7 +116,7 @@ func TestProviderStopIntentAndObservationPersistAtomically(t *testing.T) {
 		t.Fatalf("GetJob before Stop observation rollback: %v", err)
 	}
 	finalEvidence := strings.Repeat("1", 64)
-	finalCommandID := domain.ProviderStopObservationCommandID(stopIntent.OperationID, true, true, finalEvidence, true)
+	finalCommandID := domain.ProviderStopObservationCommandID(stopIntent.OperationID, "", "cmd_15151515151515151515151515151515", true, true, finalEvidence, true)
 	if _, err := database.db.ExecContext(ctx, `CREATE TRIGGER fail_provider_stop_receipt
 		BEFORE INSERT ON job_commands
 		WHEN NEW.command_id = '`+finalCommandID+`'
