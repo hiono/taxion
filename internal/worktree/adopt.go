@@ -310,7 +310,7 @@ func validateAdoptionReservationPath(directory string, reservation adoptionReser
 	if err != nil {
 		return fmt.Errorf("list Worktree adoption reservations: %w", err)
 	}
-	seen := make(map[string]struct{})
+	seen := make(map[string]adoptionReservation)
 	for _, entry := range entries {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
 			continue
@@ -325,24 +325,30 @@ func validateAdoptionReservationPath(directory string, reservation adoptionReser
 		}
 		var existing adoptionReservation
 		if err := json.Unmarshal(data, &existing); err != nil ||
-			existing.JobID == "" || existing.TaskID == "" || existing.RepositoryID == "" ||
-			existing.GitDir != reservation.GitDir || !filepath.IsAbs(existing.WorktreePath) ||
-			filepath.Clean(existing.WorktreePath) != existing.WorktreePath {
+			existing.JobID == "" || existing.TaskID == "" || existing.RepositoryID != reservation.RepositoryID ||
+			existing.GitDir == "" || !filepath.IsAbs(existing.GitDir) ||
+			!filepath.IsAbs(existing.WorktreePath) || filepath.Clean(existing.WorktreePath) != existing.WorktreePath {
 			return errors.New("Worktree adoption reservation registry contains an invalid identity")
 		}
 		key := existing.JobID + "\x00" + existing.TaskID
-		if _, duplicate := seen[key]; duplicate {
+		if previous, duplicate := seen[key]; duplicate {
+			if previous != existing {
+				return errors.New("Worktree adoption reservation registry contains conflicting Task identities")
+			}
 			continue
 		}
-		seen[key] = struct{}{}
+		seen[key] = existing
 		if existing.JobID == reservation.JobID && existing.TaskID == reservation.TaskID {
 			if existing != reservation {
 				return errors.New("Task already has a different Worktree adoption reservation")
 			}
 			continue
 		}
+		if existing.GitDir == reservation.GitDir {
+			return errors.New("Task or Git Worktree admin directory is already reserved by another Job or Task")
+		}
 		if adoptionWorktreePathsOverlap(existing.WorktreePath, reservation.WorktreePath) {
-			return errors.New("Worktree path overlaps another Task's reserved Worktree")
+			return errors.New("Worktree path overlaps another Task's already reserved Worktree")
 		}
 	}
 	return nil

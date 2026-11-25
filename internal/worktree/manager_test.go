@@ -900,7 +900,7 @@ func TestManagerAdoptionReservationsRejectNestedWorktreePaths(t *testing.T) {
 	conflict := adoptionReservation{
 		JobID: "job_3333333333333333", TaskID: "task_3333333333333333",
 		RepositoryID: "repo.primary", WorktreePath: child,
-		GitDir: gitDir, WorkspaceRoot: workspace,
+		GitDir: filepath.Join(gitDir, "worktrees", "independent"), WorkspaceRoot: workspace,
 	}
 	for _, path := range adoptionReservationPaths(directory, conflict) {
 		if _, err := writeAdoptionReservation(path, conflict); err != nil {

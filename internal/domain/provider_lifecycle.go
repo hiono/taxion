@@ -78,18 +78,28 @@ func NewProviderStartObservation(
 				break
 			}
 		}
-		permission, permissionFound := executionPermissionByID(job, start.ExecutionPermissionID)
-		assignmentFound := false
-		for _, assignment := range job.WorktreeAssignments {
-			if assignment.ID == execution.WorktreeID && assignment.OwnerRoleExecutionID == execution.ID &&
-				assignment.TaskID == execution.TaskID && assignment.JobID == job.ID {
-				assignmentFound = true
-				break
-			}
+		if execution.ID == "" {
+			return ProviderStartObservation{}, errors.New("Provider Start dispatch boundary requires its RoleExecution")
 		}
-		if execution.ID == "" || !permissionFound || !assignmentFound ||
-			permission.ValidateFor(job, start.ID, start.RequestSHA256, now) != nil {
-			return ProviderStartObservation{}, errors.New("Provider Start dispatch boundary requires the current unexpired ExecutionPermission and exact Worktree assignment")
+		switch execution.Role {
+		case RolePlanner:
+			// Taskless planning is authorized by PlanningAuthorization, validated above.
+		case RoleCoder, RoleReviewer:
+			permission, permissionFound := executionPermissionByID(job, start.ExecutionPermissionID)
+			assignmentFound := false
+			for _, assignment := range job.WorktreeAssignments {
+				if assignment.ID == execution.WorktreeID && assignment.OwnerRoleExecutionID == execution.ID &&
+					assignment.TaskID == execution.TaskID && assignment.JobID == job.ID {
+					assignmentFound = true
+					break
+				}
+			}
+			if !permissionFound || !assignmentFound ||
+				permission.ValidateFor(job, start.ID, start.RequestSHA256, now) != nil {
+				return ProviderStartObservation{}, errors.New("Task-bound Provider Start dispatch boundary requires the current unexpired ExecutionPermission and exact Worktree assignment")
+			}
+		default:
+			return ProviderStartObservation{}, errors.New("Provider Start dispatch boundary has an unsupported RoleExecution role")
 		}
 	}
 	switch status {
