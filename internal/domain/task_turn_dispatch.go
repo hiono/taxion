@@ -250,7 +250,7 @@ func NewTaskTurnDispatchRelease(
 		JobID: job.ID, ClaimID: claim.ID, OperationID: claim.OperationID,
 		PrincipalID: principalID, Outcome: outcome, EvidenceSHA256: evidenceSHA256,
 		LookupEvidenceSHA256: lookupEvidenceSHA256,
-		CreatedAt: now, CreatedRevision: job.Revision + 1,
+		CreatedAt:            now, CreatedRevision: job.Revision + 1,
 	}
 	if err := release.Validate(job); err != nil {
 		return TaskTurnDispatchRelease{}, err
