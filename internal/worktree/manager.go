@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/hiono/taxion/internal/domain"
 )
@@ -162,6 +163,15 @@ func (m *Manager) Prepare(ctx context.Context, jobID string, task domain.Task) (
 		if err := m.verify(ctx, jobID, task, snapshot); err != nil {
 			return Snapshot{}, fmt.Errorf("existing Task Worktree does not match its immutable baseline: %w", err)
 		}
+		head, err := gitOutput(ctx, worktreePath, "rev-parse", "--verify", "HEAD^{commit}")
+		if err != nil || !validCommit(head) {
+			return Snapshot{}, errors.New("existing Task Worktree HEAD is not a verifiable commit")
+		}
+		if head == baseline {
+			if err := verifyCleanInitialWorktree(ctx, worktreePath, baseline); err != nil {
+				return Snapshot{}, fmt.Errorf("existing initial Task Worktree is incomplete or modified: %w", err)
+			}
+		}
 		return snapshot, nil
 	}
 	if err := runGit(ctx, repositoryPath, "worktree", "add", "--detach", worktreePath, baseline); err != nil {
@@ -224,10 +234,13 @@ func (m *Manager) cleanupFailedPrepare(
 	ctx context.Context, repositoryPath, worktreePath, baselinePath string,
 	baselineCreated bool, reservation *adoptionReservation,
 ) error {
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+
 	var cleanupErr error
 	worktreeRemoved := true
 	if _, err := os.Lstat(worktreePath); err == nil {
-		if err := runGit(ctx, repositoryPath, "worktree", "remove", "--force", worktreePath); err != nil {
+		if err := runGit(cleanupCtx, repositoryPath, "worktree", "remove", "--force", worktreePath); err != nil {
 			worktreeRemoved = false
 			cleanupErr = fmt.Errorf("remove failed Task Worktree: %w", err)
 		}

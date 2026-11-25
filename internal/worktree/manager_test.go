@@ -320,6 +320,57 @@ func TestManagerPrepareRejectsAndCleansDirtyPostCheckoutHook(t *testing.T) {
 	}
 }
 
+func TestManagerPrepareRejectsInterruptedInitialWorktree(t *testing.T) {
+	repository := initRepository(t)
+	workspace := filepath.Join(canonicalTempDir(t), "managed-worktrees")
+	manager, err := NewManager(workspace, []Repository{{ID: "repo.primary", Path: repository}})
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	jobID := "job_1123456789abcdef"
+	task := domain.Task{ID: "task_1123456789abcdef", TargetRepositories: []string{"repo.primary"}}
+	baseline := gitTestOutput(t, repository, "rev-parse", "HEAD")
+	key := sha256.Sum256([]byte(jobID + "\x00" + task.ID))
+	worktreePath := filepath.Join(workspace, hex.EncodeToString(key[:]))
+	record := baselineRecord{
+		Version: 2, JobID: jobID, TaskID: task.ID, RepositoryID: "repo.primary",
+		RepositoryPath: repository, WorktreePath: worktreePath, BaselineCommit: baseline,
+		Origin: domain.WorktreeOriginTaxionCreated, InitialStateSHA256: cleanWorktreeStateSHA256(),
+		HeadMode: domain.WorktreeHeadDetached,
+	}
+	if err := writeBaselineRecord(worktreePath+".baseline.json", record); err != nil {
+		t.Fatalf("persist interrupted baseline: %v", err)
+	}
+	gitTestRun(t, repository, "worktree", "add", "--detach", worktreePath, baseline)
+	if err := os.Remove(filepath.Join(worktreePath, "README.md")); err != nil {
+		t.Fatalf("simulate interrupted checkout: %v", err)
+	}
+	if _, err := manager.Prepare(context.Background(), jobID, task); err == nil {
+		t.Fatal("Prepare accepted an incomplete initial Worktree at its baseline commit")
+	}
+	if _, err := os.Stat(worktreePath); err != nil {
+		t.Fatalf("rejected Worktree was unexpectedly removed or modified: %v", err)
+	}
+}
+
+func TestManagerCleanupFailedPrepareIgnoresCanceledContext(t *testing.T) {
+	repository := initRepository(t)
+	worktreePath := filepath.Join(canonicalTempDir(t), "failed-worktree")
+	gitTestRun(t, repository, "worktree", "add", "--detach", worktreePath, "HEAD")
+	manager, err := NewManager(filepath.Join(canonicalTempDir(t), "managed-worktrees"), []Repository{{ID: "repo.primary", Path: repository}})
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := manager.cleanupFailedPrepare(ctx, repository, worktreePath, worktreePath+".baseline.json", false, nil); err != nil {
+		t.Fatalf("cleanup with canceled request context: %v", err)
+	}
+	if _, err := os.Lstat(worktreePath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("failed Worktree survived cleanup: path=%s err=%v", worktreePath, err)
+	}
+}
+
 func TestManagerPrepareRecoversOrphanedAdoptionReservation(t *testing.T) {
 	repository := initRepository(t)
 	external := filepath.Join(canonicalTempDir(t), "external-worktree")
@@ -1018,15 +1069,33 @@ func TestManagerOrphanedReservationCleanupPreservesCommittedAdoption(t *testing.
 }
 
 func TestHashTrackedWorktreeFilesIncludesUnstagedDeletion(t *testing.T) {
-	repository := initRepository(t)
-	if err := os.Remove(filepath.Join(repository, "README.md")); err != nil {
-		t.Fatalf("remove tracked file: %v", err)
+	firstRepository := initRepository(t)
+	secondRepository := initRepository(t)
+	for _, repository := range []string{firstRepository, secondRepository} {
+		if err := os.WriteFile(filepath.Join(repository, "second.txt"), []byte("second baseline\n"), 0o600); err != nil {
+			t.Fatalf("write second tracked file: %v", err)
+		}
+		gitTestRun(t, repository, "add", "second.txt")
+		gitTestRun(t, repository, "commit", "-m", "add second tracked file")
 	}
-	hash := sha256.New()
-	if err := hashTrackedWorktreeFiles(context.Background(), repository, hash); err != nil {
-		t.Fatalf("hash tracked Worktree with unstaged deletion: %v", err)
+	if err := os.Remove(filepath.Join(firstRepository, "README.md")); err != nil {
+		t.Fatalf("remove first tracked file: %v", err)
 	}
-	if got := len(hash.Sum(nil)); got != sha256.Size {
+	if err := os.Remove(filepath.Join(secondRepository, "second.txt")); err != nil {
+		t.Fatalf("remove second tracked file: %v", err)
+	}
+	firstHash := sha256.New()
+	if err := hashTrackedWorktreeFiles(context.Background(), firstRepository, firstHash); err != nil {
+		t.Fatalf("hash first Worktree with unstaged deletion: %v", err)
+	}
+	secondHash := sha256.New()
+	if err := hashTrackedWorktreeFiles(context.Background(), secondRepository, secondHash); err != nil {
+		t.Fatalf("hash second Worktree with unstaged deletion: %v", err)
+	}
+	if got := len(firstHash.Sum(nil)); got != sha256.Size {
 		t.Fatalf("tracked Worktree digest size = %d, want %d", got, sha256.Size)
+	}
+	if string(firstHash.Sum(nil)) == string(secondHash.Sum(nil)) {
+		t.Fatal("tracked Worktree digest did not distinguish different unstaged deletions")
 	}
 }
