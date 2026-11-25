@@ -183,7 +183,6 @@ func (a JobQuestionAuthorization) Validate(job Job) error {
 	}
 	if revision == nil || revision.Contract.ConfigurationSHA256 != a.ConfigurationSHA256 ||
 		!repositoryInJobContract(revision.Contract, a.RepositoryID) ||
-		a.ConfigurationSHA256 != revision.Contract.ConfigurationSHA256 ||
 		a.Deadline.After(revision.Contract.Deadline) ||
 		a.Budget.MaxTurns > revision.Contract.Budget.MaxTurns ||
 		a.Budget.MaxTokens > revision.Contract.Budget.MaxTokens {
