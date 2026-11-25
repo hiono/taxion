@@ -20,13 +20,18 @@ type JobQuestionAuthorizationStore interface {
 	) (store.CommandReceipt, domain.JobQuestionAuthorization, error)
 }
 
+type QuestionReadOnlyContext struct {
+	RepositoryID string
+	Boundary     domain.PlanningReadOnlyBoundary
+}
+
 type QuestionReadOnlyContextResolver interface {
 	ResolveReadOnlyBoundary(
 		context.Context,
 		domain.Job,
 		domain.JobMessage,
 		domain.RoleExecution,
-	) (domain.PlanningReadOnlyBoundary, error)
+	) (QuestionReadOnlyContext, error)
 }
 
 type JobQuestionAuthorizationController struct {
@@ -107,7 +112,7 @@ func (c *JobQuestionAuthorizationController) Authorize(
 	if !acceptedFound || accepted.Status != domain.ProviderStartAccepted {
 		return store.CommandReceipt{}, domain.JobQuestionAuthorization{}, errors.New("JobQuestionAuthorization requires an accepted Planner Provider Session")
 	}
-	boundary, err := c.resolver.ResolveReadOnlyBoundary(ctx, job, question, planner)
+	readOnlyContext, err := c.resolver.ResolveReadOnlyBoundary(ctx, job, question, planner)
 	if err != nil {
 		return store.CommandReceipt{}, domain.JobQuestionAuthorization{}, fmt.Errorf("resolve immutable read-only question context: %w", err)
 	}
@@ -127,7 +132,9 @@ func (c *JobQuestionAuthorizationController) Authorize(
 		PlannerRoleExecutionID: planner.ID, ProviderSessionID: accepted.ProviderSessionID,
 		RepositoryID: planningGrant.RepositoryID,
 		ProviderID:   start.ProviderID, AccountID: start.AccountID,
-		ConfigurationSHA256: start.ConfigurationSHA256, ReadOnlyBoundary: boundary,
+		ConfigurationSHA256: start.ConfigurationSHA256, RepositoryID: readOnlyContext.RepositoryID,
+		PlanningRepositoryID: planningGrant.RepositoryID,
+		ReadOnlyBoundary: readOnlyContext.Boundary,
 		Budget: budget, Deadline: deadline.UTC().Round(0),
 	}
 	return c.store.AddJobQuestionAuthorization(ctx, job.ID, job.Revision, request)

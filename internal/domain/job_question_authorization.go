@@ -13,6 +13,8 @@ type JobQuestionAuthorizationRequest struct {
 	PlannerRoleExecutionID string                   `json:"planner_role_execution_id"`
 	ProviderSessionID      string                   `json:"provider_session_id"`
 	RepositoryID           string                   `json:"repository_id"`
+	PlanningRepositoryID   string                   `json:"planning_repository_id"`
+	PlanningRepositoryID   string                   `json:"planning_repository_id"`
 	ProviderID             string                   `json:"provider_id"`
 	AccountID              string                   `json:"account_id"`
 	ConfigurationSHA256    string                   `json:"configuration_sha256"`
@@ -59,7 +61,8 @@ func NewJobQuestionAuthorization(job Job, request JobQuestionAuthorizationReques
 		!validPlanningIdentity(request.QuestionMessageID) ||
 		!validPlanningIdentity(request.PlannerRoleExecutionID) ||
 		!validPlanningIdentity(request.ProviderSessionID) ||
-		!validRepositoryIdentity(request.RepositoryID) ||
+		!validPlanningIdentity(request.RepositoryID) ||
+		!validRepositoryIdentity(request.PlanningRepositoryID) ||
 		!validPlanningIdentity(request.ProviderID) || !validPlanningIdentity(request.AccountID) ||
 		!validSHA256(request.ConfigurationSHA256) || !validPlanningIdentity(request.ReadOnlyBoundary.Reference) ||
 		!validSHA256(request.ReadOnlyBoundary.SHA256) ||
@@ -75,7 +78,8 @@ func NewJobQuestionAuthorization(job Job, request JobQuestionAuthorizationReques
 	if !approved || approval.Validate(job, latest) != nil {
 		return JobQuestionAuthorization{}, errors.New("JobQuestionAuthorization requires the exact latest JobApproval")
 	}
-	if request.Deadline.After(latest.Contract.Deadline) ||
+	if !repositoryInJobContract(latest.Contract, request.RepositoryID) ||
+		request.Deadline.After(latest.Contract.Deadline) ||
 		!request.Deadline.After(now) ||
 		request.Budget.MaxTurns > latest.Contract.Budget.MaxTurns ||
 		request.Budget.MaxTokens > latest.Contract.Budget.MaxTokens {
@@ -116,7 +120,7 @@ func NewJobQuestionAuthorization(job Job, request JobQuestionAuthorizationReques
 	}
 	if !startFound || start.ProviderID != request.ProviderID || start.AccountID != request.AccountID ||
 		start.ConfigurationSHA256 != request.ConfigurationSHA256 ||
-		planningGrant.RepositoryID != request.RepositoryID {
+		planningGrant.RepositoryID != request.PlanningRepositoryID {
 		return JobQuestionAuthorization{}, errors.New("JobQuestionAuthorization Provider or repository identity differs from the accepted Planner execution")
 	}
 	startObservation, observed := latestProviderStartObservation(job, start.ID)
@@ -139,6 +143,7 @@ func NewJobQuestionAuthorization(job Job, request JobQuestionAuthorizationReques
 		JobID: job.ID, JobApprovalID: approval.ID, ContractRevision: latest.Revision,
 		QuestionMessageID: question.ID, PlannerRoleExecutionID: planner.ID,
 		ProviderSessionID: request.ProviderSessionID, RepositoryID: request.RepositoryID,
+		PlanningRepositoryID: request.PlanningRepositoryID,
 		ProviderID: request.ProviderID, AccountID: request.AccountID,
 		ConfigurationSHA256: request.ConfigurationSHA256, ReadOnlyBoundary: request.ReadOnlyBoundary,
 		Budget: request.Budget, IssuedAt: now, Deadline: request.Deadline.UTC().Round(0),
@@ -154,8 +159,8 @@ func (a JobQuestionAuthorization) Validate(job Job) error {
 	if !validCommandID(a.CommandID) || a.ID != JobQuestionAuthorizationID(a.CommandID) ||
 		a.JobID != job.ID || !validPlanningIdentity(a.JobApprovalID) || a.ContractRevision == 0 ||
 		!validPlanningIdentity(a.QuestionMessageID) || !validPlanningIdentity(a.PlannerRoleExecutionID) ||
-		!validPlanningIdentity(a.ProviderSessionID) || !validRepositoryIdentity(a.RepositoryID) ||
-		!validPlanningIdentity(a.ProviderID) || !validPlanningIdentity(a.AccountID) ||
+		!validPlanningIdentity(a.ProviderSessionID) || !validPlanningIdentity(a.RepositoryID) ||
+		!validRepositoryIdentity(a.PlanningRepositoryID) || !validPlanningIdentity(a.ProviderID) || !validPlanningIdentity(a.AccountID) ||
 		!validSHA256(a.ConfigurationSHA256) ||
 		!validPlanningIdentity(a.ReadOnlyBoundary.Reference) || !validSHA256(a.ReadOnlyBoundary.SHA256) ||
 		(a.ReadOnlyBoundary.Mode != PlanningReadOnlyBoundarySnapshot &&
@@ -172,7 +177,8 @@ func (a JobQuestionAuthorization) Validate(job Job) error {
 			break
 		}
 	}
-	if revision == nil || a.Deadline.After(revision.Contract.Deadline) ||
+	if revision == nil || !repositoryInJobContract(revision.Contract, a.RepositoryID) ||
+		a.Deadline.After(revision.Contract.Deadline) ||
 		a.Budget.MaxTurns > revision.Contract.Budget.MaxTurns ||
 		a.Budget.MaxTokens > revision.Contract.Budget.MaxTokens {
 		return errors.New("JobQuestionAuthorization does not fit its approved JobContract revision")
@@ -195,7 +201,7 @@ func (a JobQuestionAuthorization) Validate(job Job) error {
 		return errors.New("JobQuestionAuthorization Planner RoleExecution is invalid")
 	}
 	planningGrant, found := planningAuthorizationByID(job, planner.PlanningAuthorizationID)
-	if !found || planningGrant.Validate(job) != nil || planningGrant.RepositoryID != a.RepositoryID {
+	if !found || planningGrant.Validate(job) != nil || planningGrant.RepositoryID != a.PlanningRepositoryID {
 		return errors.New("JobQuestionAuthorization does not bind the Planner repository")
 	}
 	var start ProviderStartIntent
@@ -282,4 +288,13 @@ func planningAuthorizationByID(job Job, authorizationID string) (PlanningAuthori
 		}
 	}
 	return PlanningAuthorization{}, false
+}
+
+func repositoryInJobContract(contract JobContract, repositoryID string) bool {
+	for _, candidate := range contract.TargetRepositories {
+		if candidate == repositoryID {
+			return true
+		}
+	}
+	return false
 }

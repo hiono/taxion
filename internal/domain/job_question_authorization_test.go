@@ -175,7 +175,7 @@ func TestJobQuestionAuthorizationRejectsScopeAndBudgetExpansion(t *testing.T) {
 		mutate func(*JobQuestionAuthorizationRequest)
 	}{
 		{name: "foreign repository", mutate: func(r *JobQuestionAuthorizationRequest) {
-			r.RepositoryID = "https://github.com/other/project@" + strings.Repeat("b", 40)
+			r.RepositoryID = "repo_foreign"
 		}},
 		{name: "foreign Provider", mutate: func(r *JobQuestionAuthorizationRequest) { r.ProviderID = "provider.foreign" }},
 		{name: "foreign session", mutate: func(r *JobQuestionAuthorizationRequest) { r.ProviderSessionID = "session_foreign" }},

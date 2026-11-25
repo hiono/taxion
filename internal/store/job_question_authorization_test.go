@@ -129,7 +129,8 @@ func TestJobQuestionAuthorizationStorePersistsAndReplays(t *testing.T) {
 	request := domain.JobQuestionAuthorizationRequest{
 		JobID: job.ID, CommandID: "cmd_87878787878787878787878787878787",
 		QuestionMessageID: message.ID, PlannerRoleExecutionID: planner.ID,
-		ProviderSessionID: plannerSession, RepositoryID: plannerGrant.RepositoryID,
+		ProviderSessionID: plannerSession, RepositoryID: contract.TargetRepositories[0],
+		PlanningRepositoryID: plannerGrant.RepositoryID,
 		ProviderID: plannerStart.ProviderID, AccountID: plannerStart.AccountID,
 		ConfigurationSHA256: plannerStart.ConfigurationSHA256,
 		ReadOnlyBoundary: domain.PlanningReadOnlyBoundary{
