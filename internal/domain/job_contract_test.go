@@ -255,16 +255,16 @@ func TestJobContractAmendmentRejectsUnresolvedProviderStartDispatch(t *testing.T
 		t.Fatalf("JobContract amendment was not rejected by UNKNOWN Start without a dispatch fact: %v", err)
 	}
 	acceptedJob, _, _, acceptedNow := taskTurnFixture(t)
-	acceptedErr := NewJobContractAmendmentRevisionErrorForTest(acceptedJob, acceptedNow)
+	acceptedErr := jobContractAmendmentRevisionErrorForTest(acceptedJob, acceptedNow)
 	if acceptedErr == nil || strings.Contains(acceptedErr.Error(), "Provider Start dispatch is unresolved") {
 		t.Fatalf("accepted Provider Start was incorrectly blocked by dispatch boundary: %v", acceptedErr)
 	}
 }
 
 
-// NewJobContractAmendmentRevisionErrorForTest exercises the accepted Start boundary
+// jobContractAmendmentRevisionErrorForTest exercises the accepted Start boundary
 // without requiring a constructible authenticated principal in this package.
-func NewJobContractAmendmentRevisionErrorForTest(job Job, now time.Time) error {
+func jobContractAmendmentRevisionErrorForTest(job Job, now time.Time) error {
 	latest := job.JobContractRevisions[len(job.JobContractRevisions)-1]
 	_, err := NewJobContractAmendmentRevision(
 		job, "cmd_72727272727272727272727272727272",

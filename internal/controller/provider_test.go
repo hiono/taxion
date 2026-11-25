@@ -912,8 +912,10 @@ func TestProviderControllerPersistsStartIntentBeforeCallingRuntime(t *testing.T)
 			return errors.New("Provider Start dispatch boundary was not persisted before the external call")
 		}
 		intent := job.ProviderStartIntents[0]
-		if job.Revision != intent.CreatedRevision || intent.RoleExecutionID != request.RoleExecutionID {
-			return errors.New("Provider Start intent was not committed with its authorized RoleExecution")
+		if job.Revision != intent.CreatedRevision+1 ||
+			job.ProviderStartObservations[0].CreatedRevision != job.Revision ||
+			intent.RoleExecutionID != request.RoleExecutionID {
+			return errors.New("Provider Start dispatch boundary was not committed after its authorized RoleExecution")
 		}
 		return nil
 	}
