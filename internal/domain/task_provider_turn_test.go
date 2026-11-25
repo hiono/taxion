@@ -421,6 +421,108 @@ func TestTaskTurnDispatchCannotReleaseClaimAfterUnknownObservationAsDefinitiveFa
 	}
 }
 
+func TestTaskTurnDispatchClaimRequiresLatestResumeAttached(t *testing.T) {
+	job, execution, permission, now := taskTurnFixture(t)
+	turn, err := NewTaskTurnIntent(job, execution.ID, permission.ID, "session_task",
+		"cmd_31313131313131313131313131313131", strings.Repeat("3", 64), 40, now)
+	if err != nil {
+		t.Fatalf("NewTaskTurnIntent: %v", err)
+	}
+	job.TaskTurnIntents = append(job.TaskTurnIntents, turn)
+	job.Revision++
+	job.UpdatedAt = turn.CreatedAt
+	principalID := job.JobApprovals[len(job.JobApprovals)-1].ApproverPrincipalID
+	resume, err := NewPlanningResumeIntent(job, execution.ID, principalID, "session_task",
+		"cmd_32323232323232323232323232323232", strings.Repeat("4", 64), true, now.Add(time.Minute))
+	if err != nil {
+		t.Fatalf("NewPlanningResumeIntent: %v", err)
+	}
+	job.PlanningResumeIntents = append(job.PlanningResumeIntents, resume)
+	job.Revision++
+	job.UpdatedAt = resume.CreatedAt
+	if _, err := NewTaskTurnDispatchClaim(job, turn.ID, principalID,
+		"cmd_33333333333333333333333333333333", now.Add(2*time.Minute)); err == nil {
+		t.Fatal("Task Turn acquired a dispatch claim while the latest Resume was unresolved")
+	}
+}
+
+func TestPlanningResumeIntentRejectsActiveTaskTurnDispatch(t *testing.T) {
+	job, execution, permission, now := taskTurnFixture(t)
+	turn, err := NewTaskTurnIntent(job, execution.ID, permission.ID, "session_task",
+		"cmd_41414141414141414141414141414141", strings.Repeat("5", 64), 40, now)
+	if err != nil {
+		t.Fatalf("NewTaskTurnIntent: %v", err)
+	}
+	job.TaskTurnIntents = append(job.TaskTurnIntents, turn)
+	job.Revision++
+	job.UpdatedAt = turn.CreatedAt
+	principalID := job.JobApprovals[len(job.JobApprovals)-1].ApproverPrincipalID
+	claim, err := NewTaskTurnDispatchClaim(job, turn.ID, principalID,
+		"cmd_42424242424242424242424242424242", now.Add(time.Minute))
+	if err != nil {
+		t.Fatalf("NewTaskTurnDispatchClaim: %v", err)
+	}
+	job.TaskTurnDispatchClaims = append(job.TaskTurnDispatchClaims, claim)
+	job.Revision++
+	job.UpdatedAt = claim.CreatedAt
+	if _, err := NewPlanningResumeIntent(job, execution.ID, principalID, "session_task",
+		"cmd_43434343434343434343434343434343", strings.Repeat("6", 64), true, now.Add(2*time.Minute)); err == nil {
+		t.Fatal("Resume intent was created while a Task Turn dispatch claim was active")
+	}
+}
+
+func TestTaskTurnDispatchAllowsMultipleLookupEvidenceAndDefinitiveFailure(t *testing.T) {
+	job, execution, permission, now := taskTurnFixture(t)
+	turn, err := NewTaskTurnIntent(job, execution.ID, permission.ID, "session_task",
+		"cmd_51515151515151515151515151515151", strings.Repeat("7", 64), 40, now)
+	if err != nil {
+		t.Fatalf("NewTaskTurnIntent: %v", err)
+	}
+	job.TaskTurnIntents = append(job.TaskTurnIntents, turn)
+	job.Revision++
+	job.UpdatedAt = turn.CreatedAt
+	principalID := job.JobApprovals[len(job.JobApprovals)-1].ApproverPrincipalID
+	claim, err := NewTaskTurnDispatchClaim(job, turn.ID, principalID,
+		"cmd_52525252525252525252525252525252", now.Add(time.Minute))
+	if err != nil {
+		t.Fatalf("NewTaskTurnDispatchClaim: %v", err)
+	}
+	job.TaskTurnDispatchClaims = append(job.TaskTurnDispatchClaims, claim)
+	job.Revision++
+	job.UpdatedAt = claim.CreatedAt
+	appendTaskTurnDispatchObservationForTest(t, &job, claim, TaskTurnDispatchObservationStarted, "", now.Add(90*time.Second))
+	firstLookup, err := NewTaskTurnDispatchObservation(job, claim.ID, principalID,
+		"cmd_53535353535353535353535353535353", TaskTurnDispatchObservationLookupNotFound, strings.Repeat("a", 64), now.Add(2*time.Minute))
+	if err != nil {
+		t.Fatalf("first Lookup NOT_FOUND: %v", err)
+	}
+	job.TaskTurnDispatchObservations = append(job.TaskTurnDispatchObservations, firstLookup)
+	job.Revision++
+	job.UpdatedAt = firstLookup.CreatedAt
+	secondLookup, err := NewTaskTurnDispatchObservation(job, claim.ID, principalID,
+		"cmd_54545454545454545454545454545454", TaskTurnDispatchObservationLookupNotFound, strings.Repeat("b", 64), now.Add(3*time.Minute))
+	if err != nil {
+		t.Fatalf("second Lookup NOT_FOUND with refreshed evidence: %v", err)
+	}
+	job.TaskTurnDispatchObservations = append(job.TaskTurnDispatchObservations, secondLookup)
+	job.Revision++
+	job.UpdatedAt = secondLookup.CreatedAt
+	failureEvidence := strings.Repeat("c", 64)
+	failure, err := NewTaskTurnDispatchObservation(job, claim.ID, principalID,
+		"cmd_55555555555555555555555555555555", TaskTurnDispatchObservationDefinitiveFailure, failureEvidence, now.Add(4*time.Minute))
+	if err != nil {
+		t.Fatalf("definitive failure after Lookup NOT_FOUND: %v", err)
+	}
+	job.TaskTurnDispatchObservations = append(job.TaskTurnDispatchObservations, failure)
+	job.Revision++
+	job.UpdatedAt = failure.CreatedAt
+	releaseID := TaskTurnDispatchReleaseCommandID(claim.ID, TaskTurnDispatchReleasedDefinitiveFailure)
+	if _, err := NewTaskTurnDispatchRelease(job, claim.ID, principalID, releaseID,
+		TaskTurnDispatchReleasedDefinitiveFailure, failureEvidence, "", now.Add(5*time.Minute)); err != nil {
+		t.Fatalf("definitive failure release after prior Lookup NOT_FOUND: %v", err)
+	}
+}
+
 func TestTaskTurnDispatchDefinitiveFailureIsScopedToReplacementClaim(t *testing.T) {
 	job, execution, permission, now := taskTurnFixture(t)
 	turn, err := NewTaskTurnIntent(job, execution.ID, permission.ID, "session_task",

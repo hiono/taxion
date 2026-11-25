@@ -461,8 +461,10 @@ func validateNoUnresolvedTaskTurnBeforeStop(job Job, roleExecutionID, sessionID 
 			return errors.New("Provider Stop requires the Task Turn dispatch to be released")
 		}
 		observation, found := latestTaskTurnObservation(job, turn.ID)
-		if !found || observation.Status == TaskTurnUnknown ||
-			observation.CreatedRevision <= turn.CreatedRevision {
+		if found && observation.Status == TaskTurnUnknown {
+			return errors.New("Provider Stop requires every dispatched Task Turn in the Session to be terminal")
+		}
+		if !found || observation.CreatedRevision <= turn.CreatedRevision {
 			if taskTurnHasUnresolvedDispatch(job, turn.ID) {
 				return errors.New("Provider Stop requires every dispatched Task Turn in the Session to be terminal")
 			}
