@@ -131,7 +131,7 @@ func TestJobQuestionAuthorizationStorePersistsAndReplays(t *testing.T) {
 		QuestionMessageID: message.ID, PlannerRoleExecutionID: planner.ID,
 		ProviderSessionID: plannerSession, RepositoryID: contract.TargetRepositories[0],
 		PlanningRepositoryID: plannerGrant.RepositoryID,
-		ProviderID: plannerStart.ProviderID, AccountID: plannerStart.AccountID,
+		ProviderID:           plannerStart.ProviderID, AccountID: plannerStart.AccountID,
 		ConfigurationSHA256: plannerStart.ConfigurationSHA256,
 		ReadOnlyBoundary: domain.PlanningReadOnlyBoundary{
 			Mode: domain.PlanningReadOnlyBoundarySnapshot, Reference: "question_snapshot_store",
