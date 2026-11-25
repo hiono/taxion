@@ -303,7 +303,7 @@ func NewProviderStopObservation(
 		ID: ProviderStopObservationID(commandID), CommandID: commandID, JobID: job.ID,
 		RoleExecutionID: intent.RoleExecutionID, OperationID: intent.OperationID, SessionID: intent.SessionID,
 		DispatchClaimID: dispatchClaimID,
-		Stopped: stopped, Quiescent: quiescent, EvidenceSHA256: evidenceSHA256,
+		Stopped:         stopped, Quiescent: quiescent, EvidenceSHA256: evidenceSHA256,
 		ReconcilesUnknown: reconcilesUnknown, CreatedAt: now, CreatedRevision: job.Revision + 1,
 	}
 	if err := observation.Validate(job); err != nil {
