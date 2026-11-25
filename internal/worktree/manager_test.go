@@ -14,7 +14,6 @@ import (
 	"github.com/hiono/taxion/internal/domain"
 )
 
-
 func TestVerifyWorktreeHeadUnchangedRejectsChangedHEAD(t *testing.T) {
 	repository := initRepository(t)
 	expected := gitTestOutput(t, repository, "rev-parse", "HEAD")
