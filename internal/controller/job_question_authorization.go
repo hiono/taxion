@@ -23,9 +23,6 @@ type JobQuestionAuthorizationStore interface {
 		uint64,
 		domain.JobQuestionAuthorizationRequest,
 	) (store.CommandReceipt, domain.JobQuestionAuthorization, error)
-	GetJobQuestionAuthorizationCommand(
-		context.Context, string, string,
-	) (store.CommandReceipt, domain.JobQuestionAuthorization, bool, error)
 }
 
 type QuestionReadOnlyContext struct {
