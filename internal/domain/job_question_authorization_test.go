@@ -47,9 +47,9 @@ func TestJobQuestionAuthorizationBindsOneApprovedQuestionAndPlannerSession(t *te
 		t.Fatal("approved Job fixture has no Planner RoleExecution")
 	}
 	message, err := NewJobMessage(job, "cmd_72727272727272727272727272727272", JobMessageRequest{
-		Sender: ActorRef{Kind: ActorCoder, ID: start.RoleExecution.ID},
+		Sender:    ActorRef{Kind: ActorCoder, ID: start.RoleExecution.ID},
 		Recipient: ActorRef{Kind: ActorPlanner, ID: planner.ID},
-		Kind: MessageKindQuestion, Body: "Please clarify the approved implementation constraint.",
+		Kind:      MessageKindQuestion, Body: "Please clarify the approved implementation constraint.",
 	}, now.Add(2*time.Minute))
 	if err != nil {
 		t.Fatalf("NewJobMessage: %v", err)
@@ -78,13 +78,13 @@ func TestJobQuestionAuthorizationBindsOneApprovedQuestionAndPlannerSession(t *te
 		JobID: job.ID, CommandID: "cmd_73737373737373737373737373737373",
 		QuestionMessageID: message.ID, PlannerRoleExecutionID: planner.ID,
 		ProviderSessionID: startObservation.ProviderSessionID,
-		RepositoryID: planningGrant.RepositoryID,
-		ProviderID: planningGrant.ProviderID, AccountID: planningGrant.AccountID,
+		RepositoryID:      planningGrant.RepositoryID,
+		ProviderID:        planningGrant.ProviderID, AccountID: planningGrant.AccountID,
 		ConfigurationSHA256: planningGrant.ConfigurationSHA256,
 		ReadOnlyBoundary: PlanningReadOnlyBoundary{
 			Mode: PlanningReadOnlyBoundarySnapshot, Reference: "question_snapshot_1", SHA256: strings.Repeat("d", 64),
 		},
-		Budget: PlanningBudget{MaxTurns: 1, MaxTokens: 100},
+		Budget:   PlanningBudget{MaxTurns: 1, MaxTokens: 100},
 		Deadline: contract.Deadline.Add(-time.Minute),
 	}
 	authorization, err := NewJobQuestionAuthorization(job, request, authorizationTime)
@@ -163,7 +163,7 @@ func TestJobQuestionAuthorizationRejectsScopeAndBudgetExpansion(t *testing.T) {
 		JobID: job.ID, CommandID: "cmd_76767676767676767676767676767676",
 		QuestionMessageID: message.ID, PlannerRoleExecutionID: planner.ID,
 		ProviderSessionID: startObservation.ProviderSessionID,
-		RepositoryID: grant.RepositoryID, ProviderID: grant.ProviderID,
+		RepositoryID:      grant.RepositoryID, ProviderID: grant.ProviderID,
 		AccountID: grant.AccountID, ConfigurationSHA256: grant.ConfigurationSHA256,
 		ReadOnlyBoundary: PlanningReadOnlyBoundary{
 			Mode: PlanningReadOnlyBoundarySnapshot, Reference: "question_snapshot_2", SHA256: strings.Repeat("d", 64),
@@ -174,7 +174,9 @@ func TestJobQuestionAuthorizationRejectsScopeAndBudgetExpansion(t *testing.T) {
 		name   string
 		mutate func(*JobQuestionAuthorizationRequest)
 	}{
-		{name: "foreign repository", mutate: func(r *JobQuestionAuthorizationRequest) { r.RepositoryID = "https://github.com/other/project@" + strings.Repeat("b", 40) }},
+		{name: "foreign repository", mutate: func(r *JobQuestionAuthorizationRequest) {
+			r.RepositoryID = "https://github.com/other/project@" + strings.Repeat("b", 40)
+		}},
 		{name: "foreign Provider", mutate: func(r *JobQuestionAuthorizationRequest) { r.ProviderID = "provider.foreign" }},
 		{name: "foreign session", mutate: func(r *JobQuestionAuthorizationRequest) { r.ProviderSessionID = "session_foreign" }},
 		{name: "budget exceeds contract", mutate: func(r *JobQuestionAuthorizationRequest) { r.Budget.MaxTokens = contract.Budget.MaxTokens + 1 }},
