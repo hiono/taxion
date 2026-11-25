@@ -80,9 +80,15 @@ func (o TaskTurnDispatchObservation) Validate(job Job) error {
 		if !started || start.CreatedRevision >= o.CreatedRevision || !validSHA256(o.EvidenceSHA256) {
 			return errors.New("returned UNKNOWN requires a prior dispatch start and evidence")
 		}
-		latest, found := latestTaskTurnObservation(job, o.TurnID)
-		if !found || latest.Status != TaskTurnUnknown || latest.DispatchClaimID != claim.ID ||
-			latest.CreatedRevision >= o.CreatedRevision {
+		var latest *TaskTurnObservation
+		for i := range job.TaskTurnObservations {
+			candidate := &job.TaskTurnObservations[i]
+			if candidate.DispatchClaimID == claim.ID && candidate.CreatedRevision < o.CreatedRevision &&
+				(latest == nil || candidate.CreatedRevision > latest.CreatedRevision) {
+				latest = candidate
+			}
+		}
+		if latest == nil || latest.Status != TaskTurnUnknown {
 			return errors.New("returned UNKNOWN must follow the UNKNOWN observation for the same dispatch claim")
 		}
 	default:
