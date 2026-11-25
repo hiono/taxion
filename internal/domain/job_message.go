@@ -77,19 +77,19 @@ type JobMessage struct {
 }
 
 type DeliveryObservation struct {
-	ID                string         `json:"id"`
-	CommandID         string         `json:"command_id"`
-	JobID             string         `json:"job_id"`
-	MessageID         string         `json:"message_id"`
-	RequestObservationID string      `json:"request_observation_id"`
-	Recipient         ActorRef       `json:"recipient"`
-	ObservedBy        ActorRef       `json:"observed_by"`
-	Status            DeliveryStatus `json:"status"`
-	Attempt           uint32         `json:"attempt"`
-	EvidenceSHA256    string         `json:"evidence_sha256,omitempty"`
-	ReconcilesUnknown bool           `json:"reconciles_unknown,omitempty"`
-	CreatedAt         time.Time      `json:"created_at"`
-	CreatedRevision   uint64         `json:"created_revision"`
+	ID                   string         `json:"id"`
+	CommandID            string         `json:"command_id"`
+	JobID                string         `json:"job_id"`
+	MessageID            string         `json:"message_id"`
+	RequestObservationID string         `json:"request_observation_id"`
+	Recipient            ActorRef       `json:"recipient"`
+	ObservedBy           ActorRef       `json:"observed_by"`
+	Status               DeliveryStatus `json:"status"`
+	Attempt              uint32         `json:"attempt"`
+	EvidenceSHA256       string         `json:"evidence_sha256,omitempty"`
+	ReconcilesUnknown    bool           `json:"reconciles_unknown,omitempty"`
+	CreatedAt            time.Time      `json:"created_at"`
+	CreatedRevision      uint64         `json:"created_revision"`
 }
 
 func JobMessageID(commandID string) string {
@@ -294,7 +294,7 @@ func NewDeliveryObservation(
 			}
 			currentRequestID = previous.RequestObservationID
 		case DeliveryFailed:
-			if status != DeliveryRequested || requestObservationID != "" || reconcilesUnknown || evidenceSHA256 != "" {
+			if previous.Attempt == ^uint32(0) || status != DeliveryRequested || requestObservationID != "" || reconcilesUnknown || evidenceSHA256 != "" {
 				return DeliveryObservation{}, errors.New("FAILED delivery can only start a new REQUESTED attempt")
 			}
 			attempt++
