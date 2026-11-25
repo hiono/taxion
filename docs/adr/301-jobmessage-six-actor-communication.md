@@ -37,7 +37,7 @@ Question / Answerは情報交換であり、Taskや実行責任を移転しま�
 
 基本単位は1メッセージ・1宛先です。fan-outはBatchIDで相関した宛先別メッセージとして記録します。保存と配信を別の事実として扱い、宛先ごとの配信・応答観測をappend-onlyで保持します。
 
-REQUESTED、ACCEPTED、FAILED、UNKNOWNを区別します。MessageID / BatchIDで重複を排除し、配信結果UNKNOWNは不明のまま保持します。Exactly-once deliveryは保証しません。
+REQUESTED、ACCEPTED、FAILED、UNKNOWNを区別します。各非REQUESTED observationは対象となるREQUESTED observationのIDを明示し、最新REQUESTED IDと一致しない遅延結果を拒否します。FAILED後の再送は新しいREQUESTED observationとして記録し、UNKNOWNは同じREQUESTED observationに対する明示的reconciliationでのみ解消します。MessageID / BatchIDで重複を排除し、配信結果UNKNOWNは不明のまま保持します。Exactly-once deliveryは保証しません。
 
 ### Authority boundary
 
