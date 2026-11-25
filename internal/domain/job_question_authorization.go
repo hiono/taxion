@@ -14,7 +14,6 @@ type JobQuestionAuthorizationRequest struct {
 	ProviderSessionID      string                   `json:"provider_session_id"`
 	RepositoryID           string                   `json:"repository_id"`
 	PlanningRepositoryID   string                   `json:"planning_repository_id"`
-	PlanningRepositoryID   string                   `json:"planning_repository_id"`
 	ProviderID             string                   `json:"provider_id"`
 	AccountID              string                   `json:"account_id"`
 	ConfigurationSHA256    string                   `json:"configuration_sha256"`
@@ -33,6 +32,7 @@ type JobQuestionAuthorization struct {
 	PlannerRoleExecutionID string                   `json:"planner_role_execution_id"`
 	ProviderSessionID      string                   `json:"provider_session_id"`
 	RepositoryID           string                   `json:"repository_id"`
+	PlanningRepositoryID   string                   `json:"planning_repository_id"`
 	ProviderID             string                   `json:"provider_id"`
 	AccountID              string                   `json:"account_id"`
 	ConfigurationSHA256    string                   `json:"configuration_sha256"`
