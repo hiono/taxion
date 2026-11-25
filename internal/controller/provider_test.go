@@ -1288,7 +1288,7 @@ func TestProviderControllerDispatchesTaskCoderStartWithDurableIntentAndReconcile
 			{Capability: provider.CapabilityStartLookup, Identity: runtime.identity, TestID: "task-start-test",
 				EvidenceSHA256: strings.Repeat("a", 64), EvidenceLevel: provider.EvidenceSynthetic, VerifiedAt: now},
 			{Capability: provider.CapabilityStartIdempotency, Identity: runtime.identity, TestID: "task-start-test",
-				EvidenceSHA256: strings.Repeat("b", 64), EvidenceLevel: provider.EvidenceSynthetic, VerifiedAt: now},
+				EvidenceSHA256: strings.Repeat("b", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
 			{Capability: provider.CapabilityTaskWorktree, Identity: runtime.identity, TestID: "task-worktree-test",
 				EvidenceSHA256: strings.Repeat("c", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
 		},
@@ -1377,11 +1377,15 @@ func TestProviderControllerReconcilesTaskCoderStartUnknownBySameOperationID(t *t
 		startErr: &provider.OperationError{Class: provider.FailureAmbiguous, Code: provider.OperationCodeTimeout},
 	}
 	runtime.capabilities = provider.Capabilities{
-		Identity: runtime.identity, StartLookup: true, TaskWorktree: true,
+		Identity: runtime.identity, StartLookup: true, StartIdempotency: true, TaskWorktree: true,
 		Evidence: []provider.CapabilityEvidence{{
 			Capability: provider.CapabilityStartLookup, Identity: runtime.identity,
 			TestID: "task-start-test", EvidenceSHA256: strings.Repeat("d", 64),
 			EvidenceLevel: provider.EvidenceSynthetic, VerifiedAt: now,
+		}, {
+			Capability: provider.CapabilityStartIdempotency, Identity: runtime.identity,
+			TestID: "task-start-test", EvidenceSHA256: strings.Repeat("e", 64),
+			EvidenceLevel: provider.EvidenceLive, VerifiedAt: now,
 		}, {
 			Capability: provider.CapabilityTaskWorktree, Identity: runtime.identity,
 			TestID: "task-worktree-test", EvidenceSHA256: strings.Repeat("b", 64),
@@ -1515,7 +1519,7 @@ func TestProviderControllerRevalidatesTaskWorktreeAfterLookupBeforeStart(t *test
 			{Capability: provider.CapabilityStartLookup, Identity: runtime.identity, TestID: "task-start-test",
 				EvidenceSHA256: strings.Repeat("a", 64), EvidenceLevel: provider.EvidenceSynthetic, VerifiedAt: now},
 			{Capability: provider.CapabilityStartIdempotency, Identity: runtime.identity, TestID: "task-start-test",
-				EvidenceSHA256: strings.Repeat("b", 64), EvidenceLevel: provider.EvidenceSynthetic, VerifiedAt: now},
+				EvidenceSHA256: strings.Repeat("b", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
 			{Capability: provider.CapabilityTaskWorktree, Identity: runtime.identity, TestID: "task-worktree-test",
 				EvidenceSHA256: strings.Repeat("c", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
 		},
