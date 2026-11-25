@@ -32,7 +32,6 @@ type QuestionReadOnlyContextResolver interface {
 type JobQuestionAuthorizationController struct {
 	store    JobQuestionAuthorizationStore
 	resolver QuestionReadOnlyContextResolver
-	now      func() time.Time
 }
 
 func NewJobQuestionAuthorizationController(
@@ -44,7 +43,6 @@ func NewJobQuestionAuthorizationController(
 	}
 	return &JobQuestionAuthorizationController{
 		store: authorizationStore, resolver: resolver,
-		now: func() time.Time { return time.Now().UTC().Round(0) },
 	}, nil
 }
 
