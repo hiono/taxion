@@ -621,8 +621,8 @@ func TestExecutionControllerStartsCoderOnApprovedAdoptedWorktree(t *testing.T) {
 	if _, _, _, err := failingController.StartTaskExecution(ctx, permission.ID, startCommand, request); err == nil {
 		t.Fatal("Task Start succeeded despite forced persistence failure")
 	}
-	if adopter.releaseCalls != 1 || adopter.adoptCalls != 2 {
-		t.Fatalf("uncommitted adopted Worktree reservation was not released: adopt=%d release=%d",
+	if adopter.releaseCalls != 2 || adopter.adoptCalls != 2 {
+		t.Fatalf("uncommitted adopted Worktree reservations were not released: adopt=%d release=%d",
 			adopter.adoptCalls, adopter.releaseCalls)
 	}
 	receipt, execution, intent, err := controller.StartTaskExecution(ctx, permission.ID, startCommand, request)
@@ -630,7 +630,7 @@ func TestExecutionControllerStartsCoderOnApprovedAdoptedWorktree(t *testing.T) {
 		t.Fatalf("StartTaskExecution with adopted Worktree: %v", err)
 	}
 	if receipt.Revision == 0 || execution.TaskID != task.ID || intent.WorktreeID != execution.WorktreeID ||
-		adopter.adoptCalls != 3 || adopter.releaseCalls != 1 || adopter.verifyCalls != 0 || adopter.prepareCalls != 0 {
+		adopter.adoptCalls != 3 || adopter.releaseCalls != 2 || adopter.verifyCalls != 0 || adopter.prepareCalls != 0 {
 		t.Fatalf("adopted Worktree was not used for the exact Task start: receipt=%#v execution=%#v intent=%#v adopter=%#v",
 			receipt, execution, intent, adopter)
 	}
