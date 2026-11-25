@@ -15,7 +15,7 @@ func TestCommunicationControllerPersistsCoderPlannerQuestionAndAnswer(t *testing
 	runtime := &fakePlanningProviderRuntime{identity: provider.Identity{
 		ProviderID: "provider.test", AccountID: "account.primary",
 		ConfigurationSHA256: revision.Contract.ConfigurationSHA256,
-		SDKVersion: "test-sdk/1",
+		SDKVersion:          "test-sdk/1",
 	}}
 	now := time.Now().UTC().Round(0)
 	runtime.capabilities = provider.Capabilities{
