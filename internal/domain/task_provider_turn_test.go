@@ -61,7 +61,7 @@ func appendTaskTurnDispatchObservationForTest(
 	createdAt time.Time,
 ) TaskTurnDispatchObservation {
 	t.Helper()
-	commandID := TaskTurnDispatchObservationCommandID(claim.ID, status)
+	commandID := TaskTurnDispatchObservationCommandID(claim.ID, status, evidenceSHA256)
 	observation, err := NewTaskTurnDispatchObservation(
 		*job, claim.ID, claim.PrincipalID, commandID, status, evidenceSHA256, createdAt,
 	)
