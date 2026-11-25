@@ -114,9 +114,12 @@ func TestLegacyTaskRoleExecutionWithoutWorktreeRemainsReadable(t *testing.T) {
 	job.Revision++
 	job.UpdatedAt = permission.CreatedAt
 
+	legacyRoot := t.TempDir()
 	snapshot := WorktreeSnapshot{
-		RepositoryID: task.TargetRepositories[0], RepositoryPath: "/repositories/project",
-		WorktreePath: "/worktrees/legacy-task", BaselineCommit: strings.Repeat("a", 40),
+		RepositoryID: task.TargetRepositories[0],
+		RepositoryPath: filepath.Join(legacyRoot, "repositories", "project"),
+		WorktreePath: filepath.Join(legacyRoot, "worktrees", "legacy-task"),
+		BaselineCommit: strings.Repeat("a", 40),
 		Origin: WorktreeOriginTaxionCreated, InitialStateSHA256: strings.Repeat("b", 64),
 		HeadMode: WorktreeHeadDetached,
 	}
@@ -427,6 +430,8 @@ func TestExecutionPermissionBindsAdoptedWorktreeToApprovedTaskResource(t *testin
 	snapshot := WorktreeSnapshot{
 		RepositoryID: task.TargetRepositories[0], RepositoryPath: filepath.Join(filepath.Dir(worktreePath), "taxion-source"),
 		WorktreePath: worktreePath + "-mismatch", BaselineCommit: strings.Repeat("a", 40),
+		Origin: WorktreeOriginAdopted, InitialStateSHA256: strings.Repeat("b", 64),
+		HeadMode: WorktreeHeadDetached,
 	}
 	commandID := "cmd_d1010101010101010101010101010101"
 	if _, err := NewTaskRoleExecutionStart(
