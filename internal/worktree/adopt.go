@@ -540,6 +540,12 @@ func hashTrackedWorktreeFiles(ctx context.Context, path string, hash interface{ 
 			return errors.New("tracked Worktree path escapes its root")
 		}
 		info, err := os.Lstat(filePath)
+		if errors.Is(err, os.ErrNotExist) {
+			writeDigestPart(hash, []byte(relative))
+			writeDigestPart(hash, []byte(mode))
+			writeDigestPart(hash, []byte("missing"))
+			continue
+		}
 		if err != nil {
 			return fmt.Errorf("inspect tracked Worktree file %q: %w", relative, err)
 		}
