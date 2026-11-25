@@ -601,7 +601,9 @@ func (c *ProviderController) recordTaskStartObservation(
 	jobID, operationID, status, sessionID, receiptID, evidenceSHA256 string,
 	reconcilesUnknown bool,
 ) (domain.ProviderStartObservation, error) {
-	job, err := c.store.GetJob(ctx, jobID)
+	persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	job, err := c.store.GetJob(persistCtx, jobID)
 	if err != nil {
 		return domain.ProviderStartObservation{}, err
 	}
@@ -628,7 +630,7 @@ func (c *ProviderController) recordTaskStartObservation(
 		operationID, status, sessionID, receiptID, evidenceSHA256, reconcilesUnknown,
 	)
 	_, observation, err := c.store.AddTaskProviderStartObservation(
-		ctx, jobID, job.Revision, operationID, commandID, status,
+		persistCtx, jobID, job.Revision, operationID, commandID, status,
 		sessionID, receiptID, evidenceSHA256, reconcilesUnknown,
 	)
 	return observation, err
@@ -1048,7 +1050,9 @@ func (c *ProviderController) recordStartObservation(
 	reconcilesUnknown bool,
 	principal auth.AuthenticatedPrincipal,
 ) error {
-	job, err := c.store.GetJob(ctx, jobID)
+	persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	job, err := c.store.GetJob(persistCtx, jobID)
 	if err != nil {
 		return err
 	}
@@ -1082,7 +1086,7 @@ func (c *ProviderController) recordStartObservation(
 		operationID, status, sessionID, receiptID, evidenceSHA256, reconcilesUnknown,
 	)
 	_, _, err = c.store.AddProviderStartObservation(
-		ctx, jobID, job.Revision, operationID, commandID, status,
+		persistCtx, jobID, job.Revision, operationID, commandID, status,
 		sessionID, receiptID, evidenceSHA256, reconcilesUnknown, principal,
 	)
 	return err
