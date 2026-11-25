@@ -79,7 +79,7 @@ func TestJobQuestionAuthorizationBindsOneApprovedQuestionAndPlannerSession(t *te
 		QuestionMessageID: message.ID, PlannerRoleExecutionID: planner.ID,
 		ProviderSessionID: startObservation.ProviderSessionID,
 		RepositoryID:      contract.TargetRepositories[0], PlanningRepositoryID: planningGrant.RepositoryID,
-		ProviderID:        planningGrant.ProviderID, AccountID: planningGrant.AccountID,
+		ProviderID: planningGrant.ProviderID, AccountID: planningGrant.AccountID,
 		ConfigurationSHA256: planningGrant.ConfigurationSHA256,
 		ReadOnlyBoundary: PlanningReadOnlyBoundary{
 			Mode: PlanningReadOnlyBoundarySnapshot, Reference: "question_snapshot_1", SHA256: strings.Repeat("d", 64),
