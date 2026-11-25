@@ -205,7 +205,8 @@ func (c *ExecutionController) StartTaskExecution(
 		ctx, job.Revision, request.JobID, request.TaskID, permissionID, commandID, permission.RequestSHA256, snapshot,
 	)
 	if err != nil {
-		if snapshot.Origin == domain.WorktreeOriginAdopted && request.WorktreePath != "" {
+		if snapshot.Origin == domain.WorktreeOriginAdopted && request.WorktreePath != "" &&
+			request.WorktreePath == snapshot.WorktreePath {
 			persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 			defer cancel()
 			persisted, readErr := c.store.GetJob(persistCtx, request.JobID)

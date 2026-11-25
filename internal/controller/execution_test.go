@@ -621,8 +621,8 @@ func TestExecutionControllerStartsCoderOnApprovedAdoptedWorktree(t *testing.T) {
 	if _, _, _, err := failingController.StartTaskExecution(ctx, permission.ID, startCommand, request); err == nil {
 		t.Fatal("Task Start succeeded despite forced persistence failure")
 	}
-	if adopter.releaseCalls != 2 || adopter.adoptCalls != 2 {
-		t.Fatalf("uncommitted adopted Worktree reservations were not released: adopt=%d release=%d",
+	if adopter.releaseCalls != 1 || adopter.adoptCalls != 2 {
+		t.Fatalf("uncommitted adopted Worktree reservation was not released: adopt=%d release=%d",
 			adopter.adoptCalls, adopter.releaseCalls)
 	}
 	receipt, execution, intent, err := controller.StartTaskExecution(ctx, permission.ID, startCommand, request)
