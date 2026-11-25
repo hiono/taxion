@@ -628,7 +628,7 @@ func TestReleaseTaskTurnDispatchClaimBeforeSendDoesNotReleaseReplacementClaim(t 
 	}
 	if _, _, err := f.database.ReleaseTaskTurnDispatchClaim(
 		f.ctx, f.jobID, firstClaim.ID, f.principal,
-		domain.TaskTurnDispatchReleasedIdempotentRetry, lookupEvidence,
+		domain.TaskTurnDispatchReleasedIdempotentRetry, strings.Repeat("b", 64), lookupEvidence,
 	); err != nil {
 		t.Fatalf("release first dispatch claim: %v", err)
 	}
@@ -704,7 +704,7 @@ func TestDefinitivePreSendReleaseDoesNotResolveEarlierUnknownClaim(t *testing.T)
 	}
 	if _, _, err := f.database.ReleaseTaskTurnDispatchClaim(
 		f.ctx, f.jobID, firstClaim.ID, f.principal,
-		domain.TaskTurnDispatchReleasedIdempotentRetry, lookupEvidence,
+		domain.TaskTurnDispatchReleasedIdempotentRetry, strings.Repeat("b", 64), lookupEvidence,
 	); err != nil {
 		t.Fatalf("release first claim for idempotent retry: %v", err)
 	}
@@ -781,7 +781,7 @@ func TestReleaseTaskTurnDispatchClaimForIdempotentRetryDoesNotReleaseReplacement
 	}
 	if _, _, err := f.database.ReleaseTaskTurnDispatchClaim(
 		f.ctx, f.jobID, firstClaim.ID, f.principal,
-		domain.TaskTurnDispatchReleasedIdempotentRetry, lookupEvidence,
+		domain.TaskTurnDispatchReleasedIdempotentRetry, strings.Repeat("b", 64), lookupEvidence,
 	); err != nil {
 		t.Fatalf("release first dispatch claim: %v", err)
 	}

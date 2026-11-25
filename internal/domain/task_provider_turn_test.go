@@ -444,7 +444,7 @@ func TestTaskTurnDispatchDefinitiveFailureIsScopedToReplacementClaim(t *testing.
 	appendTaskTurnDispatchObservationForTest(t, &job, secondClaim, TaskTurnDispatchObservationPreDispatchFailure, failureEvidence, now.Add(4*time.Minute+30*time.Second))
 	failureCommand := TaskTurnDispatchReleaseCommandID(secondClaim.ID, TaskTurnDispatchReleasedDefinitiveFailure)
 	if _, err := NewTaskTurnDispatchRelease(job, secondClaim.ID, principalID, failureCommand,
-		TaskTurnDispatchReleasedDefinitiveFailure, failureEvidence, now.Add(5*time.Minute)); err != nil {
+		TaskTurnDispatchReleasedDefinitiveFailure, failureEvidence, "", now.Add(5*time.Minute)); err != nil {
 		t.Fatalf("definitive pre-send failure of replacement claim was blocked by older UNKNOWN: %v", err)
 	}
 }
