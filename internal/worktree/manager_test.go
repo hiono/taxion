@@ -1089,7 +1089,11 @@ func TestManagerOrphanedReservationCleanupPreservesCommittedAdoption(t *testing.
 	if err := writeBaselineRecord(adoptionRegistrationPath(manager.root, reservation.JobID, reservation.TaskID)+".baseline.json", record); err != nil {
 		t.Fatalf("write committed baseline record: %v", err)
 	}
-	if err := manager.removeOrphanedAdoptionReservation(reservation); err != nil {
+	reservationDirectory, err := manager.adoptionReservationDirectory(reservation.RepositoryID, false)
+	if err != nil {
+		t.Fatalf("resolve reservation directory: %v", err)
+	}
+	if err := manager.removeOrphanedAdoptionReservation(reservation, reservationDirectory); err != nil {
 		t.Fatalf("cleanup committed reservation: %v", err)
 	}
 	for _, path := range []string{taskPath, gitDirPath} {
