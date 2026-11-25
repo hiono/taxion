@@ -41,6 +41,7 @@ type ProviderStopObservation struct {
 	RoleExecutionID   string    `json:"role_execution_id"`
 	OperationID       string    `json:"operation_id"`
 	SessionID         string    `json:"session_id"`
+	DispatchClaimID   string    `json:"dispatch_claim_id,omitempty"`
 	Stopped           bool      `json:"stopped"`
 	Quiescent         bool      `json:"quiescent"`
 	EvidenceSHA256    string    `json:"evidence_sha256,omitempty"`
@@ -61,8 +62,8 @@ func ProviderStopObservationID(commandID string) string {
 	return planningOperationID("provider_stop_observation", commandID)
 }
 
-func ProviderStopObservationCommandID(operationID string, stopped, quiescent bool, evidenceSHA256 string, reconcilesUnknown bool) string {
-	material := operationID + "\x00" + evidenceSHA256
+func ProviderStopObservationCommandID(operationID, dispatchClaimID, attemptID string, stopped, quiescent bool, evidenceSHA256 string, reconcilesUnknown bool) string {
+	material := operationID + "\x00" + dispatchClaimID + "\x00" + attemptID + "\x00" + evidenceSHA256
 	if stopped {
 		material += "\x00stopped"
 	}
@@ -294,9 +295,14 @@ func NewProviderStopObservation(
 	if !validCommandID(commandID) || now.IsZero() || job.Revision >= uint64(^uint64(0)>>1) {
 		return ProviderStopObservation{}, errors.New("Provider Stop observation command and timestamp are required")
 	}
+	dispatchClaimID := ""
+	if claim, active := ActiveProviderStopDispatchClaim(job, intent.OperationID); active {
+		dispatchClaimID = claim.ID
+	}
 	observation := ProviderStopObservation{
 		ID: ProviderStopObservationID(commandID), CommandID: commandID, JobID: job.ID,
 		RoleExecutionID: intent.RoleExecutionID, OperationID: intent.OperationID, SessionID: intent.SessionID,
+		DispatchClaimID: dispatchClaimID,
 		Stopped: stopped, Quiescent: quiescent, EvidenceSHA256: evidenceSHA256,
 		ReconcilesUnknown: reconcilesUnknown, CreatedAt: now, CreatedRevision: job.Revision + 1,
 	}
@@ -356,6 +362,34 @@ func (o ProviderStopObservation) Validate(job Job) error {
 	if !found || intent.RoleExecutionID != o.RoleExecutionID || intent.SessionID != o.SessionID ||
 		o.CreatedRevision <= intent.CreatedRevision || o.CreatedAt.Before(intent.CreatedAt) {
 		return errors.New("Provider Stop observation does not match its Stop intent")
+	}
+	if o.DispatchClaimID != "" {
+		claim, found := providerStopDispatchClaimByID(job, o.DispatchClaimID)
+		if !found || claim.OperationID != o.OperationID || o.CreatedRevision <= claim.CreatedRevision ||
+			o.CreatedAt.Before(claim.CreatedAt) {
+			return errors.New("Provider Stop observation does not match its dispatch claim")
+		}
+		for _, release := range job.ProviderStopDispatchReleases {
+			if release.ClaimID == claim.ID && release.CreatedRevision < o.CreatedRevision {
+				return errors.New("Provider Stop observation was appended after its dispatch claim was released")
+			}
+		}
+	} else {
+		for _, claim := range job.ProviderStopDispatchClaims {
+			if claim.OperationID != o.OperationID || claim.CreatedRevision >= o.CreatedRevision {
+				continue
+			}
+			released := false
+			for _, release := range job.ProviderStopDispatchReleases {
+				if release.ClaimID == claim.ID && release.CreatedRevision < o.CreatedRevision {
+					released = true
+					break
+				}
+			}
+			if !released {
+				return errors.New("Provider Stop observation omitted its active dispatch claim identity")
+			}
+		}
 	}
 	return nil
 }

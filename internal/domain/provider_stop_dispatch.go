@@ -277,14 +277,14 @@ func providerStopFencingRequiredBefore(job Job, operationID string, beforeRevisi
 	return false
 }
 
-func providerStopDefinitiveFailureObserved(job Job, operationID string, startRevision, beforeRevision uint64, evidenceSHA256 string) bool {
+func providerStopDefinitiveFailureObserved(job Job, claimID, operationID string, startRevision, beforeRevision uint64, evidenceSHA256 string) bool {
 	if !validSHA256(evidenceSHA256) {
 		return false
 	}
 	for _, observation := range job.ProviderStopObservations {
-		if observation.OperationID == operationID && observation.CreatedRevision > startRevision &&
-			observation.CreatedRevision < beforeRevision && observation.EvidenceSHA256 == evidenceSHA256 &&
-			!observation.Stopped && !observation.Quiescent {
+		if observation.DispatchClaimID == claimID && observation.OperationID == operationID &&
+			observation.CreatedRevision > startRevision && observation.CreatedRevision < beforeRevision &&
+			observation.EvidenceSHA256 == evidenceSHA256 && !observation.Stopped && !observation.Quiescent {
 			return true
 		}
 	}
@@ -412,21 +412,22 @@ func (r ProviderStopDispatchRelease) Validate(job Job) error {
 		}
 	} else if r.Outcome == ProviderStopDispatchReleasedDefinitiveFailure {
 		if start, started := ProviderStopDispatchStartedForClaim(job, claim.ID); started &&
-			!providerStopDefinitiveFailureObserved(job, claim.OperationID, start.CreatedRevision, r.CreatedRevision, r.EvidenceSHA256) {
+			!providerStopDefinitiveFailureObserved(job, claim.ID, claim.OperationID, start.CreatedRevision, r.CreatedRevision, r.EvidenceSHA256) {
 			return errors.New("started Provider Stop dispatch definitive failure lacks matching persisted evidence")
 		}
 	}
 	if r.Outcome == ProviderStopDispatchReleasedStopped {
-		var latest *ProviderStopObservation
+		var claimObservation *ProviderStopObservation
 		for i := range job.ProviderStopObservations {
 			observation := &job.ProviderStopObservations[i]
-			if observation.OperationID == r.OperationID &&
-				(latest == nil || observation.CreatedRevision > latest.CreatedRevision) {
-				latest = observation
+			if observation.DispatchClaimID == claim.ID && observation.OperationID == r.OperationID &&
+				(observation.CreatedRevision < r.CreatedRevision) &&
+				(claimObservation == nil || observation.CreatedRevision > claimObservation.CreatedRevision) {
+				claimObservation = observation
 			}
 		}
-		if latest == nil || !latest.Quiescent || latest.CreatedRevision >= r.CreatedRevision {
-			return errors.New("STOPPED dispatch release requires prior quiescent Provider evidence")
+		if claimObservation == nil || !claimObservation.Quiescent {
+			return errors.New("STOPPED dispatch release requires prior quiescent evidence from the same claim")
 		}
 	}
 	return nil

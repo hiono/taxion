@@ -746,8 +746,16 @@ func (c *ProviderController) persistProviderStopObservation(
 	evidenceSHA256 string,
 	reconcilesUnknown bool,
 ) (domain.ProviderStopObservation, error) {
+	dispatchClaimID := ""
+	if claim, active := domain.ActiveProviderStopDispatchClaim(job, intent.OperationID); active {
+		dispatchClaimID = claim.ID
+	}
+	attemptID, err := domain.NewID("cmd")
+	if err != nil {
+		return domain.ProviderStopObservation{}, err
+	}
 	commandID := domain.ProviderStopObservationCommandID(
-		intent.OperationID, stopped, quiescent, evidenceSHA256, reconcilesUnknown,
+		intent.OperationID, dispatchClaimID, attemptID, stopped, quiescent, evidenceSHA256, reconcilesUnknown,
 	)
 	_, observation, err := c.store.AddProviderStopObservation(
 		ctx, job.ID, job.Revision, intent.ID, commandID,
