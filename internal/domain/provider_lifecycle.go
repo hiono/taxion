@@ -9,10 +9,10 @@ import (
 )
 
 const (
-	ProviderStartAccepted   = "ACCEPTED"
+	ProviderStartAccepted    = "ACCEPTED"
 	ProviderStartDispatching = "DISPATCHING"
-	ProviderStartFailed     = "FAILED"
-	ProviderStartUnknown    = "UNKNOWN"
+	ProviderStartFailed      = "FAILED"
+	ProviderStartUnknown     = "UNKNOWN"
 )
 
 type ProviderStartObservation struct {

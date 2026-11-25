@@ -75,7 +75,7 @@ func appendTaskTurnDispatchObservationForTest(
 }
 
 func TestTaskTurnIntentUsesExecutionPermissionAndAcceptedSession(t *testing.T) {
-	job, execution, permission, now := taskTurnFixture(t)
+	job, execution, _, now := taskTurnFixture(t)
 	turn, err := NewTaskTurnIntent(job, execution.ID, permission.ID, "session_task",
 		"cmd_d3030303030303030303030303030303", strings.Repeat("c", 64), 80, now)
 	if err != nil {
@@ -447,7 +447,7 @@ func TestProviderStartDispatchBoundaryRequiresUnexpiredPermission(t *testing.T) 
 		t.Fatalf("Job.Validate with dispatch boundary: %v", err)
 	}
 
-	expiredJob, expiredExecution, _, expiredNow := taskTurnFixture(t)
+	expiredJob, expiredExecution, expiredPermission, _ := taskTurnFixture(t)
 	expiredJob.ProviderStartObservations = nil
 	expiredJob.Revision--
 	for _, intent := range expiredJob.ProviderStartIntents {
@@ -458,11 +458,9 @@ func TestProviderStartDispatchBoundaryRequiresUnexpiredPermission(t *testing.T) 
 	}
 	if _, err := NewProviderStartObservation(expiredJob, expiredExecution.ProviderStartOperationID, "",
 		"cmd_62626262626262626262626262626262", ProviderStartDispatching, "", "", "", false,
-		permission.ExpiresAt.Add(time.Second)); err == nil {
+		expiredPermission.ExpiresAt.Add(time.Second)); err == nil {
 		t.Fatal("expired ExecutionPermission crossed the Provider Start dispatch boundary")
-	}
-	_ = expiredNow
-}
+	}\n}
 
 func TestTaskTurnDispatchClaimRequiresLatestResumeAttached(t *testing.T) {
 	job, execution, permission, now := taskTurnFixture(t)
