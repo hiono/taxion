@@ -192,6 +192,12 @@ func (c *ProviderController) ResumeTaskExecution(
 	if !active || activeClaim.ID != claim.ID {
 		return receipt, intent, domain.PlanningResumeObservation{}, provider.ResumeResult{}, provider.ErrResumeUnconfirmed
 	}
+	if !createdClaim {
+		// A replay must not dispatch while the original caller owns this claim.
+		// Otherwise the original caller could persist NOT_DISPATCHED after the
+		// replay has already attached the same Provider Session.
+		return receipt, intent, domain.PlanningResumeObservation{}, provider.ResumeResult{}, provider.ErrResumeUnconfirmed
+	}
 	_, claimedExecution, claimedPermission, claimedTask, claimedAssignment, claimedStart, claimedSession, err :=
 		c.taskProviderExecutionTarget(ctx, jobID, roleExecutionID, permissionID, permissionRequest, principal)
 	recordClaimedFailure := func(cause error) (domain.PlanningResumeObservation, error) {
@@ -261,6 +267,18 @@ func (c *ProviderController) ResumeTaskExecution(
 
 	result, err := c.runtime.Resume(ctx, request)
 	if err != nil {
+		if evidence, rejected := providerResumePreDispatchEvidence(intent.OperationID, err); rejected {
+			observation, persistErr := c.recordResumeObservation(
+				ctx, jobID, intent.ID, domain.PlanningResumeFailed, evidence, provider.ResumeResult{}, principal,
+			)
+			if persistErr != nil {
+				return receipt, intent, observation, provider.ResumeResult{}, errors.Join(err, persistErr)
+			}
+			releaseErr := c.releasePlanningResumeDispatchClaim(
+				ctx, jobID, intent, domain.PlanningResumeDispatchReleasedFailed, principal,
+			)
+			return receipt, intent, observation, provider.ResumeResult{}, errors.Join(err, releaseErr)
+		}
 		if evidence, definitive := providerResumeDefinitiveFailureEvidence(intent.OperationID, err); definitive {
 			observation, persistErr := c.recordResumeObservation(
 				ctx, jobID, intent.ID, domain.PlanningResumeFailed, evidence, provider.ResumeResult{}, principal,

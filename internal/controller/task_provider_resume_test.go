@@ -371,3 +371,49 @@ func TestTaskProviderResumePersistsDefinitiveFailureAndAllowsStop(t *testing.T) 
 		t.Fatalf("Stop intent was not persisted after definitive Resume failure: %#v", job.ProviderStopIntents)
 	}
 }
+
+func TestTaskProviderResumeDoesNotDispatchFromReplayedActiveClaim(t *testing.T) {
+	f := newTaskProviderStopFixture(t)
+	prepareTaskResumeTurn(t, &f)
+	enableTaskResumeE5(&f)
+
+	entered := make(chan struct{})
+	continueResume := make(chan struct{})
+	f.runtime.resumeHook = func(ctx context.Context, _ provider.ResumeRequest) error {
+		close(entered)
+		select {
+		case <-continueResume:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	commandID := "cmd_83838383838383838383838383838383"
+	firstResult := make(chan error, 1)
+	go func() {
+		_, _, _, err := f.resume(commandID)
+		firstResult <- err
+	}()
+	<-entered
+
+	_, _, _, replayErr := f.resume(commandID)
+	if !errors.Is(replayErr, provider.ErrResumeUnconfirmed) || f.runtime.resumeCalls != 1 {
+		close(continueResume)
+		t.Fatalf("replayed Resume dispatched while another caller owned the claim: calls=%d err=%v",
+			f.runtime.resumeCalls, replayErr)
+	}
+	close(continueResume)
+	if err := <-firstResult; err != nil {
+		t.Fatalf("claim owner failed to complete Resume: %v", err)
+	}
+	job, err := f.database.GetJob(f.ctx, f.jobID)
+	if err != nil {
+		t.Fatalf("GetJob after Resume race: %v", err)
+	}
+	if len(job.PlanningResumeObservations) != 1 ||
+		job.PlanningResumeObservations[0].Status != domain.PlanningResumeAttached ||
+		len(job.PlanningResumeDispatchClaims) != 1 || len(job.PlanningResumeDispatchReleases) != 1 {
+		t.Fatalf("Resume race left inconsistent facts: observations=%#v claims=%#v releases=%#v",
+			job.PlanningResumeObservations, job.PlanningResumeDispatchClaims, job.PlanningResumeDispatchReleases)
+	}
+}

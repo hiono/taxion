@@ -218,24 +218,24 @@ func (r *Runtime) Stop(ctx context.Context, request StopRequest) (StopResult, er
 
 func (r *Runtime) Resume(ctx context.Context, request ResumeRequest) (ResumeResult, error) {
 	if err := request.Validate(); err != nil {
-		return ResumeResult{}, ErrProviderInvalidRequest
+		return ResumeResult{}, NewPreDispatchError(request.OperationID, ErrProviderInvalidRequest)
 	}
 	boundedContext, cancel, err := withRequestDeadline(ctx, request.Deadline)
 	if err != nil {
-		return ResumeResult{}, err
+		return ResumeResult{}, NewPreDispatchError(request.OperationID, err)
 	}
 	defer cancel()
 	ctx = boundedContext
 	capabilities, err := r.verifiedCapabilities(ctx)
 	if err != nil {
-		return ResumeResult{}, err
+		return ResumeResult{}, NewPreDispatchError(request.OperationID, err)
 	}
 	if !capabilities.HasEvidenceAtLeast(CapabilitySessionReattach, r.durableEvidence) {
-		return ResumeResult{}, ErrUnsupportedCapability
+		return ResumeResult{}, NewPreDispatchError(request.OperationID, ErrUnsupportedCapability)
 	}
 	if request.RequireIdempotency &&
 		!capabilities.HasEvidenceAtLeast(CapabilityResumeIdempotency, EvidenceLive) {
-		return ResumeResult{}, ErrUnsupportedCapability
+		return ResumeResult{}, NewPreDispatchError(request.OperationID, ErrUnsupportedCapability)
 	}
 	result, err := withCredential(ctx, r.broker, r.identity, func(lease CredentialLease) (ResumeResult, error) {
 		result, err := r.adapter.Resume(ctx, request, lease)

@@ -1936,3 +1936,12 @@ func validProviderSHA256(value string) bool {
 	_, err := hex.DecodeString(value)
 	return err == nil
 }
+
+func providerResumePreDispatchEvidence(operationID string, err error) (string, bool) {
+	var preDispatch *provider.PreDispatchError
+	if !errors.As(err, &preDispatch) || preDispatch == nil ||
+		preDispatch.OperationID != operationID || !validProviderEvidenceSHA256(preDispatch.EvidenceSHA256) {
+		return "", false
+	}
+	return preDispatch.EvidenceSHA256, true
+}

@@ -904,3 +904,25 @@ func TestSafeAdapterErrorTreatsAdapterCredentialLeaseCleanupFailureAsAmbiguous(t
 		t.Fatalf("adapter credential cleanup failure was not treated as ambiguous: %v", err)
 	}
 }
+
+func TestRuntimeResumeReportsExpiredDeadlineBeforeAdapterDispatch(t *testing.T) {
+	adapter := newTestAdapter(CapabilitySessionReattach, CapabilityResumeIdempotency)
+	broker := &testBroker{secret: []byte("runtime-test-secret")}
+	runtime, err := newTestRuntime(adapter, broker)
+	if err != nil {
+		t.Fatalf("NewRuntime: %v", err)
+	}
+	request := validResumeRequest()
+	request.RequireIdempotency = true
+	request.Deadline = time.Now().UTC().Add(-time.Second)
+	_, err = runtime.Resume(context.Background(), request)
+	var preDispatch *PreDispatchError
+	if !errors.As(err, &preDispatch) || preDispatch.OperationID != request.OperationID ||
+		!errors.Is(err, context.DeadlineExceeded) || !validSHA256(preDispatch.EvidenceSHA256) {
+		t.Fatalf("expired Resume deadline was not classified as pre-dispatch: %v", err)
+	}
+	if adapter.resumeCalls != 0 || broker.acquires != 0 {
+		t.Fatalf("expired Resume deadline crossed the Adapter boundary: adapter=%d credential=%d",
+			adapter.resumeCalls, broker.acquires)
+	}
+}
