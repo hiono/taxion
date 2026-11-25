@@ -42,8 +42,7 @@ func (s *Store) AddDeliveryObservation(
 	ctx context.Context,
 	jobID string,
 	expectedRevision uint64,
-	messageID, commandID string,
-	attempt uint32,
+	messageID, requestObservationID, commandID string,
 	status domain.DeliveryStatus,
 	evidenceSHA256 string,
 	reconcilesUnknown bool,
@@ -51,18 +50,18 @@ func (s *Store) AddDeliveryObservation(
 	request := struct {
 		MessageID         string                `json:"message_id"`
 		CommandID         string                `json:"command_id"`
-		Attempt           uint32                `json:"attempt"`
-		Status            domain.DeliveryStatus `json:"status"`
+		RequestObservationID string                `json:"request_observation_id,omitempty"`
+		Status                domain.DeliveryStatus `json:"status"`
 		EvidenceSHA256    string                `json:"evidence_sha256,omitempty"`
 		ReconcilesUnknown bool                  `json:"reconciles_unknown,omitempty"`
 	}{
-		MessageID: messageID, CommandID: commandID, Attempt: attempt, Status: status,
+		MessageID: messageID, RequestObservationID: requestObservationID, CommandID: commandID, Status: status,
 		EvidenceSHA256: evidenceSHA256, ReconcilesUnknown: reconcilesUnknown,
 	}
 	return persistPlanningFact(
 		ctx, s, jobID, expectedRevision, commandID, addDeliveryObservationCommandType, request,
 		func(job domain.Job, now time.Time) (domain.DeliveryObservation, error) {
-			return domain.NewDeliveryObservation(job, messageID, commandID, attempt, status, evidenceSHA256, reconcilesUnknown, now)
+			return domain.NewDeliveryObservation(job, messageID, requestObservationID, commandID, status, evidenceSHA256, reconcilesUnknown, now)
 		},
 		func(job *domain.Job, observation domain.DeliveryObservation) {
 			job.DeliveryObservations = append(job.DeliveryObservations, observation)
