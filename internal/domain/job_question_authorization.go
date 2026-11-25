@@ -121,6 +121,7 @@ func NewJobQuestionAuthorization(job Job, request JobQuestionAuthorizationReques
 	}
 	if !startFound || start.ProviderID != request.ProviderID || start.AccountID != request.AccountID ||
 		start.ConfigurationSHA256 != request.ConfigurationSHA256 ||
+		latest.Contract.ConfigurationSHA256 != request.ConfigurationSHA256 ||
 		planningGrant.RepositoryID != request.PlanningRepositoryID ||
 		request.Deadline.After(start.Deadline) || !now.Before(start.Deadline) ||
 		providerStopIntentExists(job, planner.ID, request.ProviderSessionID, job.Revision+1) {
@@ -180,7 +181,8 @@ func (a JobQuestionAuthorization) Validate(job Job) error {
 			break
 		}
 	}
-	if revision == nil || !repositoryInJobContract(revision.Contract, a.RepositoryID) ||
+	if revision == nil || revision.Contract.ConfigurationSHA256 != a.ConfigurationSHA256 ||
+		!repositoryInJobContract(revision.Contract, a.RepositoryID) ||
 		a.ConfigurationSHA256 != revision.Contract.ConfigurationSHA256 ||
 		a.Deadline.After(revision.Contract.Deadline) ||
 		a.Budget.MaxTurns > revision.Contract.Budget.MaxTurns ||
