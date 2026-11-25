@@ -3,7 +3,6 @@ package controller
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strings"
 	"testing"
 
@@ -492,7 +491,6 @@ func TestTaskProviderResumeRecoversClaimCommittedBeforeProviderDispatch(t *testi
 			job.PlanningResumeDispatchClaims, job.PlanningResumeDispatchReleases, job.PlanningResumeObservations)
 	}
 }
-
 
 type failResumeClaimReadStore struct {
 	ProviderExecutionStore
