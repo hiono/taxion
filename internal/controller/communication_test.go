@@ -12,7 +12,10 @@ import (
 
 func TestCommunicationControllerPersistsCoderPlannerQuestionAndAnswer(t *testing.T) {
 	database, jobID, revision, task := approvedExecutionPermissionControllerFixture(t)
-	runtime := &fakePlanningProviderRuntime{}
+	runtime := &fakePlanningProviderRuntime{identity: provider.Identity{
+		ProviderID: "provider.test", AccountID: "account.primary",
+		ConfigurationSHA256: revision.Contract.ConfigurationSHA256,
+	}}
 	now := time.Now().UTC().Round(0)
 	assessor := &fakeExecutionEffectAssessor{assessment: domain.ExecutionEffectAssessment{
 		Reversible: true, Mutating: true, ValidUntil: now.Add(45 * time.Minute),
