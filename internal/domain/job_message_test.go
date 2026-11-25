@@ -50,10 +50,10 @@ func TestJobMessagePreservesNaturalLanguageAndQuestionCorrelation(t *testing.T) 
 
 	answer, err := NewJobMessage(job, "cmd_cccccccccccccccccccccccccccccccc", JobMessageRequest{
 		Sender:           ActorRef{Kind: ActorHuman, ID: principalID},
-		Recipient: ActorRef{Kind: ActorPlanner, ID: planner.ID},
-		Kind:      MessageKindAnswer,
+		Recipient:        ActorRef{Kind: ActorPlanner, ID: planner.ID},
+		Kind:             MessageKindAnswer,
 		ReplyToMessageID: question.ID,
-		Body:      "優先順位は安全性、次に完遂性です。",
+		Body:             "優先順位は安全性、次に完遂性です。",
 	}, job.UpdatedAt.Add(time.Second))
 	if err != nil {
 		t.Fatalf("NewJobMessage ANSWER: %v", err)
