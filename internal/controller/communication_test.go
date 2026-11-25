@@ -133,7 +133,7 @@ func TestCommunicationControllerPersistsCoderPlannerQuestionAndAnswer(t *testing
 	resolver := &fakeQuestionReadOnlyContextResolver{
 		result: QuestionReadOnlyContext{
 			RepositoryID: revision.Contract.TargetRepositories[0],
-			Boundary: domain.PlanningReadOnlyContext{
+			Boundary: domain.PlanningReadOnlyBoundary{
 				Mode: domain.PlanningReadOnlyBoundarySnapshot,
 				Reference: "question_snapshot_controller",
 				SHA256: strings.Repeat("c", 64),
