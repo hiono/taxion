@@ -258,8 +258,12 @@ func (m *Manager) ReleaseAdoptionReservation(
 	if record.JobID != jobID || record.TaskID != task.ID || record.RepositoryID != repositoryID ||
 		record.RepositoryPath != repositoryPath || record.WorktreePath != worktreePath ||
 		record.Origin != domain.WorktreeOriginAdopted || !validCommit(record.BaselineCommit) ||
-		!validSHA256(record.InitialStateSHA256) {
+		len(record.InitialStateSHA256) != sha256.Size*2 {
 		return errors.New("adopted Worktree baseline does not match reservation release identity")
+	}
+	if _, err := hex.DecodeString(record.InitialStateSHA256); err != nil ||
+		record.InitialStateSHA256 != strings.ToLower(record.InitialStateSHA256) {
+		return errors.New("adopted Worktree baseline state digest is invalid")
 	}
 	directory, err := m.adoptionReservationDirectory(repositoryID, false)
 	if err != nil {
