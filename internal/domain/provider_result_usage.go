@@ -179,6 +179,10 @@ func NewProviderUsageObservation(
 }
 
 func (o ProviderUsageObservation) Validate(job Job) error {
+	_, execution, err := providerResultUsageExecution(job, o.RoleExecutionID)
+	if err != nil {
+		return err
+	}
 	if !validPlanningIdentity(o.ID) || !validCommandID(o.CommandID) ||
 		o.ID != ProviderUsageObservationID(o.CommandID) ||
 		o.CommandID != ProviderUsageObservationCommandID(o.OperationID, o.TurnID, o.SessionID, o.UsageID, o.Tokens, o.Complete, o.EvidenceSHA256) ||
@@ -198,13 +202,13 @@ func (o ProviderUsageObservation) Validate(job Job) error {
 	if o.CreatedRevision <= minimumRevision || o.CreatedAt.Before(minimumTime) {
 		return errors.New("Provider Usage observation does not follow its accepted Provider operation")
 	}
-	if o.TurnID != "" {
+	if o.TurnID != "" && execution.Role == RoleCoder {
 		reservedTokens, found := providerTurnReservedTokens(job, o.TurnID)
 		if !found || o.Tokens > reservedTokens {
 			return errors.New("Provider Usage exceeds its reserved Turn token budget")
 		}
 	}
-	if o.TurnID != "" {
+	if o.TurnID != "" && execution.Role == RoleCoder {
 		for _, existing := range job.ProviderUsageObservations {
 			if existing.OperationID == o.OperationID && existing.TurnID == o.TurnID &&
 				existing.Complete && existing.CreatedRevision < o.CreatedRevision {
@@ -212,7 +216,7 @@ func (o ProviderUsageObservation) Validate(job Job) error {
 			}
 		}
 	}
-	if o.TurnID != "" {
+	if o.TurnID != "" && execution.Role == RoleCoder {
 		for _, observation := range job.TaskTurnObservations {
 			if observation.TurnID == o.TurnID && observation.Status != TaskTurnUnknown &&
 				o.CreatedRevision > observation.CreatedRevision {

@@ -105,13 +105,14 @@ func TestProviderResultAndUsageFactsPersistAtomicallyAndRestore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetJob before over-budget Usage: %v", err)
 	}
-	if _, _, err := database.AddProviderUsageObservation(ctx, jobID, job.Revision,
-		roleExecutionID, turn.OperationID, turn.ID, sessionID, "usage_over_budget", 101, true, strings.Repeat("9", 64), principal); err == nil {
-		t.Fatal("Task Turn accepted a complete Provider Usage above its reserved token budget")
+	_, overBudget, err := database.AddProviderUsageObservation(ctx, jobID, job.Revision,
+		roleExecutionID, turn.OperationID, turn.ID, sessionID, "usage_over_budget", 101, true, strings.Repeat("9", 64), principal)
+	if err != nil || !overBudget.Complete || overBudget.Tokens != 101 {
+		t.Fatalf("Planner Turn Usage was incorrectly constrained by Task token reservation: %#v %v", overBudget, err)
 	}
 	job, err = database.GetJob(ctx, jobID)
-	if err != nil || len(job.ProviderUsageObservations) != 1 || job.ProviderUsageObservations[0] != partial {
-		t.Fatalf("rejected over-budget Usage changed the Job: %#v %v", job.ProviderUsageObservations, err)
+	if err != nil || len(job.ProviderUsageObservations) != 2 || job.ProviderUsageObservations[0] != partial {
+		t.Fatalf("Planner Usage was not persisted: %#v %v", job.ProviderUsageObservations, err)
 	}
 	job, err = database.GetJob(ctx, jobID)
 	if err != nil {
@@ -131,12 +132,16 @@ func TestProviderResultAndUsageFactsPersistAtomicallyAndRestore(t *testing.T) {
 		t.Fatal("Provider Usage accepted an observation after Complete=true")
 	}
 	if _, _, err := database.AddProviderUsageObservation(ctx, jobID, job.Revision,
-		roleExecutionID, turn.OperationID, turn.ID, sessionID, "usage_turn_3", 21, false, evidence, principal); err == nil {
-		t.Fatal("Task Turn accepted a new partial UsageID after Complete=true")
+		roleExecutionID, turn.OperationID, turn.ID, sessionID, "usage_turn_3", 21, false, evidence, principal); err != nil {
+		t.Fatalf("Planner Turn rejected a new partial UsageID after another UsageID completed: %v", err)
+	}
+	job, err = database.GetJob(ctx, jobID)
+	if err != nil {
+		t.Fatalf("GetJob before second complete Usage: %v", err)
 	}
 	if _, _, err := database.AddProviderUsageObservation(ctx, jobID, job.Revision,
-		roleExecutionID, turn.OperationID, turn.ID, sessionID, "usage_turn_2", 22, true, strings.Repeat("3", 64), principal); err == nil {
-		t.Fatal("Task Turn accepted a second complete Provider Usage with a different UsageID")
+		roleExecutionID, turn.OperationID, turn.ID, sessionID, "usage_turn_2", 22, true, strings.Repeat("3", 64), principal); err != nil {
+		t.Fatalf("Planner Turn rejected a second complete UsageID: %v", err)
 	}
 	if _, _, err := database.AddProviderResultObservation(ctx, jobID, job.Revision,
 		roleExecutionID, turn.OperationID, turn.ID, sessionID, "different final", resultDigest("different final"), true, evidence, principal); err == nil {
@@ -150,7 +155,7 @@ func TestProviderResultAndUsageFactsPersistAtomicallyAndRestore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetJob before restart: %v", err)
 	}
-	if len(job.ProviderResultObservations) != 1 || len(job.ProviderUsageObservations) != 2 {
+	if len(job.ProviderResultObservations) != 1 || len(job.ProviderUsageObservations) != 5 {
 		t.Fatalf("unexpected persisted Result / Usage facts: %d / %d", len(job.ProviderResultObservations), len(job.ProviderUsageObservations))
 	}
 	if err := database.Close(); err != nil {
@@ -165,8 +170,10 @@ func TestProviderResultAndUsageFactsPersistAtomicallyAndRestore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetJob after restart: %v", err)
 	}
-	if len(restored.ProviderResultObservations) != 1 || len(restored.ProviderUsageObservations) != 2 ||
-		!restored.ProviderUsageObservations[1].Complete || restored.ProviderUsageObservations[1].Tokens != 20 {
+	if len(restored.ProviderResultObservations) != 1 || len(restored.ProviderUsageObservations) != 5 ||
+		!restored.ProviderUsageObservations[1].Complete || restored.ProviderUsageObservations[1].Tokens != 101 ||
+		!restored.ProviderUsageObservations[2].Complete || restored.ProviderUsageObservations[2].Tokens != 20 ||
+		!restored.ProviderUsageObservations[4].Complete || restored.ProviderUsageObservations[4].Tokens != 22 {
 		t.Fatalf("restored Provider Result / Usage facts: %#v %#v", restored.ProviderResultObservations, restored.ProviderUsageObservations)
 	}
 }
