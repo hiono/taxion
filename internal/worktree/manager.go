@@ -29,8 +29,9 @@ type OutputSnapshot struct {
 }
 
 type Manager struct {
-	root         string
-	repositories map[string]string
+	root              string
+	repositories      map[string]string
+	repositoryGitDirs map[string]string
 }
 
 func NewManager(workspaceRoot string, repositories []Repository) (*Manager, error) {
@@ -42,6 +43,7 @@ func NewManager(workspaceRoot string, repositories []Repository) (*Manager, erro
 		return nil, fmt.Errorf("resolve Worktree workspace root: %w", err)
 	}
 	known := make(map[string]string, len(repositories))
+	knownGitDirs := make(map[string]string, len(repositories))
 	for _, repository := range repositories {
 		if strings.TrimSpace(repository.ID) == "" {
 			return nil, errors.New("trusted repository identity is required")
@@ -60,9 +62,25 @@ func NewManager(workspaceRoot string, repositories []Repository) (*Manager, erro
 		if path == root || pathWithin(path, root) || pathWithin(root, path) {
 			return nil, errors.New("Worktree workspace root and trusted repository must not contain one another")
 		}
+		commonGitDir, err := gitOutput(context.Background(), path, "rev-parse", "--git-common-dir")
+		if err != nil {
+			return nil, fmt.Errorf("resolve trusted repository %q common Git metadata: %w", repository.ID, err)
+		}
+		if !filepath.IsAbs(commonGitDir) {
+			commonGitDir = filepath.Join(path, commonGitDir)
+		}
+		commonGitDir, err = filepath.EvalSymlinks(commonGitDir)
+		if err != nil {
+			return nil, fmt.Errorf("resolve trusted repository %q common Git metadata path: %w", repository.ID, err)
+		}
+		metadataInfo, err := os.Stat(commonGitDir)
+		if err != nil || !metadataInfo.IsDir() {
+			return nil, fmt.Errorf("trusted repository %q common Git metadata is not a directory", repository.ID)
+		}
 		known[repository.ID] = path
+		knownGitDirs[repository.ID] = commonGitDir
 	}
-	return &Manager{root: root, repositories: known}, nil
+	return &Manager{root: root, repositories: known, repositoryGitDirs: knownGitDirs}, nil
 }
 
 func (m *Manager) lock(ctx context.Context) (func(), error) {
@@ -71,6 +89,49 @@ func (m *Manager) lock(ctx context.Context) (func(), error) {
 		return nil, fmt.Errorf("lock Worktree registry: %w", err)
 	}
 	return lock.release, nil
+}
+
+func (m *Manager) lockRepository(ctx context.Context, repositoryID string) (func(), error) {
+	if m == nil || ctx == nil {
+		return nil, errors.New("Repository metadata lock requires a Manager and context")
+	}
+	commonGitDir, trusted := m.repositoryGitDirs[repositoryID]
+	if !trusted {
+		return nil, errors.New("Repository metadata lock requires a trusted repository")
+	}
+	lock, err := acquireAdoptionFileLock(ctx, filepath.Join(commonGitDir, "taxion-worktree.lock"))
+	if err != nil {
+		return nil, fmt.Errorf("lock trusted repository Git metadata: %w", err)
+	}
+	return lock.release, nil
+}
+
+func (m *Manager) adoptionReservationDirectory(repositoryID string, create bool) (string, error) {
+	commonGitDir, trusted := m.repositoryGitDirs[repositoryID]
+	if !trusted {
+		return "", errors.New("Worktree reservation requires a trusted repository")
+	}
+	directory := filepath.Join(commonGitDir, "taxion-worktree-reservations")
+	if create {
+		if err := os.MkdirAll(directory, 0o700); err != nil {
+			return "", fmt.Errorf("create repository Worktree reservation registry: %w", err)
+		}
+	}
+	info, err := os.Lstat(directory)
+	if errors.Is(err, os.ErrNotExist) {
+		return directory, nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("inspect repository Worktree reservation registry: %w", err)
+	}
+	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return "", errors.New("repository Worktree reservation registry is not a real directory")
+	}
+	resolved, err := filepath.EvalSymlinks(directory)
+	if err != nil || resolved != directory {
+		return "", errors.New("repository Worktree reservation registry path is not canonical")
+	}
+	return directory, nil
 }
 
 func (m *Manager) Prepare(ctx context.Context, jobID string, task domain.Task) (Snapshot, error) {
@@ -90,7 +151,14 @@ func (m *Manager) Prepare(ctx context.Context, jobID string, task domain.Task) (
 	if !trusted {
 		return Snapshot{}, errors.New("Task repository is not in the trusted repository registry")
 	}
-	if err := m.recoverOrphanedAdoptionReservations(adoptionReservation{JobID: jobID, TaskID: task.ID}); err != nil {
+	unlockRepository, err := m.lockRepository(ctx, repositoryID)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	defer unlockRepository()
+	if err := m.recoverOrphanedAdoptionReservations(adoptionReservation{
+		JobID: jobID, TaskID: task.ID, RepositoryID: repositoryID, WorkspaceRoot: m.root,
+	}); err != nil {
 		return Snapshot{}, fmt.Errorf("recover interrupted Task Worktree ownership reservation: %w", err)
 	}
 	key := sha256.Sum256([]byte(jobID + "\x00" + task.ID))
@@ -222,7 +290,7 @@ func (m *Manager) reserveWorktreeOwnership(
 	}
 	reservation := adoptionReservation{
 		JobID: jobID, TaskID: taskID, RepositoryID: repositoryID,
-		WorktreePath: worktreePath, GitDir: resolvedGitDir,
+		WorktreePath: worktreePath, GitDir: resolvedGitDir, WorkspaceRoot: m.root,
 	}
 	if err := m.reserveAdoption(jobID, taskID, repositoryID, worktreePath, resolvedGitDir); err != nil {
 		return adoptionReservation{}, err
@@ -313,6 +381,14 @@ func (m *Manager) Verify(ctx context.Context, jobID string, task domain.Task, sn
 		return err
 	}
 	defer unlock()
+	if len(task.TargetRepositories) != 1 || task.TargetRepositories[0] != snapshot.RepositoryID {
+		return errors.New("Worktree verification requires the exact approved repository")
+	}
+	unlockRepository, err := m.lockRepository(ctx, snapshot.RepositoryID)
+	if err != nil {
+		return err
+	}
+	defer unlockRepository()
 	if snapshot.Origin == domain.WorktreeOriginTaxionCreated {
 		if _, err := m.reserveWorktreeOwnership(
 			ctx, jobID, task.ID, snapshot.RepositoryID, snapshot.WorktreePath,
@@ -470,7 +546,12 @@ func parseWorktreeStatusHead(status string) (string, bool, error) {
 	return head, dirty, nil
 }
 
+const taxionIndexLockMarker = "taxion-index-lock-v1\n"
+
 func acquireWorktreeIndexLock(ctx context.Context, worktreePath string) (string, func() error, error) {
+	if ctx == nil {
+		return "", nil, errors.New("Task Worktree index lock requires a context")
+	}
 	indexPath, err := gitOutput(ctx, worktreePath, "rev-parse", "--git-path", "index")
 	if err != nil {
 		return "", nil, errors.New("resolve Task Worktree Git index path")
@@ -482,13 +563,94 @@ func acquireWorktreeIndexLock(ctx context.Context, worktreePath string) (string,
 	if err != nil || filepath.Base(indexPath) != "index" {
 		return "", nil, errors.New("Task Worktree Git index path cannot be resolved")
 	}
-	lockPath := indexPath + ".lock"
-	lockFile, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	directory := filepath.Dir(indexPath)
+	captureLock, err := acquireAdoptionFileLock(ctx, indexPath+".taxion-capture.lock")
 	if err != nil {
-		if errors.Is(err, os.ErrExist) {
-			return "", nil, errors.New("Task Worktree Git index is already locked by another writer")
+		return "", nil, fmt.Errorf("lock Task Worktree output capture: %w", err)
+	}
+	fail := func(cause error) (string, func() error, error) {
+		captureLock.release()
+		return "", nil, cause
+	}
+	staleTemps, err := filepath.Glob(filepath.Join(directory, ".taxion-index-lock-*"))
+	if err != nil {
+		return fail(fmt.Errorf("list stale Task Worktree index lock temporaries: %w", err))
+	}
+	for _, path := range staleTemps {
+		info, statErr := os.Lstat(path)
+		if statErr != nil {
+			return fail(fmt.Errorf("inspect stale Task Worktree index lock temporary: %w", statErr))
 		}
-		return "", nil, fmt.Errorf("lock Task Worktree Git index: %w", err)
+		if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
+			return fail(errors.New("stale Task Worktree index lock temporary is not a regular file"))
+		}
+		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fail(fmt.Errorf("remove stale Task Worktree index lock temporary: %w", err))
+		}
+	}
+	lockPath := indexPath + ".lock"
+	if info, statErr := os.Lstat(lockPath); statErr == nil {
+		if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
+			return fail(errors.New("Task Worktree Git index lock is not a regular file"))
+		}
+		data, readErr := os.ReadFile(lockPath)
+		if readErr != nil {
+			return fail(fmt.Errorf("read existing Task Worktree Git index lock: %w", readErr))
+		}
+		after, afterErr := os.Lstat(lockPath)
+		if afterErr != nil || !os.SameFile(info, after) {
+			return fail(errors.New("Task Worktree Git index lock changed during stale-lock inspection"))
+		}
+		if string(data) != taxionIndexLockMarker {
+			return fail(errors.New("Task Worktree Git index is already locked by another writer"))
+		}
+		if err := os.Remove(lockPath); err != nil {
+			return fail(fmt.Errorf("remove stale Taxion Task Worktree Git index lock: %w", err))
+		}
+		if err := syncDirectory(directory); err != nil {
+			return fail(fmt.Errorf("sync stale Task Worktree Git index lock recovery: %w", err))
+		}
+	} else if !errors.Is(statErr, os.ErrNotExist) {
+		return fail(fmt.Errorf("inspect Task Worktree Git index lock: %w", statErr))
+	}
+	temporary, err := os.CreateTemp(directory, ".taxion-index-lock-*")
+	if err != nil {
+		return fail(fmt.Errorf("create Task Worktree Git index lock marker: %w", err))
+	}
+	temporaryPath := temporary.Name()
+	if _, err := temporary.WriteString(taxionIndexLockMarker); err != nil {
+		_ = temporary.Close()
+		_ = os.Remove(temporaryPath)
+		return fail(fmt.Errorf("write Task Worktree Git index lock marker: %w", err))
+	}
+	if err := temporary.Sync(); err != nil {
+		_ = temporary.Close()
+		_ = os.Remove(temporaryPath)
+		return fail(fmt.Errorf("sync Task Worktree Git index lock marker: %w", err))
+	}
+	if err := temporary.Close(); err != nil {
+		_ = os.Remove(temporaryPath)
+		return fail(fmt.Errorf("close Task Worktree Git index lock marker: %w", err))
+	}
+	if err := os.Link(temporaryPath, lockPath); err != nil {
+		_ = os.Remove(temporaryPath)
+		if errors.Is(err, os.ErrExist) {
+			return fail(errors.New("Task Worktree Git index is already locked by another writer"))
+		}
+		return fail(fmt.Errorf("publish Task Worktree Git index lock: %w", err))
+	}
+	if err := os.Remove(temporaryPath); err != nil {
+		_ = os.Remove(lockPath)
+		return fail(fmt.Errorf("remove Task Worktree Git index lock temporary: %w", err))
+	}
+	if err := syncDirectory(directory); err != nil {
+		_ = os.Remove(lockPath)
+		return fail(fmt.Errorf("sync Task Worktree Git index lock: %w", err))
+	}
+	lockFile, err := os.Open(lockPath)
+	if err != nil {
+		_ = os.Remove(lockPath)
+		return fail(fmt.Errorf("open Task Worktree Git index lock: %w", err))
 	}
 	released := false
 	release := func() error {
@@ -496,7 +658,28 @@ func acquireWorktreeIndexLock(ctx context.Context, worktreePath string) (string,
 			return nil
 		}
 		released = true
-		return errors.Join(lockFile.Close(), os.Remove(lockPath))
+		fileInfo, fileErr := lockFile.Stat()
+		pathInfo, pathErr := os.Lstat(lockPath)
+		var removeErr error
+		if fileErr != nil {
+			removeErr = fileErr
+		} else if pathErr != nil {
+			if errors.Is(pathErr, os.ErrNotExist) {
+				removeErr = errors.New("Task Worktree Git index lock disappeared during output capture")
+			} else {
+				removeErr = pathErr
+			}
+		} else if !os.SameFile(fileInfo, pathInfo) {
+			removeErr = errors.New("Task Worktree Git index lock was replaced during output capture")
+		} else {
+			removeErr = os.Remove(lockPath)
+			if removeErr == nil {
+				removeErr = syncDirectory(directory)
+			}
+		}
+		closeErr := lockFile.Close()
+		captureLock.release()
+		return errors.Join(removeErr, closeErr)
 	}
 	return indexPath, release, nil
 }
@@ -519,6 +702,11 @@ func (m *Manager) CaptureOutput(ctx context.Context, jobID string, task domain.T
 		return OutputSnapshot{}, err
 	}
 	defer unlock()
+	unlockRepository, err := m.lockRepository(ctx, snapshot.RepositoryID)
+	if err != nil {
+		return OutputSnapshot{}, err
+	}
+	defer unlockRepository()
 	if err := m.verify(ctx, jobID, task, snapshot); err != nil {
 		return OutputSnapshot{}, fmt.Errorf("verify Task Worktree before output capture: %w", err)
 	}

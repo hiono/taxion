@@ -500,7 +500,10 @@ func TestManagerCaptureOutputRequiresPersistentReservationForCreatedWorktree(t *
 	if err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
-	reservationDirectory := filepath.Join(manager.root, ".adoptions")
+	reservationDirectory, err := manager.adoptionReservationDirectory("repo.primary", false)
+	if err != nil {
+		t.Fatalf("resolve Worktree reservation directory: %v", err)
+	}
 	entries, err := os.ReadDir(reservationDirectory)
 	if err != nil || len(entries) != 3 {
 		t.Fatalf("read Worktree reservations: entries=%d err=%v", len(entries), err)
@@ -807,7 +810,10 @@ func TestManagerRequiresPersistentReservationForAdoptedWorktree(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Adopt: %v", err)
 	}
-	reservationDirectory := filepath.Join(manager.root, ".adoptions")
+	reservationDirectory, err := manager.adoptionReservationDirectory("repo.primary", false)
+	if err != nil {
+		t.Fatalf("resolve adoption reservation directory: %v", err)
+	}
 	entries, err := os.ReadDir(reservationDirectory)
 	if err != nil || len(entries) != 3 {
 		t.Fatalf("read adoption reservation: entries=%v err=%v", entries, err)
@@ -859,7 +865,10 @@ func TestManagerAdoptionReservationsAreUniqueByTaskAndGitAdminDirectory(t *testi
 	if winner.err != nil {
 		winner = second
 	}
-	reservationDirectory := filepath.Join(manager.root, ".adoptions")
+	reservationDirectory, err := manager.adoptionReservationDirectory("repo.primary", false)
+	if err != nil {
+		t.Fatalf("resolve adoption reservation directory: %v", err)
+	}
 	entries, err := os.ReadDir(reservationDirectory)
 	if err != nil || len(entries) != 3 {
 		t.Fatalf("losing Task reservation was not cleaned up: entries=%d err=%v", len(entries), err)
@@ -1016,7 +1025,10 @@ func TestManagerAdoptRecoversOrphanedTaskReservationAfterGitDirConflict(t *testi
 		JobID: jobA, TaskID: taskA.ID, RepositoryID: "repo.primary",
 		WorktreePath: worktreeA, GitDir: gitDirA,
 	}
-	reservationDirectory := filepath.Join(manager.root, ".adoptions")
+	reservationDirectory, err := manager.adoptionReservationDirectory("repo.primary", true)
+	if err != nil {
+		t.Fatalf("create adoption reservation directory: %v", err)
+	}
 	taskKey := sha256.Sum256([]byte(jobA + "\x00" + taskA.ID))
 	taskReservationPath := filepath.Join(reservationDirectory, "task-"+hex.EncodeToString(taskKey[:])+".json")
 	gitDirKeyA := sha256.Sum256([]byte(gitDirA))
@@ -1053,7 +1065,10 @@ func TestManagerOrphanedReservationCleanupPreservesCommittedAdoption(t *testing.
 		RepositoryID: "repo.primary", WorktreePath: filepath.Join(canonicalTempDir(t), "worktree"),
 		GitDir: filepath.Join(canonicalTempDir(t), "git", "worktrees", "task"),
 	}
-	directory := filepath.Join(manager.root, ".adoptions")
+	directory, err := manager.adoptionReservationDirectory("repo.primary", true)
+	if err != nil {
+		t.Fatalf("create adoption reservation directory: %v", err)
+	}
 	taskKey := sha256.Sum256([]byte(reservation.JobID + "\x00" + reservation.TaskID))
 	gitDirKey := sha256.Sum256([]byte(reservation.GitDir))
 	taskPath := filepath.Join(directory, "task-"+hex.EncodeToString(taskKey[:])+".json")
@@ -1140,5 +1155,89 @@ func TestContextReaderStopsReadingAfterCancellation(t *testing.T) {
 	}
 	if reader.reads != 1 {
 		t.Fatalf("underlying reader calls = %d, want 1", reader.reads)
+	}
+}
+
+func TestManagerAdoptRejectsReservationAcrossWorkspaceRoots(t *testing.T) {
+	repository := initRepository(t)
+	managerA, err := NewManager(filepath.Join(canonicalTempDir(t), "workspace-a"), []Repository{{ID: "repo.primary", Path: repository}})
+	if err != nil {
+		t.Fatalf("NewManager A: %v", err)
+	}
+	managerB, err := NewManager(filepath.Join(canonicalTempDir(t), "workspace-b"), []Repository{{ID: "repo.primary", Path: repository}})
+	if err != nil {
+		t.Fatalf("NewManager B: %v", err)
+	}
+	taskA := domain.Task{ID: "task_aaaaaaaaaaaaaaaa", TargetRepositories: []string{"repo.primary"}}
+	snapshot, err := managerA.Prepare(context.Background(), "job_aaaaaaaaaaaaaaaa", taskA)
+	if err != nil {
+		t.Fatalf("Prepare through Manager A: %v", err)
+	}
+	taskB := domain.Task{ID: "task_bbbbbbbbbbbbbbbb", TargetRepositories: []string{"repo.primary"}}
+	if _, err := managerB.Adopt(context.Background(), "job_bbbbbbbbbbbbbbbb", taskB, snapshot.WorktreePath); err == nil {
+		t.Fatal("Manager B adopted a Worktree already owned through a different workspace root")
+	}
+	if err := managerA.Verify(context.Background(), "job_aaaaaaaaaaaaaaaa", taskA, snapshot); err != nil {
+		t.Fatalf("Manager A lost its Worktree ownership after the rejected cross-root adoption: %v", err)
+	}
+}
+
+func TestAcquireWorktreeIndexLockRecoversStaleTaxionLock(t *testing.T) {
+	repository := initRepository(t)
+	manager, err := NewManager(filepath.Join(canonicalTempDir(t), "worktrees"), []Repository{{ID: "repo.primary", Path: repository}})
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	task := domain.Task{ID: "task_caaaaaaaaaaaaaaa", TargetRepositories: []string{"repo.primary"}}
+	snapshot, err := manager.Prepare(context.Background(), "job_caaaaaaaaaaaaaaa", task)
+	if err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	indexPath := gitTestOutput(t, snapshot.WorktreePath, "rev-parse", "--git-path", "index")
+	if !filepath.IsAbs(indexPath) {
+		indexPath = filepath.Join(snapshot.WorktreePath, indexPath)
+	}
+	lockPath := indexPath + ".lock"
+	if err := os.WriteFile(lockPath, []byte(taxionIndexLockMarker), 0o600); err != nil {
+		t.Fatalf("write stale Taxion index lock: %v", err)
+	}
+	_, release, err := acquireWorktreeIndexLock(context.Background(), snapshot.WorktreePath)
+	if err != nil {
+		t.Fatalf("recover stale Taxion index lock: %v", err)
+	}
+	if err := release(); err != nil {
+		t.Fatalf("release recovered index lock: %v", err)
+	}
+	if _, err := os.Stat(lockPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("recovered index lock still exists: %v", err)
+	}
+}
+
+func TestAcquireWorktreeIndexLockPreservesForeignLock(t *testing.T) {
+	repository := initRepository(t)
+	manager, err := NewManager(filepath.Join(canonicalTempDir(t), "worktrees"), []Repository{{ID: "repo.primary", Path: repository}})
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	task := domain.Task{ID: "task_daaaaaaaaaaaaaaa", TargetRepositories: []string{"repo.primary"}}
+	snapshot, err := manager.Prepare(context.Background(), "job_daaaaaaaaaaaaaaa", task)
+	if err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	indexPath := gitTestOutput(t, snapshot.WorktreePath, "rev-parse", "--git-path", "index")
+	if !filepath.IsAbs(indexPath) {
+		indexPath = filepath.Join(snapshot.WorktreePath, indexPath)
+	}
+	lockPath := indexPath + ".lock"
+	foreignLock := []byte("foreign Git index lock")
+	if err := os.WriteFile(lockPath, foreignLock, 0o600); err != nil {
+		t.Fatalf("write foreign Git index lock: %v", err)
+	}
+	if _, _, err := acquireWorktreeIndexLock(context.Background(), snapshot.WorktreePath); err == nil {
+		t.Fatal("CaptureOutput accepted a foreign Git index lock")
+	}
+	actual, err := os.ReadFile(lockPath)
+	if err != nil || string(actual) != string(foreignLock) {
+		t.Fatalf("foreign Git index lock was modified: %q %v", actual, err)
 	}
 }
