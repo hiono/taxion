@@ -107,7 +107,7 @@ func TestDeliveryObservationRequiresExplicitUnknownReconciliation(t *testing.T) 
 	job.Revision++
 	job.UpdatedAt = message.CreatedAt
 
-	requested, err := NewDeliveryObservation(job, message.ID, "cmd_cccccccccccccccccccccccccccccccc", 1, DeliveryRequested, "", false, job.UpdatedAt.Add(time.Second))
+	requested, err := NewDeliveryObservation(job, message.ID, "", "cmd_cccccccccccccccccccccccccccccccc", DeliveryRequested, "", false, job.UpdatedAt.Add(time.Second))
 	if err != nil {
 		t.Fatalf("NewDeliveryObservation REQUESTED: %v", err)
 	}
@@ -115,7 +115,7 @@ func TestDeliveryObservationRequiresExplicitUnknownReconciliation(t *testing.T) 
 	job.Revision++
 	job.UpdatedAt = requested.CreatedAt
 
-	unknown, err := NewDeliveryObservation(job, message.ID, "cmd_dddddddddddddddddddddddddddddddd", 1, DeliveryUnknown, "", false, job.UpdatedAt.Add(time.Second))
+	unknown, err := NewDeliveryObservation(job, message.ID, requested.ID, "cmd_dddddddddddddddddddddddddddddddd", DeliveryUnknown, "", false, job.UpdatedAt.Add(time.Second))
 	if err != nil {
 		t.Fatalf("NewDeliveryObservation UNKNOWN: %v", err)
 	}
@@ -123,10 +123,10 @@ func TestDeliveryObservationRequiresExplicitUnknownReconciliation(t *testing.T) 
 	job.Revision++
 	job.UpdatedAt = unknown.CreatedAt
 
-	if _, err := NewDeliveryObservation(job, message.ID, "cmd_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", 1, DeliveryAccepted, strings.Repeat("a", 64), false, job.UpdatedAt.Add(time.Second)); err == nil {
+	if _, err := NewDeliveryObservation(job, message.ID, requested.ID, "cmd_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", DeliveryAccepted, strings.Repeat("a", 64), false, job.UpdatedAt.Add(time.Second)); err == nil {
 		t.Fatal("UNKNOWN delivery was accepted without reconciliation")
 	}
-	accepted, err := NewDeliveryObservation(job, message.ID, "cmd_ffffffffffffffffffffffffffffffff", 1, DeliveryAccepted, strings.Repeat("a", 64), true, job.UpdatedAt.Add(time.Second))
+	accepted, err := NewDeliveryObservation(job, message.ID, requested.ID, "cmd_ffffffffffffffffffffffffffffffff", DeliveryAccepted, strings.Repeat("a", 64), true, job.UpdatedAt.Add(time.Second))
 	if err != nil {
 		t.Fatalf("NewDeliveryObservation reconciliation: %v", err)
 	}
@@ -152,7 +152,7 @@ func TestDeliveryObservationBindsResultToLatestRequestedAttempt(t *testing.T) {
 	job.Revision++
 	job.UpdatedAt = message.CreatedAt
 
-	requested1, err := NewDeliveryObservation(job, message.ID, "cmd_20202020202020202020202020202020", 1, DeliveryRequested, "", false, job.UpdatedAt.Add(time.Second))
+	requested1, err := NewDeliveryObservation(job, message.ID, "", "cmd_20202020202020202020202020202020", DeliveryRequested, "", false, job.UpdatedAt.Add(time.Second))
 	if err != nil {
 		t.Fatalf("REQUESTED attempt 1: %v", err)
 	}
@@ -160,7 +160,7 @@ func TestDeliveryObservationBindsResultToLatestRequestedAttempt(t *testing.T) {
 	job.Revision++
 	job.UpdatedAt = requested1.CreatedAt
 
-	failed1, err := NewDeliveryObservation(job, message.ID, "cmd_30303030303030303030303030303030", 1, DeliveryFailed, strings.Repeat("a", 64), false, job.UpdatedAt.Add(time.Second))
+	failed1, err := NewDeliveryObservation(job, message.ID, requested1.ID, "cmd_30303030303030303030303030303030", DeliveryFailed, strings.Repeat("a", 64), false, job.UpdatedAt.Add(time.Second))
 	if err != nil {
 		t.Fatalf("FAILED attempt 1: %v", err)
 	}
@@ -168,7 +168,7 @@ func TestDeliveryObservationBindsResultToLatestRequestedAttempt(t *testing.T) {
 	job.Revision++
 	job.UpdatedAt = failed1.CreatedAt
 
-	requested2, err := NewDeliveryObservation(job, message.ID, "cmd_40404040404040404040404040404040", 2, DeliveryRequested, "", false, job.UpdatedAt.Add(time.Second))
+	requested2, err := NewDeliveryObservation(job, message.ID, "", "cmd_40404040404040404040404040404040", DeliveryRequested, "", false, job.UpdatedAt.Add(time.Second))
 	if err != nil {
 		t.Fatalf("REQUESTED attempt 2: %v", err)
 	}
@@ -176,10 +176,10 @@ func TestDeliveryObservationBindsResultToLatestRequestedAttempt(t *testing.T) {
 	job.Revision++
 	job.UpdatedAt = requested2.CreatedAt
 
-	if _, err := NewDeliveryObservation(job, message.ID, "cmd_50505050505050505050505050505050", 1, DeliveryAccepted, strings.Repeat("b", 64), false, job.UpdatedAt.Add(time.Second)); err == nil {
+	if _, err := NewDeliveryObservation(job, message.ID, requested1.ID, "cmd_50505050505050505050505050505050", DeliveryAccepted, strings.Repeat("b", 64), false, job.UpdatedAt.Add(time.Second)); err == nil {
 		t.Fatal("late result for attempt 1 was attributed to the latest REQUESTED attempt 2")
 	}
-	accepted2, err := NewDeliveryObservation(job, message.ID, "cmd_60606060606060606060606060606060", 2, DeliveryAccepted, strings.Repeat("c", 64), false, job.UpdatedAt.Add(time.Second))
+	accepted2, err := NewDeliveryObservation(job, message.ID, requested2.ID, "cmd_60606060606060606060606060606060", DeliveryAccepted, strings.Repeat("c", 64), false, job.UpdatedAt.Add(time.Second))
 	if err != nil {
 		t.Fatalf("ACCEPTED attempt 2: %v", err)
 	}
