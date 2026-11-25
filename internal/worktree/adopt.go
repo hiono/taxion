@@ -535,13 +535,18 @@ func initialWorktreeStateSHA256(
 	if err != nil {
 		return "", fmt.Errorf("capture stable submodule gitlink identities: %w", err)
 	}
+	worktreeRoot, err := os.OpenRoot(path)
+	if err != nil {
+		return "", fmt.Errorf("open Worktree root for confined state capture: %w", err)
+	}
+	defer worktreeRoot.Close()
 	hash := sha256.New()
 	for _, part := range [][]byte{
 		[]byte(head), []byte(tree), []byte(headMode), []byte(headRef), status, staged, working, submoduleIndexEntries,
 	} {
 		writeDigestPart(hash, part)
 	}
-	if err := hashTrackedWorktreeFiles(ctx, path, hash); err != nil {
+	if err := hashTrackedWorktreeFiles(ctx, path, worktreeRoot, hash); err != nil {
 		return "", err
 	}
 	for _, relative := range strings.Split(string(untracked), "\x00") {
@@ -551,25 +556,13 @@ func initialWorktreeStateSHA256(
 		if relative == "" {
 			continue
 		}
-		filePath := filepath.Clean(filepath.Join(path, filepath.FromSlash(relative)))
-		if !pathWithin(path, filePath) {
-			return "", errors.New("untracked Worktree path escapes its root")
+		relativePath := filepath.FromSlash(relative)
+		if relativePath == "" || filepath.IsAbs(relativePath) || filepath.Clean(relativePath) != relativePath {
+			return "", errors.New("untracked Worktree path is not a canonical relative path")
 		}
-		info, err := os.Lstat(filePath)
+		file, info, err := openRegularWorktreeFile(worktreeRoot, relativePath)
 		if err != nil {
-			return "", fmt.Errorf("inspect untracked Worktree file: %w", err)
-		}
-		if !info.Mode().IsRegular() {
-			return "", errors.New("untracked Worktree contains a symlink or non-regular file")
-		}
-		file, err := openRegularWorktreeFile(filePath, info)
-		if err != nil {
-			return "", fmt.Errorf("open untracked Worktree file without following replacements: %w", err)
-		}
-		openedInfo, statErr := file.Stat()
-		if statErr != nil || !openedInfo.Mode().IsRegular() || !os.SameFile(info, openedInfo) || openedInfo.Size() != info.Size() {
-			_ = file.Close()
-			return "", errors.New("untracked Worktree file changed before it could be hashed")
+			return "", fmt.Errorf("open untracked Worktree file within its root: %w", err)
 		}
 		writeDigestPart(hash, []byte(relative))
 		writeDigestPart(hash, []byte(info.Mode().Perm().String()))
@@ -579,17 +572,45 @@ func initialWorktreeStateSHA256(
 		}
 		written, copyErr := io.CopyBuffer(hash, contextReader{ctx: ctx, reader: file}, make([]byte, 64*1024))
 		afterInfo, afterStatErr := file.Stat()
+		pathInfo, pathErr := worktreeRoot.Lstat(relativePath)
 		closeErr := file.Close()
 		if copyErr != nil {
 			return "", fmt.Errorf("hash untracked Worktree file: %w", copyErr)
 		}
-		if afterStatErr != nil || closeErr != nil || written != info.Size() ||
-			!os.SameFile(info, afterInfo) || afterInfo.Size() != info.Size() ||
-			!afterInfo.ModTime().Equal(info.ModTime()) {
+		if afterStatErr != nil || pathErr != nil || closeErr != nil || written != info.Size() ||
+			!os.SameFile(info, afterInfo) || !pathInfo.Mode().IsRegular() || !os.SameFile(info, pathInfo) ||
+			afterInfo.Size() != info.Size() || !afterInfo.ModTime().Equal(info.ModTime()) {
 			return "", errors.New("untracked Worktree file changed while it was being hashed")
 		}
 	}
 	return hex.EncodeToString(hash.Sum(nil)), nil
+}
+
+func openRegularWorktreeFile(root *os.Root, relative string) (*os.File, os.FileInfo, error) {
+	if root == nil || relative == "" || filepath.IsAbs(relative) || filepath.Clean(relative) != relative {
+		return nil, nil, errors.New("Worktree file path must be relative to its root")
+	}
+	file, err := root.Open(relative)
+	if err != nil {
+		return nil, nil, err
+	}
+	info, err := file.Stat()
+	if err != nil || !info.Mode().IsRegular() {
+		_ = file.Close()
+		if err != nil {
+			return nil, nil, err
+		}
+		return nil, nil, errors.New("Worktree file is not a regular file")
+	}
+	pathInfo, err := root.Lstat(relative)
+	if err != nil || !pathInfo.Mode().IsRegular() || !os.SameFile(info, pathInfo) {
+		_ = file.Close()
+		if err != nil {
+			return nil, nil, err
+		}
+		return nil, nil, errors.New("Worktree file changed while it was being opened")
+	}
+	return file, info, nil
 }
 
 type contextReader struct {
@@ -604,7 +625,7 @@ func (r contextReader) Read(buffer []byte) (int, error) {
 	return r.reader.Read(buffer)
 }
 
-func hashTrackedWorktreeFiles(ctx context.Context, path string, hash interface{ Write([]byte) (int, error) }) error {
+func hashTrackedWorktreeFiles(ctx context.Context, path string, root *os.Root, hash interface{ Write([]byte) (int, error) }) error {
 	entries, err := gitBytes(ctx, path, "--no-optional-locks", "ls-files", "--stage", "-z")
 	if err != nil {
 		return fmt.Errorf("list tracked Worktree files for raw-state digest: %w", err)
@@ -628,11 +649,11 @@ func hashTrackedWorktreeFiles(ctx context.Context, path string, hash interface{ 
 		if mode == "160000" {
 			continue
 		}
-		filePath := filepath.Clean(filepath.Join(path, filepath.FromSlash(relative)))
-		if !pathWithin(path, filePath) {
-			return errors.New("tracked Worktree path escapes its root")
+		relativePath := filepath.FromSlash(relative)
+		if relativePath == "" || filepath.IsAbs(relativePath) || filepath.Clean(relativePath) != relativePath {
+			return errors.New("tracked Worktree path is not a canonical relative path")
 		}
-		info, err := os.Lstat(filePath)
+		info, err := root.Lstat(relativePath)
 		if errors.Is(err, os.ErrNotExist) {
 			writeDigestPart(hash, []byte(relative))
 			writeDigestPart(hash, []byte(mode))
@@ -640,7 +661,7 @@ func hashTrackedWorktreeFiles(ctx context.Context, path string, hash interface{ 
 			continue
 		}
 		if err != nil {
-			return fmt.Errorf("inspect tracked Worktree file %q: %w", relative, err)
+			return fmt.Errorf("inspect tracked Worktree file %q within its root: %w", relative, err)
 		}
 		writeDigestPart(hash, []byte(relative))
 		writeDigestPart(hash, []byte(mode))
@@ -650,11 +671,11 @@ func hashTrackedWorktreeFiles(ctx context.Context, path string, hash interface{ 
 			if info.Mode()&os.ModeSymlink == 0 {
 				return errors.New("tracked symlink changed file type during adoption")
 			}
-			target, err := os.Readlink(filePath)
+			target, err := root.Readlink(relativePath)
 			if err != nil {
 				return fmt.Errorf("read tracked Worktree symlink %q: %w", relative, err)
 			}
-			after, err := os.Lstat(filePath)
+			after, err := root.Lstat(relativePath)
 			if err != nil || !os.SameFile(info, after) || after.Mode()&os.ModeSymlink == 0 {
 				return errors.New("tracked Worktree symlink changed while its state was captured")
 			}
@@ -663,22 +684,29 @@ func hashTrackedWorktreeFiles(ctx context.Context, path string, hash interface{ 
 			if !info.Mode().IsRegular() {
 				return errors.New("tracked Worktree file is not a regular file")
 			}
-			file, err := openRegularWorktreeFile(filePath, info)
+			file, openedInfo, err := openRegularWorktreeFile(root, relativePath)
 			if err != nil {
-				return fmt.Errorf("open tracked Worktree file %q: %w", relative, err)
+				return fmt.Errorf("open tracked Worktree file %q within its root: %w", relative, err)
 			}
-			if _, err := fmt.Fprintf(hash, "%d:", info.Size()); err != nil {
+			if !os.SameFile(info, openedInfo) {
+				_ = file.Close()
+				return errors.New("tracked Worktree file changed before it could be opened")
+			}
+			if _, err := fmt.Fprintf(hash, "%d:", openedInfo.Size()); err != nil {
 				_ = file.Close()
 				return err
 			}
 			written, copyErr := io.CopyBuffer(hash, contextReader{ctx: ctx, reader: file}, make([]byte, 64*1024))
 			after, statErr := file.Stat()
+			pathAfter, pathErr := root.Lstat(relativePath)
 			closeErr := file.Close()
 			if copyErr != nil {
 				return fmt.Errorf("hash tracked Worktree file %q: %w", relative, copyErr)
 			}
-			if statErr != nil || closeErr != nil || written != info.Size() ||
-				!os.SameFile(info, after) || after.Size() != info.Size() || !after.ModTime().Equal(info.ModTime()) {
+			if statErr != nil || pathErr != nil || closeErr != nil || written != openedInfo.Size() ||
+				!os.SameFile(openedInfo, after) || !pathAfter.Mode().IsRegular() ||
+				!os.SameFile(openedInfo, pathAfter) || after.Size() != openedInfo.Size() ||
+				!after.ModTime().Equal(openedInfo.ModTime()) {
 				return errors.New("tracked Worktree file changed while its state was captured")
 			}
 		default:

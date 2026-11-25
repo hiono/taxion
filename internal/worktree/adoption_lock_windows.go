@@ -64,21 +64,6 @@ func openWorktreeIndexLockFile(path string) (*os.File, error) {
 	return file, nil
 }
 
-func openRegularWorktreeFile(path string, expected os.FileInfo) (*os.File, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	actual, err := file.Stat()
-	if err != nil || !actual.Mode().IsRegular() || !os.SameFile(expected, actual) || actual.Size() != expected.Size() {
-		_ = file.Close()
-		if err != nil {
-			return nil, err
-		}
-		return nil, errors.New("Worktree file changed or is not a regular file")
-	}
-	return file, nil
-}
 
 func (l *adoptionFileLock) release() {
 	if l == nil || l.file == nil {

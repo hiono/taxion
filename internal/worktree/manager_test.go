@@ -3,6 +3,7 @@ package worktree
 import (
 	"context"
 	"crypto/sha256"
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"os"
@@ -542,6 +543,43 @@ func TestManagerAdoptRejectsSubmoduleAssumeUnchangedIndex(t *testing.T) {
 	if _, err := manager.Adopt(context.Background(), "job_6023456789abcdef", task, worktreePath); err == nil ||
 		!strings.Contains(err.Error(), "assume-unchanged") {
 		t.Fatalf("Adopt accepted a submodule assume-unchanged index entry: %v", err)
+	}
+}
+
+
+func TestHashTrackedWorktreeFilesRejectsParentSymlinkEscape(t *testing.T) {
+	repository := initRepository(t)
+	nested := filepath.Join(repository, "nested")
+	if err := os.MkdirAll(nested, 0o700); err != nil {
+		t.Fatalf("create tracked nested directory: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(nested, "tracked.txt"), []byte("inside\n"), 0o600); err != nil {
+		t.Fatalf("write tracked nested file: %v", err)
+	}
+	gitTestRun(t, repository, "add", "nested/tracked.txt")
+	gitTestRun(t, repository, "commit", "-m", "add nested tracked file")
+	worktreePath := filepath.Join(canonicalTempDir(t), "symlink-escape-worktree")
+	gitTestRun(t, repository, "worktree", "add", "--detach", worktreePath, "HEAD")
+	outside := filepath.Join(canonicalTempDir(t), "outside-worktree-root")
+	if err := os.MkdirAll(outside, 0o700); err != nil {
+		t.Fatalf("create outside directory: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(outside, "tracked.txt"), []byte("outside\n"), 0o600); err != nil {
+		t.Fatalf("write outside file: %v", err)
+	}
+	if err := os.RemoveAll(filepath.Join(worktreePath, "nested")); err != nil {
+		t.Fatalf("remove tracked nested directory: %v", err)
+	}
+	if err := os.Symlink(outside, filepath.Join(worktreePath, "nested")); err != nil {
+		t.Fatalf("replace nested directory with symlink: %v", err)
+	}
+	root, err := os.OpenRoot(worktreePath)
+	if err != nil {
+		t.Fatalf("open Worktree root: %v", err)
+	}
+	defer root.Close()
+	if err := hashTrackedWorktreeFiles(context.Background(), worktreePath, root, sha256.New()); err == nil {
+		t.Fatal("tracked path through a parent symlink escaping the Worktree root was accepted")
 	}
 }
 
