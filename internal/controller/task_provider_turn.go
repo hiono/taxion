@@ -508,12 +508,30 @@ func (c *ProviderController) reconcileTaskTurn(
 	}
 	claimID := claim.ID
 	latestTurnObservation, hasTurnObservation := latestTaskTurnObservation(job, turn.ID)
-	hasUnknownTurnObservation := hasTurnObservation && latestTurnObservation.Status == domain.TaskTurnUnknown
+	if hasTurnObservation && latestTurnObservation.Status == domain.TaskTurnUnknown &&
+		latestTurnObservation.DispatchClaimID == claimID {
+		if _, found := taskTurnDispatchObservation(
+			job, claimID, domain.TaskTurnDispatchObservationUnknownReturned,
+		); !found {
+			evidenceSHA256 := providerTurnUnknownReturnedEvidence(turn.OperationID, claimID)
+			if _, _, err := c.recordTaskTurnDispatchObservation(
+				ctx, job.ID, claimID, domain.TaskTurnDispatchObservationUnknownReturned, evidenceSHA256, principal,
+			); err != nil {
+				return receipt, turn, latestTurnObservation, provider.TurnResult{},
+					fmt.Errorf("recover missing returned-UNKNOWN dispatch evidence: %w", err)
+			}
+			var err error
+			job, err = c.store.GetJob(ctx, job.ID)
+			if err != nil {
+				return receipt, turn, latestTurnObservation, provider.TurnResult{}, err
+			}
+		}
+	}
 	for _, failureStatus := range []string{
 		domain.TaskTurnDispatchObservationPreAdapterRejection,
 		domain.TaskTurnDispatchObservationDefinitiveFailure,
 	} {
-		if failure, found := taskTurnDispatchObservation(job, claimID, failureStatus); found && !hasUnknownTurnObservation {
+		if failure, found := taskTurnDispatchObservation(job, claimID, failureStatus); found {
 			_, _, releaseErr := c.store.ReleaseTaskTurnDispatchClaim(
 				ctx, job.ID, claimID, principal,
 				domain.TaskTurnDispatchReleasedDefinitiveFailure, failure.EvidenceSHA256, "",
@@ -752,8 +770,9 @@ func (c *ProviderController) finalizeTaskTurn(
 		evidenceSHA256 = resultObservation.EvidenceSHA256
 	}
 	status := domain.TaskTurnCompleted
-	if result.Status == domain.TaskTurnFailed {
+	if result.Status == domain.TaskTurnFailed || usage.Tokens > turn.ReservedTokens {
 		status = domain.TaskTurnFailed
+		result.Status = domain.TaskTurnFailed
 	}
 	observation, err := c.recordTaskTurnObservation(ctx, job.ID, turn.ID, claimID, status, usage.Tokens, evidenceSHA256, false)
 	if err != nil {

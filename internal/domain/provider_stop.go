@@ -155,7 +155,7 @@ func NewProviderStopIntent(
 	}
 	if hasPriorResume {
 		status, found := latestPlanningResumeStatus(job, roleExecutionID, job.Revision+1)
-		if !found || status == "" || status == PlanningResumeUnknown {
+		if !found || (status != PlanningResumeAttached && status != PlanningResumeFailed) {
 			return ProviderStopIntent{}, errors.New("Provider Stop cannot race an unresolved Resume for the same Session")
 		}
 	}

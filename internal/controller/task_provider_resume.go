@@ -86,8 +86,10 @@ func (c *ProviderController) ResumeTaskExecution(
 	evidenceSHA256 := ""
 	if existing != nil {
 		evidenceSHA256 = existing.CapabilityEvidenceSHA256
-		if !hasCapabilityEvidenceDigest(capabilities, provider.CapabilitySessionReattach, provider.EvidenceDurable, evidenceSHA256) {
-			return store.CommandReceipt{}, domain.PlanningResumeIntent{}, domain.PlanningResumeObservation{}, provider.ResumeResult{}, provider.ErrUnsupportedCapability
+		if _, err := capabilityEvidenceDigest(
+			capabilities, provider.CapabilitySessionReattach, provider.EvidenceDurable,
+		); err != nil {
+			return store.CommandReceipt{}, domain.PlanningResumeIntent{}, domain.PlanningResumeObservation{}, provider.ResumeResult{}, err
 		}
 	} else {
 		evidenceSHA256, err = capabilityEvidenceDigest(

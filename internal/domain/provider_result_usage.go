@@ -203,12 +203,6 @@ func (o ProviderUsageObservation) Validate(job Job) error {
 		return errors.New("Provider Usage observation does not follow its accepted Provider operation")
 	}
 	if o.TurnID != "" && execution.Role == RoleCoder {
-		reservedTokens, found := providerTurnReservedTokens(job, o.TurnID)
-		if !found || o.Tokens > reservedTokens {
-			return errors.New("Provider Usage exceeds its reserved Turn token budget")
-		}
-	}
-	if o.TurnID != "" && execution.Role == RoleCoder {
 		for _, existing := range job.ProviderUsageObservations {
 			if existing.OperationID == o.OperationID && existing.TurnID == o.TurnID &&
 				existing.Complete && existing.CreatedRevision < o.CreatedRevision {

@@ -9,8 +9,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hiono/taxion/internal/auth"
 	"github.com/hiono/taxion/internal/domain"
 	"github.com/hiono/taxion/internal/provider"
+	"github.com/hiono/taxion/internal/store"
 )
 
 func TestProviderControllerSendTaskExecutionPersistsResultAndCompleteUsage(t *testing.T) {
@@ -829,4 +831,104 @@ func TestReleaseTaskTurnDispatchClaimForIdempotentRetryDoesNotReleaseReplacement
 		t.Fatalf("stale Lookup changed replacement claim: active=%v claim=%#v want=%#v",
 			active, activeClaim, replacementClaim)
 	}
+}
+
+
+type failUnknownReturnedObservationStore struct {
+	ProviderExecutionStore
+	failed bool
+}
+
+func (s *failUnknownReturnedObservationStore) AddTaskTurnDispatchObservation(
+	ctx context.Context,
+	jobID string,
+	expectedRevision uint64,
+	claimID, commandID, status, evidenceSHA256 string,
+	principal auth.AuthenticatedPrincipal,
+) (store.CommandReceipt, domain.TaskTurnDispatchObservation, bool, error) {
+	if status == domain.TaskTurnDispatchObservationUnknownReturned && !s.failed {
+		s.failed = true
+		return store.CommandReceipt{}, domain.TaskTurnDispatchObservation{}, false,
+			errors.New("injected UNKNOWN_RETURNED persistence failure")
+	}
+	return s.ProviderExecutionStore.AddTaskTurnDispatchObservation(
+		ctx, jobID, expectedRevision, claimID, commandID, status, evidenceSHA256, principal,
+	)
+}
+
+func TestTaskProviderTurnRecoversMissingUnknownReturnedMarker(t *testing.T) {
+	f := newTaskProviderStopFixture(t)
+	now := f.controller.now()
+	f.runtime.capabilities.SendLookup = true
+	f.runtime.capabilities.SendIdempotency = true
+	f.runtime.capabilities.FinalOutputRetrieval = true
+	f.runtime.capabilities.UsageIdentity = true
+	f.runtime.capabilities.UsageCompleteness = true
+	f.runtime.capabilities.Evidence = append(f.runtime.capabilities.Evidence,
+		provider.CapabilityEvidence{Capability: provider.CapabilitySendLookup, Identity: f.runtime.identity, TestID: "unknown-returned-recovery", EvidenceSHA256: strings.Repeat("1", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
+		provider.CapabilityEvidence{Capability: provider.CapabilitySendIdempotency, Identity: f.runtime.identity, TestID: "unknown-returned-recovery", EvidenceSHA256: strings.Repeat("2", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
+		provider.CapabilityEvidence{Capability: provider.CapabilityFinalOutput, Identity: f.runtime.identity, TestID: "unknown-returned-recovery", EvidenceSHA256: strings.Repeat("3", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
+		provider.CapabilityEvidence{Capability: provider.CapabilityUsageIdentity, Identity: f.runtime.identity, TestID: "unknown-returned-recovery", EvidenceSHA256: strings.Repeat("4", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
+		provider.CapabilityEvidence{Capability: provider.CapabilityUsageCompleteness, Identity: f.runtime.identity, TestID: "unknown-returned-recovery", EvidenceSHA256: strings.Repeat("5", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
+	)
+	failingStore := &failUnknownReturnedObservationStore{ProviderExecutionStore: f.database}
+	f.controller.store = failingStore
+	f.runtime.sendErr = &provider.OperationError{
+		Class: provider.FailureAmbiguous, Code: provider.OperationCodeUnknown,
+	}
+	commandID := "cmd_76767676767676767676767676767676"
+	prompt := "Recover the returned UNKNOWN marker before retrying this Task Turn."
+
+	_, turn, observation, _, firstErr := f.controller.SendTaskExecution(
+		f.ctx, f.jobID, f.execution.ID, f.permission.ID, commandID,
+		prompt, f.permissionRequest, 100, f.principal,
+	)
+	if firstErr == nil || observation.Status != domain.TaskTurnUnknown || !failingStore.failed {
+		t.Fatalf("injected UNKNOWN_RETURNED failure did not leave a recoverable UNKNOWN: observation=%#v failed=%v err=%v",
+			observation, failingStore.failed, firstErr)
+	}
+	job, err := f.database.GetJob(f.ctx, f.jobID)
+	if err != nil {
+		t.Fatalf("GetJob after injected marker failure: %v", err)
+	}
+	if len(job.TaskTurnDispatchClaims) != 1 || len(job.TaskTurnDispatchReleases) != 0 ||
+		len(job.TaskTurnObservations) != 1 || job.TaskTurnObservations[0].Status != domain.TaskTurnUnknown ||
+		taskTurnDispatchObservationExists(job, job.TaskTurnDispatchClaims[0].ID, domain.TaskTurnDispatchObservationUnknownReturned) {
+		t.Fatalf("unexpected facts after marker persistence failure: claims=%#v releases=%#v observations=%#v dispatch=%#v",
+			job.TaskTurnDispatchClaims, job.TaskTurnDispatchReleases, job.TaskTurnObservations, job.TaskTurnDispatchObservations)
+	}
+
+	f.runtime.sendErr = nil
+	f.runtime.lookupResult = provider.LookupResult{
+		Found: false, OperationID: turn.OperationID, SessionID: turn.ProviderSessionID,
+		TurnID: turn.ID, Status: provider.LookupStatusNotFound,
+		EvidenceSHA256: strings.Repeat("6", 64),
+	}
+	_, _, finalObservation, _, retryErr := f.controller.SendTaskExecution(
+		f.ctx, f.jobID, f.execution.ID, f.permission.ID, commandID,
+		prompt, f.permissionRequest, 100, f.principal,
+	)
+	if retryErr != nil || finalObservation.Status != domain.TaskTurnCompleted {
+		t.Fatalf("same Task Turn did not recover after persisting UNKNOWN_RETURNED: observation=%#v err=%v",
+			finalObservation, retryErr)
+	}
+	job, err = f.database.GetJob(f.ctx, f.jobID)
+	if err != nil {
+		t.Fatalf("GetJob after recovered Task Turn: %v", err)
+	}
+	firstClaim := job.TaskTurnDispatchClaims[0]
+	if !taskTurnDispatchObservationExists(job, firstClaim.ID, domain.TaskTurnDispatchObservationUnknownReturned) ||
+		len(job.TaskTurnDispatchReleases) != 2 {
+		t.Fatalf("recovery did not persist the missing marker and release both claims: dispatch=%#v releases=%#v",
+			job.TaskTurnDispatchObservations, job.TaskTurnDispatchReleases)
+	}
+}
+
+func taskTurnDispatchObservationExists(job domain.Job, claimID, status string) bool {
+	for _, observation := range job.TaskTurnDispatchObservations {
+		if observation.ClaimID == claimID && observation.Status == status {
+			return true
+		}
+	}
+	return false
 }

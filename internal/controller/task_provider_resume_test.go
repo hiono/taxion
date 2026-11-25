@@ -553,3 +553,64 @@ func TestTaskProviderResumeRecoversAfterObservationReadFailure(t *testing.T) {
 			attached, result, f.runtime.resumeCalls, err)
 	}
 }
+
+
+func TestTaskProviderResumeReconcilesUnknownAfterE5EvidenceRefresh(t *testing.T) {
+	f := newTaskProviderStopFixture(t)
+	prepareTaskResumeTurn(t, &f)
+	enableTaskResumeE5(&f)
+	commandID := "cmd_73737373737373737373737373737373"
+	f.runtime.resumeErr = &provider.OperationError{
+		Class: provider.FailureAmbiguous, Code: provider.OperationCodeUnknown,
+	}
+
+	firstIntent, firstObservation, _, firstErr := f.resume(commandID)
+	if firstErr == nil || firstObservation.Status != domain.PlanningResumeUnknown ||
+		f.runtime.resumeCalls != 1 {
+		t.Fatalf("initial ambiguous Resume was not retained as UNKNOWN: intent=%#v observation=%#v calls=%d err=%v",
+			firstIntent, firstObservation, f.runtime.resumeCalls, firstErr)
+	}
+
+	refreshedEvidence := strings.Repeat("d", 64)
+	updated := false
+	for i := range f.runtime.capabilities.Evidence {
+		evidence := &f.runtime.capabilities.Evidence[i]
+		if evidence.Capability == provider.CapabilitySessionReattach &&
+			evidence.EvidenceLevel == provider.EvidenceDurable {
+			evidence.EvidenceSHA256 = refreshedEvidence
+			updated = true
+		}
+	}
+	if !updated {
+		t.Fatal("fixture has no durable SessionReattach evidence to refresh")
+	}
+	f.runtime.resumeErr = nil
+
+	secondIntent, secondObservation, result, secondErr := f.resume(commandID)
+	if secondErr != nil || secondIntent.ID != firstIntent.ID ||
+		secondIntent.CapabilityEvidenceSHA256 != firstIntent.CapabilityEvidenceSHA256 ||
+		secondObservation.Status != domain.PlanningResumeAttached || !result.Attached ||
+		f.runtime.resumeCalls != 2 {
+		t.Fatalf("UNKNOWN Resume did not reconcile with refreshed E5 evidence and the same intent: first=%#v second=%#v observation=%#v result=%#v calls=%d err=%v",
+			firstIntent, secondIntent, secondObservation, result, f.runtime.resumeCalls, secondErr)
+	}
+}
+
+func TestProviderStopRejectsNotDispatchedPriorResume(t *testing.T) {
+	f := newTaskProviderStopFixture(t)
+	prepareTaskResumeTurn(t, &f)
+	enableTaskResumeE5(&f)
+	f.worktree.failAt = f.worktree.verifyCalls + 2
+	f.worktree.verifyErr = errors.New("Worktree unavailable before Resume dispatch")
+
+	_, observation, _, resumeErr := f.resume("cmd_74747474747474747474747474747474")
+	if resumeErr == nil || observation.Status != domain.PlanningResumeNotDispatched {
+		t.Fatalf("fixture did not persist NOT_DISPATCHED Resume: observation=%#v err=%v", observation, resumeErr)
+	}
+	if _, _, _, stopErr := f.stop(
+		"cmd_75757575757575757575757575757575", domain.ProviderStopReasonTaskComplete,
+	); stopErr == nil || f.runtime.stopCalls != 0 {
+		t.Fatalf("Stop was allowed before the prior Resume reached ATTACHED or FAILED: stopCalls=%d err=%v",
+			f.runtime.stopCalls, stopErr)
+	}
+}

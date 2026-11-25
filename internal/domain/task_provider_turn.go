@@ -337,7 +337,8 @@ func (o TaskTurnObservation) Validate(job Job, turn TaskTurnIntent) error {
 		return nil
 	}
 	if (o.Status != TaskTurnCompleted && o.Status != TaskTurnFailed) ||
-		o.TokensUsed > turn.ReservedTokens || !validSHA256(o.EvidenceSHA256) {
+		(o.Status == TaskTurnCompleted && o.TokensUsed > turn.ReservedTokens) ||
+		!validSHA256(o.EvidenceSHA256) {
 		return errors.New("terminal TaskTurnObservation status, usage, or evidence is invalid")
 	}
 	var finalResult *ProviderResultObservation

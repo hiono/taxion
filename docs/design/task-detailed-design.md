@@ -94,7 +94,7 @@ PlanningResumeIntent / PlanningResumeObservationをPlannerとTask Coderの共通
 
 ControllerはtaskProviderExecutionTargetでACTIVE Job、JobApproval、ExecutionPermission、Coder RoleExecution、Task、accepted Start Session、Provider identityを照合します。Resume intent / receiptをcommitした後、同じauthorityとWorktree assignmentを再読込し、trusted verifierで物理Worktreeを再検証してからRuntime.Resumeを呼び出します。
 
-Resume capabilityはProvider / SDK / configuration identityに束縛されたE5 SessionReattach evidenceを要求します。Resume requestはpersisted Session IDと同じOperationIDを使用します。UNKNOWN / Observation欠落後は同一intentを再利用し、別Sessionを作成しません。terminal Attached observationが保存されるまでTaskTurnの新規作成を拒否します。
+Resume capabilityはProvider / SDK / configuration identityに束縛されたE5 SessionReattach evidenceを要求します。Resume requestは保存済みSession IDをSessionIDに設定し、同一Resume intentのOperationIDを使用します。UNKNOWN / Observation欠落後は同一intentを再利用し、別Sessionを作成しません。terminal Attached observationが保存されるまでTaskTurnの新規作成を拒否します。
 
 TaskTurnIntentの作成・復元検証は、同一RoleExecutionのlatest PlanningResume statusを参照します。Resume intentが存在しObservation未着、UNKNOWN、FAILEDの場合はTurnを拒否し、ATTACHEDだけを許可します。Provider Stop intentが先行するSessionはResumeできません。
 
