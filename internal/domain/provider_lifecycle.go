@@ -290,3 +290,12 @@ func validateProviderStartSession(job Job, start ProviderStartIntent, sessionID 
 	}
 	return nil
 }
+
+func providerStartHasDispatchBoundary(job Job, operationID string) bool {
+	for _, observation := range job.ProviderStartObservations {
+		if observation.OperationID == operationID && observation.Status == ProviderStartDispatching {
+			return true
+		}
+	}
+	return false
+}
