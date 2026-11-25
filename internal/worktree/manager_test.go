@@ -1115,3 +1115,31 @@ func TestHashTrackedWorktreeFilesIncludesUnstagedDeletion(t *testing.T) {
 		t.Fatal("tracked Worktree digest did not distinguish different unstaged deletions")
 	}
 }
+
+
+type countingReader struct {
+	reads int
+}
+
+func (r *countingReader) Read(buffer []byte) (int, error) {
+	r.reads++
+	return copy(buffer, "x"), nil
+}
+
+func TestContextReaderStopsReadingAfterCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	reader := &countingReader{}
+	wrapped := contextReader{ctx: ctx, reader: reader}
+	buffer := make([]byte, 1)
+	if _, err := wrapped.Read(buffer); err != nil {
+		t.Fatalf("first read: %v", err)
+	}
+	cancel()
+	if _, err := wrapped.Read(buffer); !errors.Is(err, context.Canceled) {
+		t.Fatalf("read after cancellation = %v, want context.Canceled", err)
+	}
+	if reader.reads != 1 {
+		t.Fatalf("underlying reader calls = %d, want 1", reader.reads)
+	}
+}

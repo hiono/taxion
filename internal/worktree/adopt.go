@@ -470,6 +470,9 @@ func initialWorktreeStateSHA256(
 		return "", err
 	}
 	for _, relative := range strings.Split(string(untracked), "\x00") {
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
 		if relative == "" {
 			continue
 		}
@@ -499,7 +502,7 @@ func initialWorktreeStateSHA256(
 			_ = file.Close()
 			return "", fmt.Errorf("write untracked Worktree file length to digest: %w", err)
 		}
-		written, copyErr := io.CopyBuffer(hash, file, make([]byte, 64*1024))
+		written, copyErr := io.CopyBuffer(hash, contextReader{ctx: ctx, reader: file}, make([]byte, 64*1024))
 		afterInfo, afterStatErr := file.Stat()
 		closeErr := file.Close()
 		if copyErr != nil {
@@ -514,12 +517,27 @@ func initialWorktreeStateSHA256(
 	return hex.EncodeToString(hash.Sum(nil)), nil
 }
 
+type contextReader struct {
+	ctx    context.Context
+	reader io.Reader
+}
+
+func (r contextReader) Read(buffer []byte) (int, error) {
+	if err := r.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return r.reader.Read(buffer)
+}
+
 func hashTrackedWorktreeFiles(ctx context.Context, path string, hash interface{ Write([]byte) (int, error) }) error {
 	entries, err := gitBytes(ctx, path, "--no-optional-locks", "ls-files", "--stage", "-z")
 	if err != nil {
 		return fmt.Errorf("list tracked Worktree files for raw-state digest: %w", err)
 	}
 	for _, entry := range strings.Split(string(entries), "\x00") {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if entry == "" {
 			continue
 		}
@@ -578,7 +596,7 @@ func hashTrackedWorktreeFiles(ctx context.Context, path string, hash interface{ 
 				_ = file.Close()
 				return err
 			}
-			written, copyErr := io.CopyBuffer(hash, file, make([]byte, 64*1024))
+			written, copyErr := io.CopyBuffer(hash, contextReader{ctx: ctx, reader: file}, make([]byte, 64*1024))
 			after, statErr := file.Stat()
 			closeErr := file.Close()
 			if copyErr != nil {
