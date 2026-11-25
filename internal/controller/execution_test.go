@@ -630,7 +630,7 @@ func TestExecutionControllerStartsCoderOnApprovedAdoptedWorktree(t *testing.T) {
 		t.Fatalf("StartTaskExecution with adopted Worktree: %v", err)
 	}
 	if receipt.Revision == 0 || execution.TaskID != task.ID || intent.WorktreeID != execution.WorktreeID ||
-		adopter.adoptCalls != 3 || adopter.releaseCalls != 2 || adopter.verifyCalls != 0 || adopter.prepareCalls != 0 {
+		adopter.adoptCalls != 3 || adopter.releaseCalls != 1 || adopter.verifyCalls != 0 || adopter.prepareCalls != 0 {
 		t.Fatalf("adopted Worktree was not used for the exact Task start: receipt=%#v execution=%#v intent=%#v adopter=%#v",
 			receipt, execution, intent, adopter)
 	}
