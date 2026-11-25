@@ -206,6 +206,22 @@ func TestManagerCapturesImmutableOutputSnapshotOnlyForCleanWorktree(t *testing.T
 	gitTestRun(t, snapshot.WorktreePath, "add", "output.txt")
 	gitTestRun(t, snapshot.WorktreePath, "commit", "-m", "capture completed output")
 
+	indexPath := gitTestOutput(t, snapshot.WorktreePath, "rev-parse", "--git-path", "index")
+	if !filepath.IsAbs(indexPath) {
+		indexPath = filepath.Join(snapshot.WorktreePath, indexPath)
+	}
+	indexLockPath := indexPath + ".lock"
+	if err := os.WriteFile(indexLockPath, nil, 0o600); err != nil {
+		t.Fatalf("create competing Git index lock: %v", err)
+	}
+	if _, err := manager.CaptureOutput(context.Background(), jobID, task, snapshot); err == nil ||
+		!strings.Contains(err.Error(), "already locked") {
+		t.Fatalf("CaptureOutput ignored a competing Git index writer: %v", err)
+	}
+	if err := os.Remove(indexLockPath); err != nil {
+		t.Fatalf("remove competing Git index lock: %v", err)
+	}
+
 	first, err := manager.CaptureOutput(context.Background(), jobID, task, snapshot)
 	if err != nil {
 		t.Fatalf("CaptureOutput: %v", err)

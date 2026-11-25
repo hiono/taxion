@@ -470,6 +470,46 @@ func parseWorktreeStatusHead(status string) (string, bool, error) {
 	return head, dirty, nil
 }
 
+func acquireWorktreeIndexLock(ctx context.Context, worktreePath string) (string, func() error, error) {
+	indexPath, err := gitOutput(ctx, worktreePath, "rev-parse", "--git-path", "index")
+	if err != nil {
+		return "", nil, errors.New("resolve Task Worktree Git index path")
+	}
+	if !filepath.IsAbs(indexPath) {
+		indexPath = filepath.Join(worktreePath, indexPath)
+	}
+	indexPath, err = filepath.EvalSymlinks(indexPath)
+	if err != nil || filepath.Base(indexPath) != "index" {
+		return "", nil, errors.New("Task Worktree Git index path cannot be resolved")
+	}
+	lockPath := indexPath + ".lock"
+	lockFile, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err != nil {
+		if errors.Is(err, os.ErrExist) {
+			return "", nil, errors.New("Task Worktree Git index is already locked by another writer")
+		}
+		return "", nil, fmt.Errorf("lock Task Worktree Git index: %w", err)
+	}
+	released := false
+	release := func() error {
+		if released {
+			return nil
+		}
+		released = true
+		return errors.Join(lockFile.Close(), os.Remove(lockPath))
+	}
+	return indexPath, release, nil
+}
+
+func worktreeIndexSHA256(indexPath string) (string, error) {
+	data, err := os.ReadFile(indexPath)
+	if err != nil {
+		return "", fmt.Errorf("read Task Worktree Git index: %w", err)
+	}
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:]), nil
+}
+
 func (m *Manager) CaptureOutput(ctx context.Context, jobID string, task domain.Task, snapshot Snapshot) (OutputSnapshot, error) {
 	if m == nil || ctx == nil {
 		return OutputSnapshot{}, errors.New("Worktree manager and context are required")
@@ -481,6 +521,15 @@ func (m *Manager) CaptureOutput(ctx context.Context, jobID string, task domain.T
 	defer unlock()
 	if err := m.verify(ctx, jobID, task, snapshot); err != nil {
 		return OutputSnapshot{}, fmt.Errorf("verify Task Worktree before output capture: %w", err)
+	}
+	indexPath, releaseIndex, err := acquireWorktreeIndexLock(ctx, snapshot.WorktreePath)
+	if err != nil {
+		return OutputSnapshot{}, err
+	}
+	defer releaseIndex()
+	indexDigestBefore, err := worktreeIndexSHA256(indexPath)
+	if err != nil {
+		return OutputSnapshot{}, err
 	}
 	if err := verifyWorktreeIndexFlags(ctx, snapshot.WorktreePath); err != nil {
 		return OutputSnapshot{}, err
@@ -540,6 +589,13 @@ func (m *Manager) CaptureOutput(ctx context.Context, jobID string, task domain.T
 	treeFinal, err := gitOutput(ctx, snapshot.WorktreePath, "rev-parse", "--verify", headFinal+"^{tree}")
 	if err != nil || treeFinal != tree {
 		return OutputSnapshot{}, errors.New("Task Worktree tree changed before output capture completed")
+	}
+	indexDigestAfter, err := worktreeIndexSHA256(indexPath)
+	if err != nil || indexDigestAfter != indexDigestBefore {
+		return OutputSnapshot{}, errors.New("Task Worktree Git index changed during output capture")
+	}
+	if err := releaseIndex(); err != nil {
+		return OutputSnapshot{}, fmt.Errorf("release Task Worktree Git index lock: %w", err)
 	}
 	return OutputSnapshot{CommitSHA: commit, TreeSHA: tree}, nil
 }
