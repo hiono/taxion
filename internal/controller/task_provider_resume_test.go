@@ -256,6 +256,69 @@ func TestTaskProviderResumeWorktreeGatesAndIntentFirstOrdering(t *testing.T) {
 	})
 }
 
+func TestTaskProviderResumeRefreshesE5EvidenceAfterNotDispatched(t *testing.T) {
+	f := newTaskProviderStopFixture(t)
+	prepareTaskResumeTurn(t, &f)
+	enableTaskResumeE5(&f)
+	f.worktree.failAt = f.worktree.verifyCalls + 2
+	f.worktree.verifyErr = errors.New("Worktree unavailable before Resume dispatch")
+
+	firstCommand := "cmd_71717171717171717171717171717171"
+	firstIntent, firstObservation, _, firstErr := f.resume(firstCommand)
+	if firstErr == nil || firstObservation.Status != domain.PlanningResumeNotDispatched ||
+		f.runtime.resumeCalls != 0 || !validTestDigest(firstIntent.CapabilityEvidenceSHA256) {
+		t.Fatalf("initial Resume did not persist a NOT_DISPATCHED intent: intent=%#v observation=%#v calls=%d err=%v",
+			firstIntent, firstObservation, f.runtime.resumeCalls, firstErr)
+	}
+
+	refreshedEvidence := strings.Repeat("d", 64)
+	updated := false
+	for i := range f.runtime.capabilities.Evidence {
+		evidence := &f.runtime.capabilities.Evidence[i]
+		if evidence.Capability == provider.CapabilitySessionReattach &&
+			evidence.EvidenceLevel == provider.EvidenceDurable {
+			evidence.EvidenceSHA256 = refreshedEvidence
+			updated = true
+		}
+	}
+	if !updated {
+		t.Fatal("fixture has no durable SessionReattach evidence to refresh")
+	}
+
+	secondIntent, secondObservation, result, secondErr := f.resume("cmd_72727272727272727272727272727272")
+	if secondErr != nil || secondIntent.ID == firstIntent.ID ||
+		secondIntent.CapabilityEvidenceSHA256 != refreshedEvidence ||
+		secondObservation.Status != domain.PlanningResumeAttached || !result.Attached ||
+		f.runtime.resumeCalls != 1 {
+		t.Fatalf("refreshed E5 evidence did not recover an un-dispatched Resume: first=%#v second=%#v observation=%#v result=%#v calls=%d err=%v",
+			firstIntent, secondIntent, secondObservation, result, f.runtime.resumeCalls, secondErr)
+	}
+	job, err := f.database.GetJob(f.ctx, f.jobID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(job.PlanningResumeIntents) != 2 || len(job.PlanningResumeObservations) != 2 ||
+		job.PlanningResumeObservations[0].ResumeID != firstIntent.ID ||
+		job.PlanningResumeObservations[0].Status != domain.PlanningResumeNotDispatched ||
+		job.PlanningResumeObservations[1].ResumeID != secondIntent.ID ||
+		job.PlanningResumeObservations[1].Status != domain.PlanningResumeAttached {
+		t.Fatalf("refreshed Resume did not preserve both append-only lifecycles: intents=%#v observations=%#v",
+			job.PlanningResumeIntents, job.PlanningResumeObservations)
+	}
+}
+
+func validTestDigest(value string) bool {
+	if len(value) != 64 {
+		return false
+	}
+	for _, char := range value {
+		if !strings.ContainsRune("0123456789abcdef", char) {
+			return false
+		}
+	}
+	return true
+}
+
 func TestTaskProviderResumePersistsDefinitiveFailureAndAllowsStop(t *testing.T) {
 	f := newTaskProviderStopFixture(t)
 	prepareTaskResumeTurn(t, &f)
