@@ -425,11 +425,25 @@ func TestTaskProviderSendCannotDispatchAfterStopIntent(t *testing.T) {
 	f := newTaskProviderStopFixture(t)
 	now := f.controller.now()
 	f.runtime.capabilities.SendIdempotency = true
+	f.runtime.capabilities.SendLookup = true
+	f.runtime.capabilities.FinalOutputRetrieval = true
+	f.runtime.capabilities.UsageIdentity = true
+	f.runtime.capabilities.UsageCompleteness = true
 	f.runtime.capabilities.Evidence = append(f.runtime.capabilities.Evidence, provider.CapabilityEvidence{
 		Capability: provider.CapabilitySendIdempotency, Identity: f.runtime.identity,
 		TestID: "task-stop-send-race", EvidenceSHA256: strings.Repeat("1", 64),
 		EvidenceLevel: provider.EvidenceLive, VerifiedAt: now,
 	})
+	for _, capability := range []provider.Capability{
+		provider.CapabilitySendLookup, provider.CapabilityFinalOutput,
+		provider.CapabilityUsageIdentity, provider.CapabilityUsageCompleteness,
+	} {
+		f.runtime.capabilities.Evidence = append(f.runtime.capabilities.Evidence, provider.CapabilityEvidence{
+			Capability: capability, Identity: f.runtime.identity,
+			TestID: "task-stop-send-race", EvidenceSHA256: strings.Repeat("1", 64),
+			EvidenceLevel: provider.EvidenceLive, VerifiedAt: now,
+		})
+	}
 	job, err := f.database.GetJob(f.ctx, f.jobID)
 	if err != nil {
 		t.Fatalf("GetJob before Stop intent: %v", err)
@@ -448,7 +462,7 @@ func TestTaskProviderSendCannotDispatchAfterStopIntent(t *testing.T) {
 		"Implement the approved Task changes.",
 		f.permissionRequest, 100, f.principal,
 	)
-	if err == nil || f.runtime.sendCalls != 0 {
+	if err == nil || errors.Is(err, provider.ErrUnsupportedCapability) || f.runtime.sendCalls != 0 {
 		t.Fatalf("Send crossed an existing Stop intent: sendCalls=%d err=%v", f.runtime.sendCalls, err)
 	}
 	job, err = f.database.GetJob(f.ctx, f.jobID)

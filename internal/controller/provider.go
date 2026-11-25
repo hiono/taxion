@@ -439,8 +439,12 @@ func (c *ProviderController) DispatchTaskExecution(
 			}
 		}
 	}
-	// Lookup NOT_FOUND, or a verified Start idempotency capability, permits only
-	// the same immutable OperationID. Revalidate authority after the external lookup.
+	// A new Task Start requires verified Start idempotency. Lookup NOT_FOUND only
+	// confirms absence; it does not authorize a non-idempotent dispatch.
+	if !canRetry {
+		return domain.ProviderStartObservation{}, provider.StartResult{}, provider.ErrUnsupportedCapability
+	}
+	// Revalidate authority after the external lookup.
 	if _, err := c.execution.ValidatePermission(ctx, permissionID, permissionRequest); err != nil {
 		return domain.ProviderStartObservation{}, provider.StartResult{}, err
 	}

@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -473,7 +474,8 @@ func TestExecutionControllerReplaysExistingJobOutputWithoutRecapturingWorktree(t
 func TestExecutionControllerStartsCoderOnApprovedAdoptedWorktree(t *testing.T) {
 	ctx := context.Background()
 	_, database, principal, jobID, _, sourceResult, _ := startContractPlanner(t)
-	worktreePath := "/tmp/taxion-approved-existing-worktree"
+	worktreePath := filepath.Join(t.TempDir(), "taxion-approved-existing-worktree")
+	repositoryPath := filepath.Join(t.TempDir(), "taxion-test-repository")
 	job, err := database.GetJob(ctx, jobID)
 	if err != nil {
 		t.Fatalf("GetJob before JobContract proposal: %v", err)
@@ -529,7 +531,7 @@ func TestExecutionControllerStartsCoderOnApprovedAdoptedWorktree(t *testing.T) {
 	adopter := &fakeTaskWorktreeAdopter{
 		fakeTaskWorktreeVerifier: &fakeTaskWorktreeVerifier{},
 		snapshot: domain.WorktreeSnapshot{
-			RepositoryID: "repo_taxion", RepositoryPath: "/tmp/taxion-test-repository",
+			RepositoryID: "repo_taxion", RepositoryPath: repositoryPath,
 			WorktreePath: worktreePath, BaselineCommit: strings.Repeat("a", 40),
 			Origin: domain.WorktreeOriginAdopted, InitialStateSHA256: strings.Repeat("b", 64),
 			HeadMode: domain.WorktreeHeadDetached,

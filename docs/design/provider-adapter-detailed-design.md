@@ -266,7 +266,8 @@ Reviewer Startは、ADR-408 / ADR-507に従うimmutable Worktree snapshotとread
 - 既存Stop intentの再送ではE4 Stop lookupを先に実行する。STOPPEDかつStopped / Quiescent=trueなら同じintentのObservationを追加する。
 - active ClaimにDispatchStartがない場合、検証済みNOT_FOUNDで旧Claimを未dispatchとして解放し、新しいClaimを作成する。
 - DispatchStart済みClaimは、元のDispatchStart factに保存されたE4 Stop Dispatch Fencing evidenceを検証したうえで、DispatchStartより後に観測されたE4 Stop Lookup NOT_FOUNDとE4 Stop Dispatch Fencingが揃う場合だけ、旧Claimをfenced_not_foundとして解放し、新しいJob revisionをfencing tokenとして同じOperationID / SessionIDで再dispatchする。比較対象はLookup結果の受信時刻ではなくLookupの観測時刻とし、その時刻をrelease factへ保存する。Providerは古いtokenを拒否し、同一operationの重複要求を一つへ収束させる。
-- fencing capabilityがない、またはLookupがUNKNOWN / 不整合の場合はClaimを保持し、Runtime.Stopを再実行しない。ClaimのTTL・経過時間だけで解放しない。
+- DispatchStart前のClaimは、検証済みNOT_FOUNDで未dispatchを確認できた場合に解放できる。fencing capability不足を理由に保持するのはDispatchStart済みClaimに限る。
+- DispatchStart済みClaimでfencing capabilityがない、またはLookupがUNKNOWN / 不整合の場合はClaimを保持し、Runtime.Stopを再実行しない。ClaimのTTL・経過時間だけで解放しない。
 - Resume intentとCommand receiptをRuntime.Resumeより先に保存する。
 - E5 SessionReattach capability evidence、Principal / grant / Provider identity、既存accepted Session、configuration identityを検証する。
 - Resumeは同一OperationID / SessionIDで再照合し、Attached=trueとevidenceを得た場合だけATTACHED observationを追加する。曖昧な結果はUNKNOWNとして保存し、UNKNOWN解消時は同じOperationIDのterminal evidenceだけを許可する。
