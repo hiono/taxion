@@ -423,6 +423,14 @@ func TestTaskTurnDispatchCannotReleaseClaimAfterUnknownObservationAsDefinitiveFa
 
 func TestProviderStartDispatchBoundaryRequiresUnexpiredPermission(t *testing.T) {
 	job, execution, _, now := taskTurnFixture(t)
+	job.PlanningTurnIntents = nil
+	job.PlanningTurnObservations = nil
+	job.PlanningEffectDecisions = nil
+	job.PlanningResumeIntents = nil
+	job.PlanningResumeObservations = nil
+	job.PlanningResumeDispatchClaims = nil
+	job.PlanningResumeDispatchReleases = nil
+	job.PlanningBoundaryDecisions = nil
 	job.ProviderStartObservations = nil
 	job.Revision--
 	for _, intent := range job.ProviderStartIntents {
@@ -448,6 +456,14 @@ func TestProviderStartDispatchBoundaryRequiresUnexpiredPermission(t *testing.T) 
 	}
 
 	expiredJob, expiredExecution, expiredPermission, _ := taskTurnFixture(t)
+	expiredJob.PlanningTurnIntents = nil
+	expiredJob.PlanningTurnObservations = nil
+	expiredJob.PlanningEffectDecisions = nil
+	expiredJob.PlanningResumeIntents = nil
+	expiredJob.PlanningResumeObservations = nil
+	expiredJob.PlanningResumeDispatchClaims = nil
+	expiredJob.PlanningResumeDispatchReleases = nil
+	expiredJob.PlanningBoundaryDecisions = nil
 	expiredJob.ProviderStartObservations = nil
 	expiredJob.Revision--
 	for _, intent := range expiredJob.ProviderStartIntents {
@@ -460,6 +476,44 @@ func TestProviderStartDispatchBoundaryRequiresUnexpiredPermission(t *testing.T) 
 		"cmd_62626262626262626262626262626262", ProviderStartDispatching, "", "", "", false,
 		expiredPermission.ExpiresAt.Add(time.Second)); err == nil {
 		t.Fatal("expired ExecutionPermission crossed the Provider Start dispatch boundary")
+	}
+}
+
+func TestTaskTurnDispatchStartUsesResumeStateAtItsCreatedRevision(t *testing.T) {
+	job, execution, permission, now := taskTurnFixture(t)
+	turn, err := NewTaskTurnIntent(job, execution.ID, permission.ID, "session_task",
+		"cmd_63636363636363636363636363636363", strings.Repeat("6", 64), 40, now)
+	if err != nil {
+		t.Fatalf("NewTaskTurnIntent: %v", err)
+	}
+	job.TaskTurnIntents = append(job.TaskTurnIntents, turn)
+	job.Revision++
+	job.UpdatedAt = turn.CreatedAt
+	principalID := job.JobApprovals[len(job.JobApprovals)-1].ApproverPrincipalID
+	claim, err := NewTaskTurnDispatchClaim(job, turn.ID, principalID,
+		"cmd_64646464646464646464646464646464", now.Add(time.Minute))
+	if err != nil {
+		t.Fatalf("NewTaskTurnDispatchClaim: %v", err)
+	}
+	job.TaskTurnDispatchClaims = append(job.TaskTurnDispatchClaims, claim)
+	job.Revision++
+	job.UpdatedAt = claim.CreatedAt
+	started, err := NewTaskTurnDispatchObservation(job, claim.ID, principalID,
+		TaskTurnDispatchObservationCommandID(claim.ID, TaskTurnDispatchObservationStarted, ""),
+		TaskTurnDispatchObservationStarted, "", now.Add(2*time.Minute))
+	if err != nil {
+		t.Fatalf("NewTaskTurnDispatchObservation STARTED: %v", err)
+	}
+	job.TaskTurnDispatchObservations = append(job.TaskTurnDispatchObservations, started)
+	job.Revision++
+	job.UpdatedAt = started.CreatedAt
+
+	// A later Resume intent must not retroactively invalidate the earlier dispatch fact.
+	job.PlanningResumeIntents = append(job.PlanningResumeIntents, PlanningResumeIntent{
+		ID: "resume_later", RoleExecutionID: execution.ID, CreatedRevision: job.Revision + 1,
+	})
+	if err := started.Validate(job); err != nil {
+		t.Fatalf("historical dispatch observation was invalidated by a later Resume intent: %v", err)
 	}
 }
 
