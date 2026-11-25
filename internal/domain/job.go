@@ -59,7 +59,7 @@ type Job struct {
 	PlanningBoundaryDecisions             []PlanningBoundaryDecision  `json:"planning_boundary_decisions,omitempty"`
 	JobMessages                           []JobMessage                `json:"job_messages,omitempty"`
 	DeliveryObservations                  []DeliveryObservation       `json:"delivery_observations,omitempty"`
-	JobQuestionAuthorizations             []JobQuestionAuthorization `json:"job_question_authorizations,omitempty"`
+	JobQuestionAuthorizations             []JobQuestionAuthorization  `json:"job_question_authorizations,omitempty"`
 }
 
 type IntakeProvenance struct {
