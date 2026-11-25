@@ -24,6 +24,14 @@ func TestJobQuestionAuthorizationBindsOneApprovedQuestionAndPlannerSession(t *te
 	job.JobContractRevisions[latestRevision].Contract = canonicalContract
 	job.JobContractRevisions[latestRevision].CanonicalHash = canonicalHash
 	job.JobApprovals[len(job.JobApprovals)-1].CanonicalHash = canonicalHash
+	task.CanonicalHash = canonicalHash
+	task.TargetRepositories = append([]string(nil), canonicalContract.TargetRepositories...)
+	for i := range job.Tasks {
+		if job.Tasks[i].ID == task.ID {
+			job.Tasks[i] = task
+			break
+		}
+	}
 	contract = canonicalContract
 	if err := job.Validate(); err != nil {
 		t.Fatalf("Job.Validate with commit-pinned approved target: %v", err)
