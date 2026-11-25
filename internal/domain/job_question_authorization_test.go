@@ -7,6 +7,10 @@ import (
 )
 
 func TestJobQuestionAuthorizationBindsOneApprovedQuestionAndPlannerSession(t *testing.T) {
+	pinnedRepository := "https://example.com/team/repo.git@" + strings.Repeat("a", 40)
+	if !validRepositoryIdentity(pinnedRepository) {
+		t.Fatal("validRepositoryIdentity rejected an approved commit-pinned repository target")
+	}
 	job, task, now := approvedJobWithTaskForExecutionPermission(t)
 	permissionRequest := executionPermissionTestRequest(job, now)
 	permissionSHA, err := ExecutionPermissionRequestSHA256(permissionRequest)
