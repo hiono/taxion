@@ -12,6 +12,24 @@ func TestJobQuestionAuthorizationBindsOneApprovedQuestionAndPlannerSession(t *te
 		t.Fatal("exact JobContract membership rejected an approved commit-pinned repository target")
 	}
 	job, task, now := approvedJobWithTaskForExecutionPermission(t)
+	contract := job.JobContractRevisions[len(job.JobContractRevisions)-1].Contract
+	contract.TargetRepositories = []string{
+		"https://github.com/example/commit-pinned-repository@" + strings.Repeat("a", 40),
+	}
+	canonicalContract, canonicalHash, err := CanonicalizeJobContract(
+		contract, job.JobContractRevisions[len(job.JobContractRevisions)-1].CanonicalizationVersion,
+	)
+	if err != nil {
+		t.Fatalf("CanonicalizeJobContract with commit-pinned target: %v", err)
+	}
+	latestRevision := len(job.JobContractRevisions) - 1
+	job.JobContractRevisions[latestRevision].Contract = canonicalContract
+	job.JobContractRevisions[latestRevision].CanonicalHash = canonicalHash
+	job.JobApprovals[len(job.JobApprovals)-1].CanonicalHash = canonicalHash
+	contract = canonicalContract
+	if err := job.Validate(); err != nil {
+		t.Fatalf("Job.Validate with commit-pinned approved target: %v", err)
+	}
 	permissionRequest := executionPermissionTestRequest(job, now)
 	permissionSHA, err := ExecutionPermissionRequestSHA256(permissionRequest)
 	if err != nil {
