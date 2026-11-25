@@ -590,6 +590,13 @@ func openRegularWorktreeFile(root *os.Root, relative string) (*os.File, os.FileI
 	if root == nil || relative == "" || filepath.IsAbs(relative) || filepath.Clean(relative) != relative {
 		return nil, nil, errors.New("Worktree file path must be relative to its root")
 	}
+	initialInfo, err := root.Lstat(relative)
+	if err != nil {
+		return nil, nil, err
+	}
+	if !initialInfo.Mode().IsRegular() {
+		return nil, nil, errors.New("Worktree file is not a regular file")
+	}
 	file, err := root.Open(relative)
 	if err != nil {
 		return nil, nil, err
