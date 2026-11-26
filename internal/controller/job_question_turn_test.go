@@ -26,7 +26,7 @@ type jobQuestionTurnFixture struct {
 	controller                                                                        *JobQuestionTurnController
 	runtime                                                                           *fakePlanningProviderRuntime
 	database                                                                          *store.Store
-	jobID, authorizationID, questionID, coderID, coderSessionID, plannerID, sessionID string
+	jobID, authorizationID, questionID, coderID, plannerID, sessionID string
 }
 
 func newJobQuestionTurnFixture(t *testing.T) jobQuestionTurnFixture {
@@ -104,17 +104,6 @@ func newJobQuestionTurnFixture(t *testing.T) jobQuestionTurnFixture {
 	job, err = database.GetJob(ctx, jobID)
 	if err != nil {
 		t.Fatalf("GetJob before question: %v", err)
-	}
-	var coderSessionID string
-	for _, observation := range job.ProviderStartObservations {
-		if observation.OperationID == coderStart.RoleExecution.ProviderStartOperationID &&
-			observation.Status == domain.ProviderStartAccepted {
-			coderSessionID = observation.ProviderSessionID
-			break
-		}
-	}
-	if coderSessionID == "" {
-		t.Fatal("accepted Coder Provider Session not found")
 	}
 	plannerID := ""
 	for _, execution := range job.RoleExecutions {
@@ -202,7 +191,7 @@ func newJobQuestionTurnFixture(t *testing.T) jobQuestionTurnFixture {
 	return jobQuestionTurnFixture{
 		controller: controller, runtime: runtime, database: database, jobID: jobID,
 		authorizationID: authorization.ID, questionID: question.ID,
-		coderID: coderStart.RoleExecution.ID, coderSessionID: coderSessionID,
+		coderID: coderStart.RoleExecution.ID,
 		plannerID: plannerID, sessionID: sessionID,
 	}
 }
@@ -478,15 +467,20 @@ func TestOrchestratorContinuesAfterFailedQuestionAndCollectsErrors(t *testing.T)
 	if err != nil {
 		t.Fatalf("NewCommunicationController: %v", err)
 	}
-	secondQuestion, err := communication.SendFromRole(context.Background(), RoleMessageRequest{
-		JobID: fixture.jobID, RoleExecutionID: fixture.coderID,
-		ProviderSessionID: fixture.coderSessionID,
-		CommandID:         "cmd_85858585858585858585858585858585",
-		Recipient:         domain.ActorRef{Kind: domain.ActorPlanner, ID: fixture.plannerID},
-		Body:              "Second independent question",
-	})
+	job, err := fixture.database.GetJob(context.Background(), fixture.jobID)
 	if err != nil {
-		t.Fatalf("SendFromRole second question: %v", err)
+		t.Fatalf("GetJob before second question: %v", err)
+	}
+	_, secondQuestion, err := fixture.database.AddJobMessage(
+		context.Background(), fixture.jobID, job.Revision, "cmd_85858585858585858585858585858585",
+		domain.JobMessageRequest{
+			Sender: domain.ActorRef{Kind: domain.ActorCoder, ID: fixture.coderID},
+			Recipient: domain.ActorRef{Kind: domain.ActorPlanner, ID: fixture.plannerID},
+			Body: "Second independent question",
+		},
+	)
+	if err != nil {
+		t.Fatalf("AddJobMessage second question: %v", err)
 	}
 	authorization, err := NewJobQuestionAuthorizationController(
 		fixture.database, fixedQuestionTurnContextResolver{
@@ -549,8 +543,8 @@ func TestOrchestratorContinuesAfterFailedQuestionAndCollectsErrors(t *testing.T)
 		t.Fatalf("failed question blocked independent inbox processing: outcomes=%#v sends=%d err=%v",
 			outcomes, fixture.runtime.sendCalls, err)
 	}
-	if outcomes[1].Reply.Message.ReplyToMessageID != secondQuestion.Message.ID {
-		t.Fatalf("second question reply correlation = %q, want %q", outcomes[1].Reply.Message.ReplyToMessageID, secondQuestion.Message.ID)
+	if outcomes[1].Reply.Message.ReplyToMessageID != secondQuestion.ID {
+		t.Fatalf("second question reply correlation = %q, want %q", outcomes[1].Reply.Message.ReplyToMessageID, secondQuestion.ID)
 	}
 	job, err := fixture.database.GetJob(context.Background(), fixture.jobID)
 	if err != nil {
