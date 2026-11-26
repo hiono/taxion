@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hiono/taxion/internal/auth"
 	"github.com/hiono/taxion/internal/domain"
 	"github.com/hiono/taxion/internal/provider"
 	"github.com/hiono/taxion/internal/store"
@@ -271,15 +272,20 @@ func TestCommunicationControllerPersistsCoderPlannerQuestionAndAnswer(t *testing
 	if err != nil {
 		t.Fatalf("StartTaskExecution Reviewer: %v", err)
 	}
-	runtime.startResult = provider.StartResult{
-		OperationID: reviewerPermission.OperationID, SessionID: "session_reviewer",
-		ReceiptID: "receipt_reviewer", EvidenceSHA256: strings.Repeat("f", 64),
-	}
-	reviewerStart, _, err := providerController.DispatchTaskExecution(
-		context.Background(), jobID, reviewerExecution.ID, reviewerPermission.ID, reviewerPermissionRequest,
-	)
+	// The mock Provider accepts a Reviewer Session; this test exercises message routing,
+	// while production Reviewer dispatch remains guarded by the Worktree boundary.
+	job, err = database.GetJob(context.Background(), jobID)
 	if err != nil {
-		t.Fatalf("DispatchTaskExecution Reviewer: %v", err)
+		t.Fatalf("GetJob before mock Reviewer acceptance: %v", err)
+	}
+	reviewerSessionID := "session_reviewer"
+	_, reviewerObservation, err := database.AddProviderStartObservation(
+		context.Background(), jobID, job.Revision, reviewerExecution.ProviderStartOperationID,
+		"cmd_72727272727272727272727272727272", domain.ProviderStartAccepted,
+		reviewerSessionID, "receipt_reviewer", strings.Repeat("f", 64), false, auth.AuthenticatedPrincipal{},
+	)
+	if err != nil || reviewerObservation.Status != domain.ProviderStartAccepted {
+		t.Fatalf("record mock Reviewer Provider acceptance: %#v %v", reviewerObservation, err)
 	}
 
 	coderOutput, err := orchestrator.SendRoleMessage(context.Background(), RoleMessageRequest{
@@ -294,12 +300,12 @@ func TestCommunicationControllerPersistsCoderPlannerQuestionAndAnswer(t *testing
 	}
 	if len(coderOutput.ResumedContexts) != 1 ||
 		coderOutput.ResumedContexts[0].RoleExecution.ID != reviewerExecution.ID ||
-		coderOutput.ResumedContexts[0].ProviderSessionID != reviewerStart.ProviderSessionID {
+		coderOutput.ResumedContexts[0].ProviderSessionID != reviewerSessionID {
 		t.Fatalf("Coder output did not route to the independent Reviewer Session: %#v", coderOutput.ResumedContexts)
 	}
 
 	review, err := orchestrator.SendRoleMessage(context.Background(), RoleMessageRequest{
-		JobID: jobID, RoleExecutionID: reviewerExecution.ID, ProviderSessionID: reviewerStart.ProviderSessionID,
+		JobID: jobID, RoleExecutionID: reviewerExecution.ID, ProviderSessionID: reviewerSessionID,
 		CommandID:        "cmd_69696969696969696969696969696969",
 		Recipient:        domain.ActorRef{Kind: domain.ActorCoder, ID: coderExecution.ID},
 		ReplyToMessageID: coderOutput.Message.Message.ID,
@@ -326,12 +332,12 @@ func TestCommunicationControllerPersistsCoderPlannerQuestionAndAnswer(t *testing
 	}
 	if len(correction.ResumedContexts) != 1 ||
 		correction.ResumedContexts[0].RoleExecution.ID != reviewerExecution.ID ||
-		correction.ResumedContexts[0].ProviderSessionID != reviewerStart.ProviderSessionID {
+		correction.ResumedContexts[0].ProviderSessionID != reviewerSessionID {
 		t.Fatalf("Coder correction did not restore the independent Reviewer Session: %#v", correction.ResumedContexts)
 	}
 
 	rereview, err := orchestrator.SendRoleMessage(context.Background(), RoleMessageRequest{
-		JobID: jobID, RoleExecutionID: reviewerExecution.ID, ProviderSessionID: reviewerStart.ProviderSessionID,
+		JobID: jobID, RoleExecutionID: reviewerExecution.ID, ProviderSessionID: reviewerSessionID,
 		CommandID:        "cmd_71717171717171717171717171717171",
 		Recipient:        domain.ActorRef{Kind: domain.ActorCoder, ID: coderExecution.ID},
 		ReplyToMessageID: correction.Message.Message.ID,

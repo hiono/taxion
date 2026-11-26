@@ -137,7 +137,7 @@ func (c *OrchestratorController) ProcessPlannerInbox(
 		if err := job.Validate(); err != nil {
 			return outcomes, fmt.Errorf("validate Job before routing Planner question: %w", err)
 		}
-		if questionHasPlannerReply(job, question) {
+		if questionHasPlannerReply(job, question) && !questionHasTurnIntent(job, question.ID) {
 			continue
 		}
 		grant, found := questionAuthorizationForMessage(job, question.ID)
@@ -190,6 +190,15 @@ func questionAuthorizationForMessage(
 		}
 	}
 	return latest, found
+}
+
+func questionHasTurnIntent(job domain.Job, questionMessageID string) bool {
+	for _, intent := range job.JobQuestionTurnIntents {
+		if intent.QuestionMessageID == questionMessageID {
+			return true
+		}
+	}
+	return false
 }
 
 func questionHasPlannerReply(job domain.Job, question domain.JobMessage) bool {
