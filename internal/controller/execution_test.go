@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"strings"
+
+	"github.com/hiono/taxion/internal/auth"
 	"testing"
 	"time"
 
@@ -45,7 +47,20 @@ func (a *fakeExecutionEffectAssessor) Assess(
 
 func approvedExecutionControllerFixture(t *testing.T) (*store.Store, string, domain.JobContractRevision) {
 	t.Helper()
-	_, database, principal, jobID, _, sourceResult, _ := startContractPlanner(t)
+	return approvedExecutionControllerFixtureAtPath(t, "")
+}
+
+func approvedExecutionControllerFixtureAtPath(t *testing.T, databasePath string) (*store.Store, string, domain.JobContractRevision) {
+	t.Helper()
+	var database *store.Store
+	var principal auth.AuthenticatedPrincipal
+	var jobID string
+	var sourceResult domain.ProviderResultObservation
+	if databasePath == "" {
+		_, database, principal, jobID, _, sourceResult, _ = startContractPlanner(t)
+	} else {
+		_, database, principal, jobID, _, sourceResult, _ = startContractPlannerWithResultContentAtPath(t, "", databasePath)
+	}
 	ctx := context.Background()
 	jobContractController, err := NewJobContractController(database)
 	if err != nil {
@@ -71,7 +86,12 @@ func approvedExecutionControllerFixture(t *testing.T) (*store.Store, string, dom
 
 func approvedExecutionPermissionControllerFixture(t *testing.T) (*store.Store, string, domain.JobContractRevision, domain.Task) {
 	t.Helper()
-	database, jobID, revision := approvedExecutionControllerFixture(t)
+	return approvedExecutionPermissionControllerFixtureAtPath(t, "")
+}
+
+func approvedExecutionPermissionControllerFixtureAtPath(t *testing.T, databasePath string) (*store.Store, string, domain.JobContractRevision, domain.Task) {
+	t.Helper()
+	database, jobID, revision := approvedExecutionControllerFixtureAtPath(t, databasePath)
 	taskController, err := NewTaskController(database)
 	if err != nil {
 		t.Fatalf("NewTaskController: %v", err)

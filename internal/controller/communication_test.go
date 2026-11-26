@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -56,7 +57,8 @@ func TestPersistMessageReplaysConcurrentIdenticalCommandAfterRevisionConflict(t 
 }
 
 func TestCommunicationControllerPersistsCoderPlannerQuestionAndAnswer(t *testing.T) {
-	database, jobID, revision, task := approvedExecutionPermissionControllerFixture(t)
+	databasePath := filepath.Join(t.TempDir(), "communication.sqlite")
+	database, jobID, revision, task := approvedExecutionPermissionControllerFixtureAtPath(t, databasePath)
 	runtime := &fakePlanningProviderRuntime{identity: provider.Identity{
 		ProviderID: "provider.test", AccountID: "account.primary",
 		ConfigurationSHA256: revision.Contract.ConfigurationSHA256,
@@ -356,6 +358,33 @@ func TestCommunicationControllerPersistsCoderPlannerQuestionAndAnswer(t *testing
 	}
 	if len(persisted.JobMessages) != 6 {
 		t.Fatalf("persisted Role conversation messages=%d, want 6", len(persisted.JobMessages))
+	}
+
+	if err := database.Close(); err != nil {
+		t.Fatalf("close SQLite database before conversation recovery: %v", err)
+	}
+	reopened, err := store.Open(context.Background(), databasePath)
+	if err != nil {
+		t.Fatalf("reopen SQLite database after Role conversation: %v", err)
+	}
+	defer reopened.Close()
+	reopenedCommunication, err := NewCommunicationController(reopened)
+	if err != nil {
+		t.Fatalf("NewCommunicationController after SQLite restart: %v", err)
+	}
+	restoredCoder, err := reopenedCommunication.ContextForMessage(
+		context.Background(), jobID, rereview.Message.Message.ID,
+	)
+	if err != nil {
+		t.Fatalf("restore Coder conversation after SQLite restart: %v", err)
+	}
+	if restoredCoder.RoleExecution.ID != coderExecution.ID ||
+		restoredCoder.ProviderSessionID != coderStart.ProviderSessionID ||
+		len(restoredCoder.Messages) != 6 ||
+		restoredCoder.Messages[0].ID != question.Message.ID ||
+		restoredCoder.Messages[1].ID != answer.Message.ID ||
+		restoredCoder.Messages[5].ID != rereview.Message.Message.ID {
+		t.Fatalf("SQLite restart did not restore the original Coder RoleExecution / Session / conversation: %#v", restoredCoder)
 	}
 }
 
