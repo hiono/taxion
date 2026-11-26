@@ -183,6 +183,14 @@ func (s *Store) initialize(ctx context.Context) error {
 		}
 	}
 	if version < schemaVersion {
+		// This database trigger also fences old processes that opened the prior
+		// schema before migration and would otherwise discard unknown aggregate facts.
+		if _, err := tx.ExecContext(ctx, "DROP TRIGGER IF EXISTS job_aggregates_preserve_v2_facts"); err != nil {
+			return fmt.Errorf("replace JobAggregate fact-preservation trigger: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, preserveJobAggregateFactsTrigger); err != nil {
+			return fmt.Errorf("install JobAggregate fact-preservation trigger: %w", err)
+		}
 		if _, err := tx.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d", schemaVersion)); err != nil {
 			return fmt.Errorf("upgrade schema version: %w", err)
 		}
