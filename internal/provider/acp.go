@@ -601,35 +601,32 @@ func (p *acpProcess) close(ctx context.Context) error {
 		return ErrProviderInvalidRequest
 	}
 	_ = p.stdin.Close()
-	wait := 2 * time.Second
-	if deadline, ok := ctx.Deadline(); ok {
-		remaining := time.Until(deadline)
-		if remaining < wait {
-			wait = remaining
-		}
-	}
-	if wait <= 0 {
-		if p.cmd.Process != nil {
+	kill := func() {
+		if p.cmd != nil && p.cmd.Process != nil {
 			_ = p.cmd.Process.Kill()
 		}
-		<-p.done
-		return ctx.Err()
 	}
-	timer := time.NewTimer(wait)
+	if _, hasDeadline := ctx.Deadline(); hasDeadline {
+		select {
+		case <-p.done:
+			return nil
+		case <-ctx.Done():
+			kill()
+			<-p.done
+			return ctx.Err()
+		}
+	}
+	timer := time.NewTimer(2 * time.Second)
 	defer timer.Stop()
 	select {
 	case <-p.done:
 		return nil
 	case <-ctx.Done():
-		if p.cmd.Process != nil {
-			_ = p.cmd.Process.Kill()
-		}
+		kill()
 		<-p.done
 		return ctx.Err()
 	case <-timer.C:
-		if p.cmd.Process != nil {
-			_ = p.cmd.Process.Kill()
-		}
+		kill()
 		<-p.done
 		return nil
 	}

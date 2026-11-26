@@ -4,7 +4,9 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -258,5 +260,98 @@ func TestACPFakePeerThroughProviderRuntime(t *testing.T) {
 	}
 	if turnResult.Output != "fixed ACP response" {
 		t.Fatalf("unexpected Runtime.Send output: %q", turnResult.Output)
+	}
+}
+
+
+type acpTestWriter struct {
+	strings.Builder
+}
+
+func (*acpTestWriter) Close() error { return nil }
+
+func TestACPProcessRespondsToUnknownServerRequest(t *testing.T) {
+	writer := &acpTestWriter{}
+	process := &acpProcess{
+		stdin: writer, updates: make(chan json.RawMessage, 1),
+		done: make(chan struct{}), failed: make(chan struct{}),
+	}
+	request := `{"jsonrpc":"2.0","id":1,"method":"unknown/request"}` + "\n"
+	process.read(strings.NewReader(request))
+	var response struct {
+		Error struct {
+			Code int `json:"code"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(writer.String())), &response); err != nil {
+		t.Fatalf("decode unknown-request response: %v", err)
+	}
+	if response.Error.Code != -32601 {
+		t.Fatalf("unknown request returned error code %d, want -32601", response.Error.Code)
+	}
+}
+
+func TestACPProcessFailsClosedOnMalformedJSONAndQueueOverflow(t *testing.T) {
+	t.Run("malformed JSON", func(t *testing.T) {
+		process := &acpProcess{
+			updates: make(chan json.RawMessage, 1),
+			done: make(chan struct{}), failed: make(chan struct{}),
+		}
+		process.read(strings.NewReader("{invalid}\n"))
+		if process.failure() == nil {
+			t.Fatal("malformed ACP message did not fail the process")
+		}
+	})
+	t.Run("notification queue overflow", func(t *testing.T) {
+		process := &acpProcess{
+			updates: make(chan json.RawMessage, 1),
+			done: make(chan struct{}), failed: make(chan struct{}),
+		}
+		notification := `{"jsonrpc":"2.0","method":"session/update"}` + "\n"
+		process.read(strings.NewReader(notification + notification))
+		if process.failure() == nil {
+			t.Fatal("ACP notification queue overflow was silently accepted")
+		}
+	})
+}
+
+func TestACPBlockingHelperProcess(t *testing.T) {
+	if os.Getenv("TAXION_ACP_BLOCK_HELPER") != "1" {
+		return
+	}
+	for {
+		time.Sleep(time.Hour)
+	}
+}
+
+func TestACPProcessCloseHonorsContextDeadline(t *testing.T) {
+	command := exec.Command(os.Args[0], "-test.run=^TestACPBlockingHelperProcess$")
+	command.Env = []string{"TAXION_ACP_BLOCK_HELPER=1"}
+	stdin, err := command.StdinPipe()
+	if err != nil {
+		t.Fatalf("StdinPipe: %v", err)
+	}
+	if err := command.Start(); err != nil {
+		t.Fatalf("start blocking ACP helper: %v", err)
+	}
+	process := &acpProcess{
+		cmd: command, stdin: stdin, updates: make(chan json.RawMessage, 1),
+		done: make(chan struct{}), failed: make(chan struct{}),
+	}
+	go func() {
+		_ = command.Wait()
+		close(process.done)
+	}()
+	defer func() { _ = process.close(context.Background()) }()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	started := time.Now()
+	err = process.close(ctx)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("close error = %v, want context deadline exceeded", err)
+	}
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("close exceeded context deadline: %s", elapsed)
 	}
 }
