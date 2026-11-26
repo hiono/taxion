@@ -11,7 +11,6 @@ import (
 	"github.com/hiono/taxion/internal/store"
 )
 
-
 type conflictReplayCommunicationStore struct {
 	job     domain.Job
 	message domain.JobMessage
@@ -44,9 +43,9 @@ func TestPersistMessageReplaysConcurrentIdenticalCommandAfterRevisionConflict(t 
 		t.Fatalf("NewCommunicationController: %v", err)
 	}
 	outcome, err := controller.persistMessage(context.Background(), fake.job.ID, commandID, domain.JobMessageRequest{
-		Sender: domain.ActorRef{Kind: domain.ActorCoder, ID: "role_coder"},
+		Sender:    domain.ActorRef{Kind: domain.ActorCoder, ID: "role_coder"},
 		Recipient: domain.ActorRef{Kind: domain.ActorPlanner, ID: "role_planner"},
-		Body: "retry the same command",
+		Body:      "retry the same command",
 	})
 	if err != nil {
 		t.Fatalf("persistMessage() error = %v", err)
