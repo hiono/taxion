@@ -130,6 +130,36 @@ func (s *Store) initialize(ctx context.Context) error {
 		)`,
 		`CREATE INDEX IF NOT EXISTS job_aggregates_updated_at
 			ON job_aggregates(updated_at DESC, job_id ASC)`,
+		`CREATE TRIGGER IF NOT EXISTS protect_job_v2_append_only_facts
+			BEFORE UPDATE OF payload_json ON job_aggregates
+			WHEN
+				COALESCE(json_array_length(NEW.payload_json, '$.job_messages'), 0) <
+					COALESCE(json_array_length(OLD.payload_json, '$.job_messages'), 0)
+				OR EXISTS (
+					SELECT 1 FROM json_each(OLD.payload_json, '$.job_messages') AS previous
+					WHERE json(json_extract(
+						NEW.payload_json, '$.job_messages[' || previous.key || ']'
+					)) IS NOT json(previous.value)
+				)
+				OR COALESCE(json_array_length(NEW.payload_json, '$.delivery_observations'), 0) <
+					COALESCE(json_array_length(OLD.payload_json, '$.delivery_observations'), 0)
+				OR EXISTS (
+					SELECT 1 FROM json_each(OLD.payload_json, '$.delivery_observations') AS previous
+					WHERE json(json_extract(
+						NEW.payload_json, '$.delivery_observations[' || previous.key || ']'
+					)) IS NOT json(previous.value)
+				)
+				OR COALESCE(json_array_length(NEW.payload_json, '$.job_question_authorizations'), 0) <
+					COALESCE(json_array_length(OLD.payload_json, '$.job_question_authorizations'), 0)
+				OR EXISTS (
+					SELECT 1 FROM json_each(OLD.payload_json, '$.job_question_authorizations') AS previous
+					WHERE json(json_extract(
+						NEW.payload_json, '$.job_question_authorizations[' || previous.key || ']'
+					)) IS NOT json(previous.value)
+				)
+			BEGIN
+				SELECT RAISE(ABORT, 'JobAggregate update would remove or modify append-only v2 facts');
+			END`,
 		`CREATE TABLE IF NOT EXISTS job_commands (
 			command_id TEXT PRIMARY KEY,
 			job_id TEXT NOT NULL REFERENCES job_aggregates(job_id),
