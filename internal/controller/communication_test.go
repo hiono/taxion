@@ -20,7 +20,7 @@ func TestCommunicationControllerPersistsCoderPlannerQuestionAndAnswer(t *testing
 	now := time.Now().UTC().Round(0)
 	runtime.capabilities = provider.Capabilities{
 		Identity: runtime.identity, StartIdempotency: true,
-		Evidence:   []provider.CapabilityEvidence{{
+		Evidence: []provider.CapabilityEvidence{{
 			Capability: provider.CapabilityStartIdempotency, Identity: runtime.identity,
 			TestID: "test_start_idempotency", EvidenceSHA256: strings.Repeat("a", 64),
 			EvidenceLevel: provider.EvidenceSynthetic, VerifiedAt: now,
@@ -39,8 +39,8 @@ func TestCommunicationControllerPersistsCoderPlannerQuestionAndAnswer(t *testing
 		Role: domain.RoleCoder, Effect: "repository.write",
 		Resource:   revision.Contract.TargetRepositories[0],
 		ProviderID: runtime.identity.ProviderID, AccountID: runtime.identity.AccountID,
-		ConfigurationSHA256:    revision.Contract.ConfigurationSHA256,
-		ReservedTurns: 1, ReservedTokens: 100, ExpiresAt: now.Add(30 * time.Minute),
+		ConfigurationSHA256: revision.Contract.ConfigurationSHA256,
+		ReservedTurns:       1, ReservedTokens: 100, ExpiresAt: now.Add(30 * time.Minute),
 	}
 	_, permission, err := executionController.Authorize(context.Background(), permissionRequest)
 	if err != nil {
