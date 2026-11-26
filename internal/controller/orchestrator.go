@@ -166,9 +166,9 @@ func questionAuthorizationDeadline(job domain.Job, plannerRoleExecutionID string
 }
 
 func orchestratorQuestionAuthorizationCommandID(questionMessageID string) string {
-	return "cmd_" + sha256String("taxion:orchestrator:question-authorization:v1:"+questionMessageID)[:32]
+	return "cmd_" + sha256String("taxion:orchestrator:question-authorization:v1:" + questionMessageID)[:32]
 }
 
 func orchestratorQuestionTurnCommandID(authorizationID string) string {
-	return "cmd_" + sha256String("taxion:orchestrator:question-turn:v1:"+authorizationID)[:32]
+	return "cmd_" + sha256String("taxion:orchestrator:question-turn:v1:" + authorizationID)[:32]
 }

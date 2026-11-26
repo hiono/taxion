@@ -307,7 +307,6 @@ func TestJobQuestionTurnControllerRejectsProviderWithoutSafeSend(t *testing.T) {
 	}
 }
 
-
 func TestOrchestratorRoutesPlannerInboxAndReturnsAnswerToOriginalCoder(t *testing.T) {
 	fixture := newJobQuestionTurnFixture(t)
 	communication, err := NewCommunicationController(fixture.database)
@@ -322,7 +321,7 @@ func TestOrchestratorRoutesPlannerInboxAndReturnsAnswerToOriginalCoder(t *testin
 		fixture.database, fixedQuestionTurnContextResolver{
 			context: QuestionReadOnlyContext{
 				RepositoryID: "https://github.com/example/project",
-				Boundary: boundary,
+				Boundary:     boundary,
 			},
 		},
 	)
