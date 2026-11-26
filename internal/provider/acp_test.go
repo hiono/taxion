@@ -691,3 +691,51 @@ func TestACPAdapterAcceptsFinalResponseBeforePeerEOF(t *testing.T) {
 		t.Fatalf("Start lost final response sent before peer EOF: %v", err)
 	}
 }
+
+func TestACPAdapterResultReturnsInitialStartPromptOutput(t *testing.T) {
+	t.Setenv("TAXION_ACP_HELPER", "1")
+	adapter := newACPTestAdapter(t)
+	defer adapter.Close()
+	request := newACPTestStartRequest("start", "role_execution_1")
+	start, err := adapter.Start(context.Background(), request, nil)
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	result, err := adapter.Result(context.Background(), ResultRequest{
+		OperationID: request.OperationID, SessionID: start.SessionID,
+	}, nil)
+	if err != nil {
+		t.Fatalf("Result for initial Start prompt: %v", err)
+	}
+	if !result.Final || result.Content != "fixed ACP response" {
+		t.Fatalf("initial Start result = %#v", result)
+	}
+}
+
+func TestACPAdapterStopDoesNotWaitForBlockedWrite(t *testing.T) {
+	reader, writer := io.Pipe()
+	defer reader.Close()
+	process := newACPProcess(nil, writer)
+	<-process.writeGate // Simulate a concurrent write holding the transport gate.
+	session := &acpSession{
+		roleExecutionID: "role_execution_1",
+		sessionID:       "session_1",
+		process:         process,
+	}
+	adapter := &ACPAdapter{
+		byRole: map[string]*acpSession{session.roleExecutionID: session},
+		byID:   map[string]*acpSession{session.sessionID: session},
+		byOp:   make(map[string]StartResult),
+	}
+	started := time.Now()
+	_, err := adapter.Stop(context.Background(), StopRequest{
+		OperationID: "operation_stop_1", SessionID: session.sessionID,
+	}, nil)
+	var operationErr *OperationError
+	if !errors.As(err, &operationErr) || operationErr.Class != FailureAmbiguous {
+		t.Fatalf("Stop error = %v, want ambiguous outcome", err)
+	}
+	if elapsed := time.Since(started); elapsed > 500*time.Millisecond {
+		t.Fatalf("Stop waited for blocked transport write: %s", elapsed)
+	}
+}

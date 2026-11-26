@@ -48,7 +48,6 @@ type ACPAdapter struct {
 
 type acpSession struct {
 	roleExecutionID string
-	processID       int
 	sessionID       string
 	process         *acpProcess
 	turnGate        chan struct{}
@@ -234,7 +233,6 @@ func (a *ACPAdapter) Start(ctx context.Context, request StartRequest, _ Credenti
 	turnGate <- struct{}{}
 	session := &acpSession{
 		roleExecutionID: request.RoleExecutionID,
-		processID:       process.cmd.Process.Pid,
 		sessionID:       sessionReply.SessionID,
 		process:         process,
 		turnGate:        turnGate,
