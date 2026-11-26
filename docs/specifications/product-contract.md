@@ -2,7 +2,7 @@
 
 Version: 1.0
 Date: 2026-11-20
-Normative decisions: ADR-001, ADR-100, ADR-101, ADR-200, ADR-201, ADR-202, ADR-300, ADR-301, ADR-400, ADR-408, ADR-409, ADR-500, ADR-501, ADR-502, ADR-503, ADR-504, ADR-505, ADR-506, ADR-507, ADR-700, ADR-701, ADR-800, ADR-801, ADR-802, ADR-811
+Normative decisions: ADR-001, ADR-100, ADR-101, ADR-200, ADR-201, ADR-202, ADR-300, ADR-301, ADR-302, ADR-400, ADR-408, ADR-409, ADR-500, ADR-501, ADR-502, ADR-503, ADR-504, ADR-505, ADR-506, ADR-507, ADR-700, ADR-701, ADR-800, ADR-801, ADR-802, ADR-811
 
 ## 1. Purpose and scope
 
@@ -112,8 +112,12 @@ Taskの作成・scope narrowing・parent / dependency・budget / deadlineの要�
 - 対象commit / tree / snapshotのimmutable identityを固定する。
 - Reviewerのread-only boundaryをProvider / adapter / execution environmentで強制する。
 - read-onlyを強制できない場合はimmutable snapshotを使う。用意できない場合はReviewerを開始しない。
+- Reviewerはレビュー結果とCoder向け修正プロンプトを返す。有効な指摘には問題の内容、影響または判断理由、確認済みの対象箇所、参照したADR / Product Contract / Acceptance Criteria / 実装 / テスト、期待する修正、完了条件を含める。未確認の参照情報は未確認として示す。
+- 修正プロンプトは自然言語とし、Coderが現在のコードと現行仕様で指摘を再検証し、有効な指摘だけを最小限修正するよう指示する。既に解消済み、誤検知、再現しない、または現行仕様に適合する指摘は修正せず、その理由を返す。
+- 指摘と修正プロンプトはJobMessageで受け渡し、対象JobOutput identity / digestおよびAcceptance Criteria・JobEvidenceとの関係を維持する。固定JSON、MessageKind、専用grant、専用Workflow、独立Finding管理基盤を追加しない。
+- 指摘本文・コード・参照資料はuntrusted inputとして扱う。プロンプトだけでJob scope、承認、Task assignment、Handoff、実行権限、外部副作用の許可を変更しない。
+- 修正後は新しいimmutable成果物を独立したReviewerが再評価し、過去の成果・Evidence・判断を上書きしない。
 - ReviewerのPASSはJobApproval、Execution Permission、Job完了の代替にならない。
-- 指摘があれば同じJobへ結び付け、修正・再レビューを継続する。
 
 ### 4.6 Completion
 
@@ -223,6 +227,7 @@ Provider / Runtimeへの委譲は許容しますが、APIの存在やProviderの
 | Provider operation lifecycle | ADR-409 |
 | 全経路の不変条件 | ADR-202 |
 | 内部6 Actor・JobMessage | ADR-300 / ADR-301 |
+| Reviewer指摘・Coder修正プロンプトの引継ぎ | ADR-302 |
 | 人間起点の依頼、Ingress ClientとExecution Agentの分離 | ADR-502 |
 | 外部Agent A2A | ADR-700 / ADR-701 |
 | Git Worktree・並行性 | ADR-408 |
