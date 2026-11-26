@@ -270,3 +270,23 @@ func TestStartAndTurnRequestsValidateImmutablePromptAndContextDigests(t *testing
 		t.Fatal("Turn request accepted prompt content that differs from its immutable digest")
 	}
 }
+
+
+func TestTurnRequestValidatesReadOnlyContextBoundary(t *testing.T) {
+	prompt := "Answer using the authorized context only"
+	request := TurnRequest{
+		OperationID: "provider_turn_boundary", TurnID: "planning_turn_boundary",
+		SessionID: "session_boundary", PromptSHA256: sha256Hex(prompt), Prompt: prompt,
+		ReadOnlyBoundary: ReadOnlyContextBoundary{
+			Mode: "snapshot", Reference: "snapshot_boundary", SHA256: strings.Repeat("c", 64),
+		},
+		MaxTokens: 100, Deadline: time.Now().UTC().Add(time.Hour),
+	}
+	if err := request.Validate(); err != nil {
+		t.Fatalf("valid read-only boundary: %v", err)
+	}
+	request.ReadOnlyBoundary.Mode = "write"
+	if err := request.Validate(); err == nil {
+		t.Fatal("Turn request accepted a non-read-only boundary mode")
+	}
+}

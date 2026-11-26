@@ -349,14 +349,29 @@ type StartResult struct {
 	EvidenceSHA256 string
 }
 
+type ReadOnlyContextBoundary struct {
+	Mode      string
+	Reference string
+	SHA256    string
+}
+
+func (b ReadOnlyContextBoundary) Validate() error {
+	if (b.Mode != "snapshot" && b.Mode != "documents") ||
+		!validIdentifier(b.Reference) || !validSHA256(b.SHA256) {
+		return errors.New("Provider Turn read-only context boundary is invalid")
+	}
+	return nil
+}
+
 type TurnRequest struct {
-	OperationID  string
-	TurnID       string
-	SessionID    string
-	PromptSHA256 string
-	Prompt       string
-	MaxTokens    uint64
-	Deadline     time.Time
+	OperationID      string
+	TurnID           string
+	SessionID        string
+	PromptSHA256     string
+	Prompt           string
+	ReadOnlyBoundary ReadOnlyContextBoundary
+	MaxTokens        uint64
+	Deadline         time.Time
 }
 
 func (r TurnRequest) Validate() error {
@@ -364,6 +379,11 @@ func (r TurnRequest) Validate() error {
 		!validSHA256(r.PromptSHA256) || r.Prompt == "" || sha256Hex(r.Prompt) != r.PromptSHA256 ||
 		r.MaxTokens == 0 || r.Deadline.IsZero() {
 		return errors.New("Provider Turn request identity, prompt digest, or token budget is invalid")
+	}
+	if r.ReadOnlyBoundary != (ReadOnlyContextBoundary{}) {
+		if err := r.ReadOnlyBoundary.Validate(); err != nil {
+			return err
+		}
 	}
 	return nil
 }
