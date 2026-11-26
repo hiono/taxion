@@ -10,9 +10,9 @@ import (
 )
 
 type fakeACPToolCallEvaluator struct {
-	effect string
+	effect   string
 	resource string
-	err error
+	err      error
 }
 
 func (e *fakeACPToolCallEvaluator) Evaluate(_ context.Context, _ provider.ACPToolPermissionRequest) (string, string, error) {
@@ -26,24 +26,34 @@ func TestACPExecutionPermissionAuthorizerRevalidatesExactTaskAuthority(t *testin
 		Reversible: true, Mutating: true, ValidUntil: now.Add(45 * time.Minute),
 	}}
 	executionController, err := NewExecutionController(database, assessor)
-	if err != nil { t.Fatalf("NewExecutionController: %v", err) }
+	if err != nil {
+		t.Fatalf("NewExecutionController: %v", err)
+	}
 	executionController.now = func() time.Time { return now }
 	permissionRequest := domain.ExecutionPermissionRequest{
 		JobID: jobID, TaskID: task.ID, CommandID: "cmd_92929292929292929292929292929292",
 		Role: "CODER", Effect: "repository.write", Resource: revision.Contract.TargetRepositories[0],
 		ProviderID: "provider.test", AccountID: "account.primary",
 		ConfigurationSHA256: revision.Contract.ConfigurationSHA256,
-		ReservedTurns: 1, ReservedTokens: 100, ExpiresAt: now.Add(30 * time.Minute),
+		ReservedTurns:       1,
+		ReservedTokens:      100,
+		ExpiresAt:           now.Add(30 * time.Minute),
 	}
 	_, permission, err := executionController.Authorize(context.Background(), permissionRequest)
-	if err != nil { t.Fatalf("Authorize: %v", err) }
+	if err != nil {
+		t.Fatalf("Authorize: %v", err)
+	}
 	_, execution, intent, err := executionController.StartTaskExecution(
 		context.Background(), permission.ID, "cmd_a7070707070707070707070707070707", permissionRequest,
 	)
-	if err != nil { t.Fatalf("StartTaskExecution: %v", err) }
+	if err != nil {
+		t.Fatalf("StartTaskExecution: %v", err)
+	}
 	evaluator := &fakeACPToolCallEvaluator{effect: permission.Effect, resource: permission.Resource}
 	authorizer, err := NewACPExecutionPermissionAuthorizer(database, evaluator)
-	if err != nil { t.Fatalf("NewACPExecutionPermissionAuthorizer: %v", err) }
+	if err != nil {
+		t.Fatalf("NewACPExecutionPermissionAuthorizer: %v", err)
+	}
 	authorizer.now = func() time.Time { return now }
 	request := provider.ACPToolPermissionRequest{
 		OperationID: intent.ID, JobID: jobID, RoleExecutionID: execution.ID,
@@ -76,25 +86,35 @@ func TestACPExecutionPermissionAuthorizerRejectsMismatchedProviderAndRole(t *tes
 		Reversible: true, Mutating: true, ValidUntil: now.Add(time.Hour),
 	}}
 	executionController, err := NewExecutionController(database, assessor)
-	if err != nil { t.Fatalf("NewExecutionController: %v", err) }
+	if err != nil {
+		t.Fatalf("NewExecutionController: %v", err)
+	}
 	executionController.now = func() time.Time { return now }
 	permissionRequest := domain.ExecutionPermissionRequest{
 		JobID: jobID, TaskID: task.ID, CommandID: "cmd_93939393939393939393939393939393",
 		Role: "CODER", Effect: "repository.write", Resource: revision.Contract.TargetRepositories[0],
 		ProviderID: "provider.test", AccountID: "account.primary",
 		ConfigurationSHA256: revision.Contract.ConfigurationSHA256,
-		ReservedTurns: 1, ReservedTokens: 100, ExpiresAt: now.Add(30 * time.Minute),
+		ReservedTurns:       1,
+		ReservedTokens:      100,
+		ExpiresAt:           now.Add(30 * time.Minute),
 	}
 	_, permission, err := executionController.Authorize(context.Background(), permissionRequest)
-	if err != nil { t.Fatalf("Authorize: %v", err) }
+	if err != nil {
+		t.Fatalf("Authorize: %v", err)
+	}
 	_, execution, intent, err := executionController.StartTaskExecution(
 		context.Background(), permission.ID, "cmd_a8080808080808080808080808080808", permissionRequest,
 	)
-	if err != nil { t.Fatalf("StartTaskExecution: %v", err) }
+	if err != nil {
+		t.Fatalf("StartTaskExecution: %v", err)
+	}
 	authorizer, err := NewACPExecutionPermissionAuthorizer(database, &fakeACPToolCallEvaluator{
 		effect: permission.Effect, resource: permission.Resource,
 	})
-	if err != nil { t.Fatalf("NewACPExecutionPermissionAuthorizer: %v", err) }
+	if err != nil {
+		t.Fatalf("NewACPExecutionPermissionAuthorizer: %v", err)
+	}
 	authorizer.now = func() time.Time { return now }
 	request := provider.ACPToolPermissionRequest{
 		OperationID: intent.ID, JobID: jobID, RoleExecutionID: execution.ID,
