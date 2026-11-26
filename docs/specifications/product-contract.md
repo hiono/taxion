@@ -90,8 +90,7 @@ Provider Adapterの実装要求は[Provider Adapter 実行境界 要求仕様書
 
 ### 4.3.1 JobQuestionAuthorization
 
-承認済みJob内でRoleからTaskless PLANNERへ質問し、個別のbounded read-only executionが必要な場合は、immutable JobQuestionAuthorizationを発行できます。grantはJobApproval、Planner RoleExecution、元Question JobMessage、Provider / account / configuration、read-only context、budget、deadlineへ束縛します。QUESTION本文やMessageKindだけから自動発行しません。DRAFT Jobの初期PlanningAuthorizationとは用途と適用条件を分離します。発行時はControllerが現在有効なJobApproval、Questionの宛先、Plannerの受理済みProvider Session、および信頼されたimmutable read-only contextを検証します。grantは元Question・Planner RoleExecution・Provider Session・Repositoryへ束縛し、他のQuestionやSessionへ再利用できません。Repositoryは承認済みJobContractのTargetRepositories内に限定し、元PlanningAuthorizationのRepository identityも保持します。Provider configurationは承認済みJobContractと受理済みStartの両方に一致させ、grant deadlineはStart deadlineを超えず、Stop intentがあるSessionには発行・使用しません。
-
+承認済みJob内でRoleからTaskless PLANNERへ質問し、回答のために追加のbounded read-only Provider executionが必要な場合は、元のQuestionと実行範囲に束縛したJobQuestionAuthorizationを発行できます。自然言語の質問・回答、JobMessageの保存・参照・転送、既存Session / Contextを使った応答にはgrantを要求しません。QUESTION本文やMessageKindだけからgrantを発行しません。grantはJobApproval、Planner RoleExecution、元Question、Provider / account / configuration、read-only context、budget、deadlineへ束縛し、JobApprovalやExecutionPermissionを拡張しません。
 
 ### 4.4 Execution and collaboration
 
@@ -144,20 +143,13 @@ Provider Adapterのoperation・credential・recovery検証項目は[Provider Ada
 
 ### 5.1 Internal JobMessage
 
-内部6 Actor間通信はJobMessageを使用する。EnvelopeはController / UI / Runtimeが生成・検証し、Bodyは利用者とAgentに共通の自然言語とする。本文中の自己申告でSender、Recipient、Job identity、認可、承認、Handoffを確定しない。
+内部6 Actor間の情報交換はJobMessageを使用します。Bodyは利用者とAgentに共通の自然言語とし、そのまま保存・受け渡します。固定JSON本文やWorkflow DSLへの変換、MessageKind別の認可、通信専用grantを要求しません。
 
-MessageKindは次の意味を持つ。
+永続化に必要な最小情報としてMessageID、JobID、認証済みSender、Recipient、作成時刻、provenanceを保持します。Senderは認証済みHUMAN Principal、Taxion管理のCONTROLLER / ORCHESTRATOR identity、またはRoleExecutionへ結び付いたPLANNER / CODER / REVIEWER identityからControllerが確定します。本文の自己申告でidentityや宛先を決めません。Thread、Reply、Task、RoleExecution等の参照は、元Contextへの復帰や対象特定に必要な場合だけ保持します。
 
-| Kind | 意味 | 権限効果 |
-| --- | --- | --- |
-| MESSAGE | 情報共有 | なし |
-| QUESTION | 情報照会 | なし |
-| ANSWER | 既存QUESTIONへの相関応答 | なし |
-| REQUEST | 情報・作業依頼 | なし |
-| NOTIFICATION | 通知 | なし |
-| HANDOFF | 責任移転intent | 明示的Commandと停止・結果・Usage・Worktree gateを要求 |
+質問・回答・依頼・通知・レビュー指摘は通常の自然言語メッセージです。情報交換だけではTask assignment、JobApproval、Execution Permission、Worktree ownershipを変更しません。実行責任の移転は独立したHandoff操作とします。回答のために追加Provider実行が必要な場合だけ§4.3.1およびADR-506に従い、外部副作用はADR-507に従って認可します。
 
-基本単位は1 Message・1 Recipientとする。Fan-outは不変BatchIDで相関する。Delivery状態はMessage本体と分離し、REQUESTED / ACCEPTED / FAILED / UNKNOWNを区別する。最初のREQUESTED observationは自身のObservationIDをRequestObservationIDとして持ち、後続の結果observationは対象attemptを開始したREQUESTED observationのIDを必須参照とする。結果は最新attemptのRequestObservationIDと一致しなければ拒否し、遅延した旧attemptの結果を新attemptへ帰属させない。UNKNOWNの明示的なreconciliationでも同じRequestObservationIDを維持する。Exactly-once deliveryを保証せず、MessageIDによる重複排除と追跡可能性を提供する。
+JobMessageの保存とProvider Send / Turnの実行を分離します。Provider operationの受理・結果・Usage・UNKNOWN・再試行はProvider operationの事実として管理し、メッセージ専用のRecipient状態機械を重複して設けません。通常の情報交換にFan-out BatchIDやDeliveryObservationの状態機械を必須化しません。
 
 ### 5.2 External Agent A2A
 
@@ -178,7 +170,6 @@ A2A Task / Message / Artifact / Agent Card / stateはTaxionのJob、RoleExecutio
 | Task | Job内の作業分解と明示的dependency |
 | RoleExecution | Roleの個々の実行とprovenance |
 | JobMessage | Job内協調のappend-only facts |
-| DeliveryObservation | Recipient単位の配信結果 |
 | ProviderOperation | 外部副作用のintentとOperationID |
 | ProviderObservation | Providerの受理、turn、result、usage、stop等の観測事実 |
 | WorktreeOwnership | Task単位の排他的所有状態 |
