@@ -130,6 +130,7 @@ func (a *ACPExecutionPermissionAuthorizer) Authorize(ctx context.Context, reques
 	}
 	return nil
 }
+
 type ProviderController struct {
 	store     ProviderExecutionStore
 	runtime   PlanningProviderRuntime
