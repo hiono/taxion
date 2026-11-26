@@ -24,9 +24,9 @@ func (r fixedQuestionTurnContextResolver) ResolveReadOnlyBoundary(
 }
 
 type jobQuestionTurnFixture struct {
-	controller                                                        *JobQuestionTurnController
-	runtime                                                           *fakePlanningProviderRuntime
-	database                                                          *store.Store
+	controller                                                                      *JobQuestionTurnController
+	runtime                                                                         *fakePlanningProviderRuntime
+	database                                                                        *store.Store
 	jobID, authorizationID, questionID, coderID, plannerID, sessionID, databasePath string
 }
 
