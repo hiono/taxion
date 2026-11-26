@@ -316,8 +316,9 @@ func TestAggregateUpdateCannotRemoveAppendOnlyFacts(t *testing.T) {
 		WHERE job_id = ?`, job.ID); err != nil {
 		t.Fatalf("append facts while preserving existing entries: %v", err)
 	}
-	if _, err := oldWriteStatement.ExecContext(ctx, job.ID); err == nil {
-		t.Fatal("pre-upgrade prepared writer removed append-only facts without being rejected")
+	if _, err := oldWriteStatement.ExecContext(ctx, job.ID); err == nil ||
+		!strings.Contains(err.Error(), "append-only v2 facts") {
+		t.Fatalf("pre-upgrade prepared writer error = %v, want append-only fact trigger rejection", err)
 	}
 	if _, err := oldWriter.ExecContext(ctx, `UPDATE job_aggregates
 		SET payload_json = json_remove(
@@ -326,8 +327,9 @@ func TestAggregateUpdateCannotRemoveAppendOnlyFacts(t *testing.T) {
 			'$.delivery_observations',
 			'$.job_question_authorizations'
 		)
-		WHERE job_id = ?`, job.ID); err == nil {
-		t.Fatal("pre-upgrade writer removed append-only facts after statement reprepare")
+		WHERE job_id = ?`, job.ID); err == nil ||
+		!strings.Contains(err.Error(), "append-only v2 facts") {
+		t.Fatalf("pre-upgrade writer after statement reprepare error = %v, want append-only fact trigger rejection", err)
 	}
 	var payload string
 	if err := upgraded.db.QueryRowContext(ctx, "SELECT payload_json FROM job_aggregates WHERE job_id = ?", job.ID).Scan(&payload); err != nil {
