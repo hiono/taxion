@@ -170,12 +170,19 @@ func newJobQuestionTurnFixture(t *testing.T) jobQuestionTurnFixture {
 		SDKVersion: "test-sdk/1", ConfigurationSHA256: authorization.ConfigurationSHA256,
 	}}
 	runtime.capabilities = provider.Capabilities{
-		Identity: runtime.identity, SendIdempotency: true,
-		Evidence: []provider.CapabilityEvidence{{
-			Capability: provider.CapabilitySendIdempotency, Identity: runtime.identity,
-			TestID: "question-turn", EvidenceSHA256: strings.Repeat("a", 64),
-			EvidenceLevel: provider.EvidenceLive, VerifiedAt: time.Now().UTC(),
-		}},
+		Identity: runtime.identity, SendIdempotency: true, ReadOnlyContextEnforcement: true,
+		Evidence: []provider.CapabilityEvidence{
+			{
+				Capability: provider.CapabilitySendIdempotency, Identity: runtime.identity,
+				TestID: "question-turn", EvidenceSHA256: strings.Repeat("a", 64),
+				EvidenceLevel: provider.EvidenceLive, VerifiedAt: time.Now().UTC(),
+			},
+			{
+				Capability: provider.CapabilityReadOnlyContextEnforcement, Identity: runtime.identity,
+				TestID: "read-only-context", EvidenceSHA256: strings.Repeat("b", 64),
+				EvidenceLevel: provider.EvidenceLive, VerifiedAt: time.Now().UTC(),
+			},
+		},
 	}
 	controller, err := NewJobQuestionTurnController(database, runtime)
 	if err != nil {
@@ -238,9 +245,12 @@ func TestJobQuestionTurnControllerReconcilesUnknownWithoutBlindResend(t *testing
 	f := newJobQuestionTurnFixture(t)
 	now := time.Now().UTC()
 	f.runtime.capabilities = provider.Capabilities{
-		Identity: f.runtime.identity, SendLookup: true, FinalOutputRetrieval: true,
+		Identity: f.runtime.identity, SendIdempotency: true, SendLookup: true,
+		ReadOnlyContextEnforcement: true, FinalOutputRetrieval: true,
 		UsageIdentity: true, UsageCompleteness: true,
 		Evidence: []provider.CapabilityEvidence{
+			{Capability: provider.CapabilitySendIdempotency, Identity: f.runtime.identity, TestID: "send-idempotency", EvidenceSHA256: strings.Repeat("5", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
+			{Capability: provider.CapabilityReadOnlyContextEnforcement, Identity: f.runtime.identity, TestID: "read-only-context", EvidenceSHA256: strings.Repeat("6", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
 			{Capability: provider.CapabilitySendLookup, Identity: f.runtime.identity, TestID: "lookup", EvidenceSHA256: strings.Repeat("a", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
 			{Capability: provider.CapabilityFinalOutput, Identity: f.runtime.identity, TestID: "result", EvidenceSHA256: strings.Repeat("b", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
 			{Capability: provider.CapabilityUsageIdentity, Identity: f.runtime.identity, TestID: "usage-id", EvidenceSHA256: strings.Repeat("c", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
@@ -293,17 +303,48 @@ func TestJobQuestionTurnControllerReconcilesUnknownWithoutBlindResend(t *testing
 
 func TestJobQuestionTurnControllerRejectsProviderWithoutSafeSend(t *testing.T) {
 	f := newJobQuestionTurnFixture(t)
-	f.runtime.capabilities = provider.Capabilities{Identity: f.runtime.identity}
+	now := time.Now().UTC()
+	f.runtime.capabilities = provider.Capabilities{
+		Identity: f.runtime.identity, SendLookup: true, ReadOnlyContextEnforcement: true,
+		Evidence: []provider.CapabilityEvidence{
+			{Capability: provider.CapabilitySendLookup, Identity: f.runtime.identity, TestID: "lookup-only", EvidenceSHA256: strings.Repeat("a", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
+			{Capability: provider.CapabilityReadOnlyContextEnforcement, Identity: f.runtime.identity, TestID: "read-only-context", EvidenceSHA256: strings.Repeat("b", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
+		},
+	}
 	if _, err := f.controller.Send(context.Background(), f.jobID, f.authorizationID,
-		"cmd_a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3", 100); !errors.Is(err, provider.ErrUnsupportedCapability) {
-		t.Fatalf("Send without safe capability = %v, want ErrUnsupportedCapability", err)
+		"cmd_a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3", 100); !errors.Is(err, provider.ErrUnsupportedCapability) {
+		t.Fatalf("Send with lookup but without idempotency = %v, want ErrUnsupportedCapability", err)
 	}
 	job, err := f.database.GetJob(context.Background(), f.jobID)
 	if err != nil {
 		t.Fatalf("GetJob: %v", err)
 	}
 	if len(job.JobQuestionTurnIntents) != 0 || f.runtime.sendCalls != 0 {
-		t.Fatalf("unsupported Provider Send created intent or ran Provider: %#v", job.JobQuestionTurnIntents)
+		t.Fatalf("unsafe Provider Send created intent or ran Provider: %#v", job.JobQuestionTurnIntents)
+	}
+}
+
+func TestJobQuestionTurnControllerRejectsProviderWithoutReadOnlyContextEnforcement(t *testing.T) {
+	f := newJobQuestionTurnFixture(t)
+	now := time.Now().UTC()
+	f.runtime.capabilities = provider.Capabilities{
+		Identity: f.runtime.identity, SendIdempotency: true,
+		Evidence: []provider.CapabilityEvidence{{
+			Capability: provider.CapabilitySendIdempotency, Identity: f.runtime.identity,
+			TestID: "send-idempotency", EvidenceSHA256: strings.Repeat("a", 64),
+			EvidenceLevel: provider.EvidenceLive, VerifiedAt: now,
+		}},
+	}
+	if _, err := f.controller.Send(context.Background(), f.jobID, f.authorizationID,
+		"cmd_a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4", 100); !errors.Is(err, provider.ErrUnsupportedCapability) {
+		t.Fatalf("Send without read-only enforcement = %v, want ErrUnsupportedCapability", err)
+	}
+	job, err := f.database.GetJob(context.Background(), f.jobID)
+	if err != nil {
+		t.Fatalf("GetJob: %v", err)
+	}
+	if len(job.JobQuestionTurnIntents) != 0 || f.runtime.sendCalls != 0 {
+		t.Fatalf("Provider without read-only enforcement created intent or ran Provider: %#v", job.JobQuestionTurnIntents)
 	}
 }
 
