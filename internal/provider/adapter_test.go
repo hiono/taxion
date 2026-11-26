@@ -271,7 +271,6 @@ func TestStartAndTurnRequestsValidateImmutablePromptAndContextDigests(t *testing
 	}
 }
 
-
 func TestTurnRequestValidatesReadOnlyContextBoundary(t *testing.T) {
 	prompt := "Answer using the authorized context only"
 	request := TurnRequest{
