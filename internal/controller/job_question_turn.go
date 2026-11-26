@@ -100,7 +100,7 @@ func (c *JobQuestionTurnController) Send(
 		if err != nil {
 			return outcome, err
 		}
-		if !capabilities.SupportsSafeSend() {
+		if !capabilities.HasEvidenceAtLeast(provider.CapabilitySendIdempotency, provider.EvidenceLive) {
 			return outcome, provider.ErrUnsupportedCapability
 		}
 		receipt, created, err := c.store.AddJobQuestionTurnIntent(ctx, job.ID, job.Revision, domain.JobQuestionTurnIntentRequest{
@@ -144,7 +144,7 @@ func (c *JobQuestionTurnController) Send(
 	if err != nil {
 		return outcome, err
 	}
-	if !capabilities.SupportsSafeSend() {
+	if !capabilities.HasEvidenceAtLeast(provider.CapabilitySendIdempotency, provider.EvidenceLive) {
 		return outcome, provider.ErrUnsupportedCapability
 	}
 	return c.dispatch(ctx, outcome, grant, question, intent, capabilities)
@@ -241,7 +241,7 @@ func (c *JobQuestionTurnController) reconcileUnknown(
 	if err := currentGrant.ValidateFor(currentJob, currentQuestion.ID, currentGrant.PlannerRoleExecutionID, currentGrant.ProviderSessionID, now); err != nil {
 		return outcome, err
 	}
-	if !capabilities.SupportsSafeSend() {
+	if !capabilities.HasEvidenceAtLeast(provider.CapabilitySendIdempotency, provider.EvidenceLive) {
 		return outcome, provider.ErrUnsupportedCapability
 	}
 	return c.dispatch(ctx, outcome, currentGrant, currentQuestion, intent, capabilities)
@@ -255,6 +255,10 @@ func (c *JobQuestionTurnController) dispatch(
 	intent domain.JobQuestionTurnIntent,
 	capabilities provider.Capabilities,
 ) (JobQuestionTurnOutcome, error) {
+	if !capabilities.HasEvidenceAtLeast(provider.CapabilitySendIdempotency, provider.EvidenceLive) ||
+		!capabilities.HasEvidenceAtLeast(provider.CapabilityReadOnlyContextEnforcement, provider.EvidenceLive) {
+		return outcome, provider.ErrUnsupportedCapability
+	}
 	prompt := jobQuestionTurnPrompt(question.Body)
 	request := provider.TurnRequest{
 		OperationID:  intent.OperationID,
@@ -430,6 +434,9 @@ func (c *JobQuestionTurnController) verifiedCapabilities(
 	}
 	if err := capabilities.Validate(identity); err != nil {
 		return provider.Capabilities{}, fmt.Errorf("validate question Provider capabilities: %w", err)
+	}
+	if !capabilities.HasEvidenceAtLeast(provider.CapabilityReadOnlyContextEnforcement, provider.EvidenceLive) {
+		return provider.Capabilities{}, provider.ErrUnsupportedCapability
 	}
 	return capabilities, nil
 }
