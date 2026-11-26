@@ -194,6 +194,34 @@ func TestPreUpgradeProcessCannotOverwriteV2AggregateFacts(t *testing.T) {
 			storedRevision, storedPayload, storedHash)
 	}
 
+	mutatedAggregate := make(map[string]json.RawMessage, len(aggregate))
+	for field, value := range aggregate {
+		mutatedAggregate[field] = append(json.RawMessage(nil), value...)
+	}
+	var messages []map[string]string
+	if err := json.Unmarshal(mutatedAggregate["job_messages"], &messages); err != nil {
+		t.Fatalf("decode existing JobMessages: %v", err)
+	}
+	messages[0]["id"] = "message_mutated"
+	mutatedAggregate["job_messages"], err = json.Marshal(messages)
+	if err != nil {
+		t.Fatalf("mutate existing JobMessage fixture: %v", err)
+	}
+	mutatedPayload, err := json.Marshal(mutatedAggregate)
+	if err != nil {
+		t.Fatalf("marshal mutated aggregate: %v", err)
+	}
+	_, err = upgraded.db.ExecContext(ctx,
+		`UPDATE job_aggregates
+			SET revision = ?, payload_json = ?, integrity_sha256 = ?, updated_at = ?
+			WHERE job_id = ? AND revision = ?`,
+		3, string(mutatedPayload), digest(mutatedPayload),
+		v2UpdatedAt.Add(time.Minute).Format(time.RFC3339Nano), job.ID, 2,
+	)
+	if err == nil || !strings.Contains(err.Error(), "append-only v2 facts") {
+		t.Fatalf("writer mutation of an existing v2 fact error = %v, want append-only v2 fact guard rejection", err)
+	}
+
 	for field, fact := range map[string]string{
 		"job_messages":                `{"id":"message_2"}`,
 		"delivery_observations":       `{"id":"delivery_2"}`,
