@@ -30,17 +30,17 @@ func (i Identity) Validate() error {
 type Capability string
 
 const (
-	CapabilityStartIdempotency  Capability = "start.idempotency"
-	CapabilityStartLookup       Capability = "start.lookup"
-	CapabilitySendIdempotency   Capability = "send.idempotency"
-	CapabilitySendLookup        Capability = "send.lookup"
+	CapabilityStartIdempotency           Capability = "start.idempotency"
+	CapabilityStartLookup                Capability = "start.lookup"
+	CapabilitySendIdempotency            Capability = "send.idempotency"
+	CapabilitySendLookup                 Capability = "send.lookup"
 	CapabilityReadOnlyContextEnforcement Capability = "send.read_only_context_enforcement"
-	CapabilitySessionReattach   Capability = "session.cross_process_reattachment"
-	CapabilityEventReplay       Capability = "event.replay"
-	CapabilityStopProof         Capability = "stop.proof"
-	CapabilityFinalOutput       Capability = "result.final_output_retrieval"
-	CapabilityUsageIdentity     Capability = "usage.identity"
-	CapabilityUsageCompleteness Capability = "usage.completeness"
+	CapabilitySessionReattach            Capability = "session.cross_process_reattachment"
+	CapabilityEventReplay                Capability = "event.replay"
+	CapabilityStopProof                  Capability = "stop.proof"
+	CapabilityFinalOutput                Capability = "result.final_output_retrieval"
+	CapabilityUsageIdentity              Capability = "usage.identity"
+	CapabilityUsageCompleteness          Capability = "usage.completeness"
 )
 
 type EvidenceLevel string
@@ -67,7 +67,7 @@ type Capabilities struct {
 	StartLookup                 bool
 	SendIdempotency             bool
 	SendLookup                  bool
-	ReadOnlyContextEnforcement bool
+	ReadOnlyContextEnforcement  bool
 	CrossProcessSessionReattach bool
 	EventReplay                 bool
 	StopProof                   bool
