@@ -38,12 +38,19 @@ var allowedACPEnvironment = map[string]struct{}{
 }
 
 type ACPAdapter struct {
-	config ACPConfig
-	mu     sync.Mutex
-	closed bool
-	byRole map[string]*acpSession
-	byID   map[string]*acpSession
-	byOp   map[string]StartResult
+	config       ACPConfig
+	mu           sync.Mutex
+	closed       bool
+	byRole       map[string]*acpSession
+	byID         map[string]*acpSession
+	byOp         map[string]StartResult
+	startingRole map[string]*acpStartReservation
+	startingOp   map[string]*acpStartReservation
+}
+
+type acpStartReservation struct {
+	cancel context.CancelFunc
+	done   chan struct{}
 }
 
 type acpSession struct {
@@ -51,25 +58,28 @@ type acpSession struct {
 	sessionID       string
 	process         *acpProcess
 	turnGate        chan struct{}
+	stopping        atomic.Bool
 	mu              sync.RWMutex
 	turns           map[string]TurnResult
 }
 
 type acpProcess struct {
-	cmd       *exec.Cmd
-	stdin     io.WriteCloser
-	pending   sync.Map
-	updates   chan json.RawMessage
-	done      chan struct{}
-	stop      chan struct{}
-	failed    chan struct{}
-	failMu    sync.Mutex
-	failErr   error
-	failOnce  sync.Once
-	stopOnce  sync.Once
-	closing   atomic.Bool
-	writeGate chan struct{}
-	nextID    atomic.Uint64
+	cmd             *exec.Cmd
+	stdin           io.WriteCloser
+	pending         sync.Map
+	updates         chan json.RawMessage
+	done            chan struct{}
+	readerDone      chan struct{}
+	stop            chan struct{}
+	failed          chan struct{}
+	failMu          sync.Mutex
+	failErr         error
+	failOnce        sync.Once
+	stopOnce        sync.Once
+	closing         atomic.Bool
+	updateConsumers atomic.Int32
+	writeGate       chan struct{}
+	nextID          atomic.Uint64
 }
 
 type acpMessage struct {
@@ -117,8 +127,10 @@ func NewACPAdapter(config ACPConfig) (*ACPAdapter, error) {
 	return &ACPAdapter{
 		config: config,
 		byRole: make(map[string]*acpSession),
-		byID:   make(map[string]*acpSession),
-		byOp:   make(map[string]StartResult),
+		byID: make(map[string]*acpSession),
+		byOp: make(map[string]StartResult),
+		startingRole: make(map[string]*acpStartReservation),
+		startingOp: make(map[string]*acpStartReservation),
 	}, nil
 }
 
@@ -155,114 +167,129 @@ func (a *ACPAdapter) Start(ctx context.Context, request StartRequest, _ Credenti
 		return StartResult{}, ErrProviderInvalidRequest
 	}
 	operationCtx, cancel := context.WithDeadline(ctx, request.Deadline)
-	defer cancel()
 	if err := operationCtx.Err(); err != nil {
+		cancel()
 		return StartResult{}, err
 	}
 	initialPrompt := acpStartPrompt(request)
 	initialTurnID := acpInitialTurnID(request.RoleExecutionID)
 	if !validIdentifier(initialTurnID) {
+		cancel()
 		return StartResult{}, ErrProviderInvalidRequest
 	}
-
+	reservation := &acpStartReservation{cancel: cancel, done: make(chan struct{})}
 	a.mu.Lock()
 	if a.closed {
 		a.mu.Unlock()
+		cancel()
 		return StartResult{}, &OperationError{Class: FailureDefinitive, Code: OperationCodeUnavailable}
 	}
 	if existing, ok := a.byOp[request.OperationID]; ok {
 		a.mu.Unlock()
+		cancel()
 		return existing, nil
 	}
-	if existing := a.byRole[request.RoleExecutionID]; existing != nil {
+	if a.byRole[request.RoleExecutionID] != nil || a.startingRole[request.RoleExecutionID] != nil ||
+		a.startingOp[request.OperationID] != nil {
 		a.mu.Unlock()
+		cancel()
 		return StartResult{}, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown}
 	}
-
+	a.startingRole[request.RoleExecutionID] = reservation
+	a.startingOp[request.OperationID] = reservation
+	a.mu.Unlock()
+	defer func() {
+		cancel()
+		close(reservation.done)
+		a.releaseStartReservation(request.RoleExecutionID, request.OperationID, reservation)
+	}()
 	process, err := a.startProcess()
 	if err != nil {
-		a.mu.Unlock()
 		return StartResult{}, err
 	}
+	closeOnFailure := func() { _ = process.close(operationCtx) }
 	initialized, err := process.call(operationCtx, "initialize", map[string]any{
-		"protocolVersion":    1,
-		"clientInfo":         map[string]string{"name": "taxion", "version": "0.1"},
+		"protocolVersion": 1,
+		"clientInfo": map[string]string{"name": "taxion", "version": "0.1"},
 		"clientCapabilities": map[string]any{},
 	}, nil)
 	if err != nil {
-		_ = process.close(operationCtx)
-		a.mu.Unlock()
+		closeOnFailure()
 		return StartResult{}, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown}
 	}
-	var negotiated struct {
-		ProtocolVersion int `json:"protocolVersion"`
-	}
-	if json.Unmarshal(initialized, &negotiated) != nil || negotiated.ProtocolVersion != 1 {
-		_ = process.close(operationCtx)
-		a.mu.Unlock()
+	var negotiated map[string]json.RawMessage
+	var protocolVersion int
+	if json.Unmarshal(initialized, &negotiated) != nil ||
+		json.Unmarshal(negotiated["protocolVersion"], &protocolVersion) != nil || protocolVersion != 1 {
+		closeOnFailure()
 		return StartResult{}, &OperationError{Class: FailureDefinitive, Code: OperationCodeUnsupported}
 	}
 	if err := process.notify(operationCtx, "initialized", map[string]any{}); err != nil {
-		_ = process.close(operationCtx)
-		a.mu.Unlock()
+		closeOnFailure()
 		return StartResult{}, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown}
 	}
 	created, err := process.call(operationCtx, "session/new", map[string]any{
-		"cwd":        a.config.WorkingDirectory,
+		"cwd": a.config.WorkingDirectory,
 		"mcpServers": []any{},
 	}, nil)
 	if err != nil {
-		_ = process.close(operationCtx)
-		a.mu.Unlock()
+		closeOnFailure()
 		return StartResult{}, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown}
 	}
-	var sessionReply struct {
-		SessionID string `json:"sessionId"`
-	}
-	if json.Unmarshal(created, &sessionReply) != nil || !validIdentifier(sessionReply.SessionID) {
-		_ = process.close(operationCtx)
-		a.mu.Unlock()
-		return StartResult{}, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown}
-	}
-	if _, exists := a.byID[sessionReply.SessionID]; exists {
-		_ = process.close(operationCtx)
-		a.mu.Unlock()
+	var sessionReply map[string]json.RawMessage
+	var sessionID string
+	if json.Unmarshal(created, &sessionReply) != nil ||
+		json.Unmarshal(sessionReply["sessionId"], &sessionID) != nil || !validIdentifier(sessionID) {
+		closeOnFailure()
 		return StartResult{}, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown}
 	}
 	turnGate := make(chan struct{}, 1)
 	turnGate <- struct{}{}
 	session := &acpSession{
 		roleExecutionID: request.RoleExecutionID,
-		sessionID:       sessionReply.SessionID,
-		process:         process,
-		turnGate:        turnGate,
-		turns:           make(map[string]TurnResult),
+		sessionID: sessionID,
+		process: process,
+		turnGate: turnGate,
+		turns: make(map[string]TurnResult),
 	}
 	result := StartResult{
-		OperationID:    request.OperationID,
-		SessionID:      session.sessionID,
-		ReceiptID:      acpReceiptID("acp-session-", request.RoleExecutionID),
+		OperationID: request.OperationID,
+		SessionID: session.sessionID,
+		ReceiptID: acpReceiptID("acp-session-", request.RoleExecutionID),
 		EvidenceSHA256: sha256Hex(string(created)),
 	}
+	a.mu.Lock()
+	reservationOwned := a.startingRole[request.RoleExecutionID] == reservation &&
+		a.startingOp[request.OperationID] == reservation
+	if a.closed || !reservationOwned || a.byRole[request.RoleExecutionID] != nil {
+		a.mu.Unlock()
+		closeOnFailure()
+		return StartResult{}, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown}
+	}
+	if _, exists := a.byID[session.sessionID]; exists {
+		a.mu.Unlock()
+		closeOnFailure()
+		return StartResult{}, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown}
+	}
+	delete(a.startingRole, request.RoleExecutionID)
+	delete(a.startingOp, request.OperationID)
 	a.byRole[request.RoleExecutionID] = session
 	a.byID[session.sessionID] = session
 	a.mu.Unlock()
-
 	initialTurn := TurnRequest{
-		OperationID:  request.OperationID,
-		TurnID:       initialTurnID,
-		SessionID:    session.sessionID,
+		OperationID: request.OperationID,
+		TurnID: initialTurnID,
+		SessionID: session.sessionID,
 		PromptSHA256: sha256Hex(initialPrompt),
-		Prompt:       initialPrompt,
-		MaxTokens:    request.MaxTokens,
-		Deadline:     request.Deadline,
+		Prompt: initialPrompt,
+		MaxTokens: request.MaxTokens,
+		Deadline: request.Deadline,
 	}
 	if _, err := a.Send(operationCtx, initialTurn, nil); err != nil {
 		a.detachSession(session)
 		session.process.terminate()
 		return StartResult{}, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown}
 	}
-
 	a.mu.Lock()
 	if a.closed || a.byID[session.sessionID] != session {
 		a.mu.Unlock()
@@ -272,6 +299,17 @@ func (a *ACPAdapter) Start(ctx context.Context, request StartRequest, _ Credenti
 	a.byOp[request.OperationID] = result
 	a.mu.Unlock()
 	return result, nil
+}
+
+func (a *ACPAdapter) releaseStartReservation(roleExecutionID, operationID string, reservation *acpStartReservation) {
+	a.mu.Lock()
+	if a.startingRole[roleExecutionID] == reservation {
+		delete(a.startingRole, roleExecutionID)
+	}
+	if a.startingOp[operationID] == reservation {
+		delete(a.startingOp, operationID)
+	}
+	a.mu.Unlock()
 }
 
 func acpStartPrompt(request StartRequest) string {
@@ -331,6 +369,7 @@ func (a *ACPAdapter) Send(ctx context.Context, request TurnRequest, _ Credential
 		var notification struct {
 			Method string `json:"method"`
 			Params struct {
+				SessionID string `json:"sessionId"`
 				Update struct {
 					SessionUpdate string `json:"sessionUpdate"`
 					Content       struct {
@@ -343,8 +382,10 @@ func (a *ACPAdapter) Send(ctx context.Context, request TurnRequest, _ Credential
 		if err := json.Unmarshal(raw, &notification); err != nil {
 			return errors.New("invalid ACP session update")
 		}
-		if notification.Method != "session/update" ||
-			notification.Params.Update.SessionUpdate != "agent_message_chunk" ||
+		if notification.Method != "session/update" || notification.Params.SessionID != request.SessionID {
+			return errors.New("ACP session update belongs to another Session")
+		}
+		if notification.Params.Update.SessionUpdate != "agent_message_chunk" ||
 			notification.Params.Update.Content.Type != "text" {
 			return nil
 		}
@@ -355,7 +396,7 @@ func (a *ACPAdapter) Send(ctx context.Context, request TurnRequest, _ Credential
 		output.WriteString(chunk)
 		return nil
 	}
-	response, err := session.process.call(operationCtx, "session/prompt", map[string]any{
+	response, err := session.process.callForSession(operationCtx, session, "session/prompt", map[string]any{
 		"sessionId": request.SessionID,
 		"prompt":    []map[string]string{{"type": "text", "text": request.Prompt}},
 	}, onUpdate)
@@ -392,15 +433,18 @@ func (a *ACPAdapter) detachSession(session *acpSession) {
 		return
 	}
 	a.mu.Lock()
-	if a.byID[session.sessionID] == session {
+	owned := a.byID[session.sessionID] == session
+	if owned {
 		delete(a.byID, session.sessionID)
 	}
 	if a.byRole[session.roleExecutionID] == session {
 		delete(a.byRole, session.roleExecutionID)
 	}
-	for operationID, result := range a.byOp {
-		if result.SessionID == session.sessionID {
-			delete(a.byOp, operationID)
+	if owned {
+		for operationID, result := range a.byOp {
+			if result.SessionID == session.sessionID {
+				delete(a.byOp, operationID)
+			}
 		}
 	}
 	a.mu.Unlock()
@@ -416,6 +460,7 @@ func (a *ACPAdapter) Stop(ctx context.Context, request StopRequest, _ Credential
 	if session == nil {
 		return StopResult{}, &OperationError{Class: FailureDefinitive, Code: OperationCodeNotFound}
 	}
+	session.stopping.Store(true)
 	a.detachSession(session)
 	cancelCtx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
 	_ = session.process.notify(cancelCtx, "session/cancel", map[string]string{"sessionId": request.SessionID})
@@ -483,6 +528,13 @@ func (a *ACPAdapter) Close() error {
 	for _, session := range a.byID {
 		sessions = append(sessions, session)
 	}
+	reservations := make(map[*acpStartReservation]struct{}, len(a.startingRole))
+	for _, reservation := range a.startingRole {
+		reservations[reservation] = struct{}{}
+		reservation.cancel()
+	}
+	a.startingRole = make(map[string]*acpStartReservation)
+	a.startingOp = make(map[string]*acpStartReservation)
 	a.byID = make(map[string]*acpSession)
 	a.byRole = make(map[string]*acpSession)
 	a.byOp = make(map[string]StartResult)
@@ -505,6 +557,9 @@ func (a *ACPAdapter) Close() error {
 	for err := range errorsCh {
 		joined = errors.Join(joined, err)
 	}
+	for reservation := range reservations {
+		<-reservation.done
+	}
 	return joined
 }
 
@@ -522,18 +577,19 @@ func (a *ACPAdapter) startProcess() (*acpProcess, error) {
 	}
 	command := exec.Command(a.config.Command, a.config.Args...)
 	command.Dir = a.config.WorkingDirectory
-	command.Stderr = io.Discard
+	// Leave Stderr nil so os/exec connects it directly to the null device.
 	stdin, err := command.StdinPipe()
 	if err != nil {
 		cleanupHome()
 		return nil, errors.New("start ACP stdin pipe failed")
 	}
-	stdout, err := command.StdoutPipe()
+	stdoutRead, stdoutWrite, err := os.Pipe()
 	if err != nil {
 		_ = stdin.Close()
 		cleanupHome()
 		return nil, errors.New("start ACP stdout pipe failed")
 	}
+	command.Stdout = stdoutWrite
 	env := []string{
 		"PATH=" + os.Getenv("PATH"),
 		"HOME=" + homeDir,
@@ -554,19 +610,31 @@ func (a *ACPAdapter) startProcess() (*acpProcess, error) {
 		}
 		command.Env = nil
 		_ = stdin.Close()
-		_ = stdout.Close()
+		_ = stdoutRead.Close()
+		_ = stdoutWrite.Close()
 		cleanupHome()
 		return nil, errors.New("start Copilot CLI ACP process failed")
 	}
+	_ = stdoutWrite.Close()
 	for index := range env {
 		env[index] = ""
 	}
 	command.Env = nil
 	process := newACPProcess(command, stdin)
+	go process.read(stdoutRead)
 	go func() {
-		// StdoutPipe must be fully drained before Wait closes its read end.
-		process.read(stdout)
 		_ = command.Wait()
+		// Preserve buffered protocol replies, but do not let a descendant that
+		// inherited stdout retain the process lifecycle or isolated HOME forever.
+		timer := time.NewTimer(250 * time.Millisecond)
+		defer timer.Stop()
+		select {
+		case <-process.readerDone:
+		case <-timer.C:
+			_ = stdoutRead.Close()
+			<-process.readerDone
+		}
+		_ = stdoutRead.Close()
 		cleanupHome()
 		close(process.done)
 	}()
@@ -578,12 +646,13 @@ func newACPProcess(command *exec.Cmd, stdin io.WriteCloser) *acpProcess {
 	writeGate <- struct{}{}
 	return &acpProcess{
 		cmd: command, stdin: stdin, updates: make(chan json.RawMessage, 256),
-		done: make(chan struct{}), stop: make(chan struct{}), failed: make(chan struct{}),
-		writeGate: writeGate,
+		done: make(chan struct{}), readerDone: make(chan struct{}),
+		stop: make(chan struct{}), failed: make(chan struct{}), writeGate: writeGate,
 	}
 }
 
 func (p *acpProcess) read(stdout io.Reader) {
+	defer close(p.readerDone)
 	defer p.closePending()
 	scanner := bufio.NewScanner(stdout)
 	scanner.Buffer(make([]byte, 64*1024), 4*1024*1024)
@@ -614,12 +683,21 @@ func (p *acpProcess) read(stdout io.Reader) {
 				}
 				continue
 			}
-			select {
-			case p.updates <- line:
-			case <-p.stop:
-				return
-			case <-p.failed:
-				return
+			if p.updateConsumers.Load() > 0 {
+				select {
+				case p.updates <- line:
+				case <-p.stop:
+					return
+				case <-p.failed:
+					return
+				}
+			} else {
+				select {
+				case p.updates <- line:
+				default:
+					p.fail(errors.New("ACP notification queue overflow without an active consumer"))
+					return
+				}
 			}
 			continue
 		}
@@ -771,18 +849,26 @@ func (p *acpProcess) receiveResponse(waiter <-chan acpMessage, ctx context.Conte
 }
 
 func (p *acpProcess) call(ctx context.Context, method string, params any, onUpdate func(json.RawMessage) error) (json.RawMessage, error) {
+	return p.callForSession(ctx, nil, method, params, onUpdate)
+}
+
+func (p *acpProcess) callForSession(ctx context.Context, session *acpSession, method string, params any, onUpdate func(json.RawMessage) error) (json.RawMessage, error) {
 	if ctx == nil {
 		return nil, ErrProviderInvalidRequest
 	}
 	if err := p.failure(); err != nil {
 		return nil, errors.New("ACP transport failed")
 	}
+	if onUpdate != nil {
+		p.updateConsumers.Add(1)
+		defer p.updateConsumers.Add(-1)
+	}
 	id := strconv.FormatUint(p.nextID.Add(1), 10)
 	waiter := make(chan acpMessage, 1)
 	p.pending.Store(id, waiter)
 	if err := p.write(ctx, map[string]any{
 		"jsonrpc": "2.0", "id": json.Number(id), "method": method, "params": params,
-	}); err != nil {
+	}, session); err != nil {
 		p.pending.Delete(id)
 		return nil, err
 	}
@@ -830,7 +916,7 @@ func (p *acpProcess) notify(ctx context.Context, method string, params any) erro
 	return p.write(ctx, map[string]any{"jsonrpc": "2.0", "method": method, "params": params})
 }
 
-func (p *acpProcess) write(ctx context.Context, message any) error {
+func (p *acpProcess) write(ctx context.Context, message any, session ...*acpSession) error {
 	if ctx == nil {
 		return ErrProviderInvalidRequest
 	}
@@ -851,6 +937,12 @@ func (p *acpProcess) write(ctx context.Context, message any) error {
 		return errors.New("ACP process exited")
 	}
 	defer func() { p.writeGate <- struct{}{} }()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if len(session) > 0 && session[0] != nil && session[0].stopping.Load() {
+		return errors.New("ACP Session is stopping")
+	}
 	if p.failure() != nil {
 		return errors.New("ACP transport failed")
 	}

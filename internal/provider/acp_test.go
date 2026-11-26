@@ -8,6 +8,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"os/exec"
 	"strconv"
 	"strings"
 	"testing"
@@ -27,6 +28,10 @@ func acpHelperSetting(name string) string {
 func TestACPHelperProcess(t *testing.T) {
 	if os.Getenv("TAXION_ACP_HELPER") == "" {
 		return
+	}
+	if os.Getenv("TAXION_ACP_HOLD_STDOUT") == "1" {
+		time.Sleep(2 * time.Second)
+		os.Exit(0)
 	}
 	if os.Getenv("COPILOT_GITHUB_TOKEN") != "" || os.Getenv("GH_TOKEN") != "" || os.Getenv("GITHUB_TOKEN") != "" {
 		os.Exit(17)
@@ -49,6 +54,10 @@ func TestACPHelperProcess(t *testing.T) {
 		}
 		switch request.Method {
 		case "initialize":
+			if delay := acpHelperSetting("delay-initialize"); delay != "" {
+				milliseconds, _ := strconv.Atoi(delay)
+				time.Sleep(time.Duration(milliseconds) * time.Millisecond)
+			}
 			version := 1
 			if configured := acpHelperSetting("protocol"); configured != "" {
 				version, _ = strconv.Atoi(configured)
@@ -126,10 +135,17 @@ func TestACPHelperProcess(t *testing.T) {
 					stopReason = parts[1]
 				}
 			}
-			write(map[string]any{"jsonrpc": "2.0", "id": request.ID, "result": map[string]string{"stopReason": stopReason}})
 			if exit := acpHelperSetting("exit"); exit != "" && promptText == exit {
-				return
+				child := exec.Command(os.Args[0], "-test.run=TestACPHelperProcess")
+				child.Env = append(os.Environ(), "TAXION_ACP_HOLD_STDOUT=1")
+				child.Stdout = os.Stdout
+				if err := child.Start(); err != nil {
+					os.Exit(18)
+				}
+				write(map[string]any{"jsonrpc": "2.0", "id": request.ID, "result": map[string]string{"stopReason": stopReason}})
+				os.Exit(0)
 			}
+			write(map[string]any{"jsonrpc": "2.0", "id": request.ID, "result": map[string]string{"stopReason": stopReason}})
 		case "session/cancel":
 			// Cancellation is a notification and has no response.
 		}
@@ -383,29 +399,21 @@ func TestACPProcessRejectsMalformedJSONRPCAndTreatsEOFAsTerminal(t *testing.T) {
 	})
 }
 
-func TestACPProcessBackpressuresNotificationsWithoutDroppingThem(t *testing.T) {
+func TestACPProcessFailsWhenIdleNotificationQueueOverflows(t *testing.T) {
 	process := newACPProcess(nil, &acpTestWriter{})
 	process.closing.Store(true)
 	notification := `{"jsonrpc":"2.0","method":"session/update"}` + "\n"
-	done := make(chan struct{})
-	go func() {
-		process.read(strings.NewReader(strings.Repeat(notification, 300)))
-		close(done)
-	}()
-	for index := 0; index < 300; index++ {
-		select {
-		case <-process.updates:
-		case <-time.After(time.Second):
-			t.Fatalf("notification %d was not delivered", index)
-		}
-	}
+	go process.read(strings.NewReader(strings.Repeat(notification, 300)))
 	select {
-	case <-done:
+	case <-process.readerDone:
 	case <-time.After(time.Second):
-		t.Fatal("ACP reader did not finish after all notifications were drained")
+		t.Fatal("ACP reader did not terminate after idle notification overflow")
 	}
-	if process.failure() != nil {
-		t.Fatalf("notification backpressure failed the process: %v", process.failure())
+	if process.failure() == nil {
+		t.Fatal("idle notification overflow did not fail the transport")
+	}
+	if len(process.updates) != cap(process.updates) {
+		t.Fatalf("queued notifications = %d, want bounded capacity %d", len(process.updates), cap(process.updates))
 	}
 }
 
@@ -443,7 +451,9 @@ func TestACPProcessCallDrainsNotificationsWhileWaitingForResponse(t *testing.T) 
 		close(readerDone)
 	}()
 	updates := 0
-	result, err := process.call(context.Background(), "session/prompt", map[string]string{"sessionId": "fake"}, func(json.RawMessage) error {
+	callCtx, cancelCall := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancelCall()
+	result, err := process.call(callCtx, "session/prompt", map[string]string{"sessionId": "fake"}, func(json.RawMessage) error {
 		updates++
 		return nil
 	})
@@ -737,5 +747,56 @@ func TestACPAdapterStopDoesNotWaitForBlockedWrite(t *testing.T) {
 	}
 	if elapsed := time.Since(started); elapsed > 500*time.Millisecond {
 		t.Fatalf("Stop waited for blocked transport write: %s", elapsed)
+	}
+}
+
+func TestACPAdapterCloseReapsCLIWhenDescendantKeepsStdoutOpen(t *testing.T) {
+	t.Setenv("TAXION_ACP_HELPER", "1;exit=exit")
+	adapter := newACPTestAdapter(t)
+	request := newACPTestStartRequest("exit", "role_execution_pipe")
+	if _, err := adapter.Start(context.Background(), request, nil); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	started := time.Now()
+	if err := adapter.Close(); err != nil {
+		t.Fatalf("Close after CLI exit: %v", err)
+	}
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("Close waited for descendant-held stdout: %s", elapsed)
+	}
+}
+
+func TestACPAdapterStopDoesNotWaitForAnotherRoleStartNegotiation(t *testing.T) {
+	t.Setenv("TAXION_ACP_HELPER", "1;delay-initialize=700")
+	adapter := newACPTestAdapter(t)
+	defer adapter.Close()
+	first := newACPTestStartRequest("first", "role_execution_first")
+	first.Deadline = time.Now().Add(5 * time.Second)
+	started, err := adapter.Start(context.Background(), first, nil)
+	if err != nil {
+		t.Fatalf("Start first role: %v", err)
+	}
+	second := newACPTestStartRequest("second", "role_execution_second")
+	second.Deadline = time.Now().Add(5 * time.Second)
+	secondDone := make(chan error, 1)
+	go func() {
+		_, startErr := adapter.Start(context.Background(), second, nil)
+		secondDone <- startErr
+	}()
+	time.Sleep(50 * time.Millisecond)
+	stopStarted := time.Now()
+	_, stopErr := adapter.Stop(context.Background(), StopRequest{
+		OperationID: "operation_stop_first", SessionID: started.SessionID,
+	}, nil)
+	if stopErr == nil {
+		t.Fatal("Stop unexpectedly claimed quiescence")
+	}
+	if elapsed := time.Since(stopStarted); elapsed > 500*time.Millisecond {
+		t.Fatalf("Stop blocked behind another role's Start negotiation: %s", elapsed)
+	}
+	select {
+	case <-secondDone:
+	case <-time.After(6 * time.Second):
+		t.Fatal("second Start did not finish")
 	}
 }
