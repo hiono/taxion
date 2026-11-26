@@ -72,10 +72,10 @@ func TestACPAdapterUsesOneProcessPerRoleAndDeniesToolRequests(t *testing.T) {
 	t.Setenv("TAXION_ACP_HELPER", "1")
 	identity := testIdentity()
 	adapter, err := NewACPAdapter(ACPConfig{
-		Command: os.Args[0],
-		Args: []string{"-test.run=TestACPHelperProcess"},
+		Command:          os.Args[0],
+		Args:             []string{"-test.run=TestACPHelperProcess"},
 		WorkingDirectory: t.TempDir(),
-		Identity: identity,
+		Identity:         identity,
 	})
 	if err != nil {
 		t.Fatalf("NewACPAdapter: %v", err)
@@ -90,9 +90,15 @@ func TestACPAdapterUsesOneProcessPerRoleAndDeniesToolRequests(t *testing.T) {
 	defer cancel()
 	startPrompt := "start the assigned task"
 	start := StartRequest{
-		OperationID: "operation_start_1", JobID: "job_1", RoleExecutionID: "role_execution_1",
-		RequestSHA256: strings.Repeat("a", 64), PromptSHA256: sha256Hex(startPrompt),
-		Prompt: startPrompt, MaxTurns: 2, MaxTokens: 1000, Deadline: time.Now().Add(8*time.Second),
+		OperationID:     "operation_start_1",
+		JobID:           "job_1",
+		RoleExecutionID: "role_execution_1",
+		RequestSHA256:   strings.Repeat("a", 64),
+		PromptSHA256:    sha256Hex(startPrompt),
+		Prompt:          startPrompt,
+		MaxTurns:        2,
+		MaxTokens:       1000,
+		Deadline:        time.Now().Add(8 * time.Second),
 	}
 	result, err := adapter.Start(ctx, start, nil)
 	if err != nil {
@@ -104,9 +110,13 @@ func TestACPAdapterUsesOneProcessPerRoleAndDeniesToolRequests(t *testing.T) {
 
 	prompt := "continue"
 	turn, err := adapter.Send(ctx, TurnRequest{
-		OperationID: "operation_turn_1", TurnID: "turn_1", SessionID: result.SessionID,
-		PromptSHA256: sha256Hex(prompt), Prompt: prompt, MaxTokens: 1000,
-		Deadline: time.Now().Add(8*time.Second),
+		OperationID:  "operation_turn_1",
+		TurnID:       "turn_1",
+		SessionID:    result.SessionID,
+		PromptSHA256: sha256Hex(prompt),
+		Prompt:       prompt,
+		MaxTokens:    1000,
+		Deadline:     time.Now().Add(8 * time.Second),
 	}, nil)
 	if err != nil {
 		t.Fatalf("Send: %v", err)
@@ -134,8 +144,9 @@ func TestACPAdapterRejectsMissingConfiguration(t *testing.T) {
 		t.Fatal("empty ACP configuration was accepted")
 	}
 	if _, err := NewACPAdapter(ACPConfig{
-		Command: "copilot", WorkingDirectory: t.TempDir(),
-		Identity: Identity{ProviderID: "provider", AccountID: "account"},
+		Command:          "copilot",
+		WorkingDirectory: t.TempDir(),
+		Identity:         Identity{ProviderID: "provider", AccountID: "account"},
 	}); err == nil {
 		t.Fatal("invalid Provider identity was accepted")
 	}
