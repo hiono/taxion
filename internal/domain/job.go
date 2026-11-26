@@ -352,8 +352,8 @@ type RoleExecution struct {
 	TaskID                   string    `json:"task_id,omitempty"`
 	PlanningAuthorizationID  string    `json:"planning_authorization_id"`
 	ExecutionPermissionID    string    `json:"execution_permission_id,omitempty"`
-	WorktreeAssignmentID      string    `json:"worktree_assignment_id,omitempty"`
-	WorktreePath              string    `json:"worktree_path,omitempty"`
+	WorktreeAssignmentID     string    `json:"worktree_assignment_id,omitempty"`
+	WorktreePath             string    `json:"worktree_path,omitempty"`
 	ProviderStartOperationID string    `json:"provider_start_operation_id"`
 	CreatedAt                time.Time `json:"created_at"`
 	CreatedRevision          uint64    `json:"created_revision"`
@@ -367,8 +367,8 @@ type ProviderStartIntent struct {
 	PlanningAuthorizationID string                   `json:"planning_authorization_id"`
 	TaskID                  string                   `json:"task_id,omitempty"`
 	ExecutionPermissionID   string                   `json:"execution_permission_id,omitempty"`
-	WorktreeAssignmentID     string                   `json:"worktree_assignment_id,omitempty"`
-	WorktreePath             string                   `json:"worktree_path,omitempty"`
+	WorktreeAssignmentID    string                   `json:"worktree_assignment_id,omitempty"`
+	WorktreePath            string                   `json:"worktree_path,omitempty"`
 	ProviderID              string                   `json:"provider_id"`
 	AccountID               string                   `json:"account_id"`
 	ConfigurationSHA256     string                   `json:"configuration_sha256"`
