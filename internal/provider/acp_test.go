@@ -4,9 +4,11 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"bytes"
 	"errors"
 	"io"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -84,7 +86,7 @@ func TestACPHelperProcess(t *testing.T) {
 				_ = writer.Flush()
 				return
 			}
-			if promptText == acpHelperSetting("block") {
+			if block := acpHelperSetting("block"); block != "" && promptText == block {
 				write(map[string]any{
 					"jsonrpc": "2.0", "method": "session/update",
 					"params": map[string]any{"sessionId": "fake-session", "update": map[string]any{
@@ -125,7 +127,7 @@ func TestACPHelperProcess(t *testing.T) {
 				}
 			}
 			write(map[string]any{"jsonrpc": "2.0", "id": request.ID, "result": map[string]string{"stopReason": stopReason}})
-			if promptText == acpHelperSetting("exit") {
+			if exit := acpHelperSetting("exit"); exit != "" && promptText == exit {
 				return
 			}
 		case "session/cancel":
@@ -326,16 +328,22 @@ func TestACPFakePeerThroughProviderRuntime(t *testing.T) {
 
 type acpTestWriter struct {
 	strings.Builder
+	onWrite func([]byte)
+}
+
+func (w *acpTestWriter) Write(data []byte) (int, error) {
+	n, err := w.Builder.Write(data)
+	if err == nil && w.onWrite != nil {
+		w.onWrite(append([]byte(nil), data...))
+	}
+	return n, err
 }
 
 func (*acpTestWriter) Close() error { return nil }
 
 func TestACPProcessRespondsToUnknownServerRequest(t *testing.T) {
 	writer := &acpTestWriter{}
-	process := &acpProcess{
-		stdin: writer, updates: make(chan json.RawMessage, 1),
-		done: make(chan struct{}), failed: make(chan struct{}),
-	}
+	process := newACPProcess(nil, writer)
 	request := `{"jsonrpc":"2.0","id":1,"method":"unknown/request"}` + "\n"
 	process.read(strings.NewReader(request))
 	var response struct {
@@ -351,67 +359,335 @@ func TestACPProcessRespondsToUnknownServerRequest(t *testing.T) {
 	}
 }
 
-func TestACPProcessFailsClosedOnMalformedJSONAndQueueOverflow(t *testing.T) {
+func TestACPProcessRejectsMalformedJSONRPCAndTreatsEOFAsTerminal(t *testing.T) {
 	t.Run("malformed JSON", func(t *testing.T) {
-		process := &acpProcess{
-			updates: make(chan json.RawMessage, 1),
-			done:    make(chan struct{}), failed: make(chan struct{}),
-		}
+		process := newACPProcess(nil, &acpTestWriter{})
 		process.read(strings.NewReader("{invalid}\n"))
 		if process.failure() == nil {
 			t.Fatal("malformed ACP message did not fail the process")
 		}
 	})
-	t.Run("notification queue overflow", func(t *testing.T) {
-		process := &acpProcess{
-			updates: make(chan json.RawMessage, 1),
-			done:    make(chan struct{}), failed: make(chan struct{}),
-		}
-		notification := `{"jsonrpc":"2.0","method":"session/update"}` + "\n"
-		process.read(strings.NewReader(notification + notification))
+	t.Run("missing JSON-RPC version", func(t *testing.T) {
+		process := newACPProcess(nil, &acpTestWriter{})
+		process.read(strings.NewReader(`{"id":1,"result":{}}` + "\n"))
 		if process.failure() == nil {
-			t.Fatal("ACP notification queue overflow was silently accepted")
+			t.Fatal("response without jsonrpc version did not fail the process")
+		}
+	})
+	t.Run("unexpected EOF", func(t *testing.T) {
+		process := newACPProcess(nil, &acpTestWriter{})
+		process.read(strings.NewReader(""))
+		if process.failure() == nil {
+			t.Fatal("unexpected stdout EOF did not mark the process terminal")
 		}
 	})
 }
 
-func TestACPBlockingHelperProcess(t *testing.T) {
-	if os.Getenv("TAXION_ACP_BLOCK_HELPER") != "1" {
-		return
+func TestACPProcessBackpressuresNotificationsWithoutDroppingThem(t *testing.T) {
+	process := newACPProcess(nil, &acpTestWriter{})
+	process.closing.Store(true)
+	notification := `{"jsonrpc":"2.0","method":"session/update"}` + "\n"
+	done := make(chan struct{})
+	go func() {
+		process.read(strings.NewReader(strings.Repeat(notification, 300)))
+		close(done)
+	}()
+	for index := 0; index < 300; index++ {
+		select {
+		case <-process.updates:
+		case <-time.After(time.Second):
+			t.Fatalf("notification %d was not delivered", index)
+		}
 	}
-	for {
-		time.Sleep(time.Hour)
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("ACP reader did not finish after all notifications were drained")
+	}
+	if process.failure() != nil {
+		t.Fatalf("notification backpressure failed the process: %v", process.failure())
+	}
+}
+
+func TestACPProcessCallDrainsNotificationsWhileWaitingForResponse(t *testing.T) {
+	stdoutReader, stdoutWriter := io.Pipe()
+	defer stdoutReader.Close()
+	writer := &acpTestWriter{}
+	process := newACPProcess(nil, writer)
+	process.closing.Store(true)
+	writer.onWrite = func(frame []byte) {
+		var request struct {
+			ID json.RawMessage `json:"id"`
+		}
+		if err := json.Unmarshal(bytes.TrimSpace(frame), &request); err != nil {
+			return
+		}
+		go func() {
+			encoder := json.NewEncoder(stdoutWriter)
+			for index := 0; index < 300; index++ {
+				_ = encoder.Encode(map[string]any{
+					"jsonrpc": "2.0", "method": "session/update",
+					"params": map[string]any{"update": map[string]any{
+						"sessionUpdate": "agent_message_chunk",
+						"content":       map[string]string{"type": "text", "text": "x"},
+					}},
+				})
+			}
+			_ = encoder.Encode(map[string]any{"jsonrpc": "2.0", "id": request.ID, "result": map[string]string{"status": "ok"}})
+			_ = stdoutWriter.Close()
+		}()
+	}
+	readerDone := make(chan struct{})
+	go func() {
+		process.read(stdoutReader)
+		close(readerDone)
+	}()
+	updates := 0
+	result, err := process.call(context.Background(), "session/prompt", map[string]string{"sessionId": "fake"}, func(json.RawMessage) error {
+		updates++
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("call with more than queue capacity of updates: %v", err)
+	}
+	if updates != 300 {
+		t.Fatalf("consumed %d updates, want 300", updates)
+	}
+	if !strings.Contains(string(result), "ok") {
+		t.Fatalf("unexpected response: %s", result)
+	}
+	select {
+	case <-readerDone:
+	case <-time.After(time.Second):
+		t.Fatal("ACP reader did not finish")
+	}
+}
+
+func TestACPProcessWriteHonorsContextDeadline(t *testing.T) {
+	reader, writer := io.Pipe()
+	defer reader.Close()
+	process := newACPProcess(nil, writer)
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	err := process.write(ctx, map[string]any{"jsonrpc": "2.0", "method": "blocked"})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("write error = %v, want context deadline exceeded", err)
+	}
+	if process.failure() == nil {
+		t.Fatal("interrupted partial write did not retire the ACP process")
 	}
 }
 
 func TestACPProcessCloseHonorsContextDeadline(t *testing.T) {
-	command := exec.Command(os.Args[0], "-test.run=^TestACPBlockingHelperProcess$")
-	command.Env = []string{"TAXION_ACP_BLOCK_HELPER=1"}
-	stdin, err := command.StdinPipe()
-	if err != nil {
-		t.Fatalf("StdinPipe: %v", err)
-	}
-	if err := command.Start(); err != nil {
-		t.Fatalf("start blocking ACP helper: %v", err)
-	}
-	process := &acpProcess{
-		cmd: command, stdin: stdin, updates: make(chan json.RawMessage, 1),
-		done: make(chan struct{}), failed: make(chan struct{}),
-	}
-	go func() {
-		_ = command.Wait()
-		close(process.done)
-	}()
-	defer func() { _ = process.close(context.Background()) }()
-
+	reader, writer := io.Pipe()
+	defer reader.Close()
+	process := newACPProcess(nil, writer)
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 	started := time.Now()
-	err = process.close(ctx)
+	err := process.close(ctx)
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("close error = %v, want context deadline exceeded", err)
 	}
 	if elapsed := time.Since(started); elapsed > time.Second {
 		t.Fatalf("close exceeded context deadline: %s", elapsed)
+	}
+}
+
+func newACPTestStartRequest(prompt, roleExecutionID string) StartRequest {
+	return StartRequest{
+		OperationID: "operation_start_1", JobID: "job_1", RoleExecutionID: roleExecutionID,
+		RequestSHA256: strings.Repeat("a", 64), PromptSHA256: sha256Hex(prompt),
+		Prompt: prompt, MaxTurns: 2, MaxTokens: 1000, Deadline: time.Now().Add(8 * time.Second),
+	}
+}
+
+func newACPTestAdapter(t *testing.T) *ACPAdapter {
+	t.Helper()
+	adapter, err := NewACPAdapter(ACPConfig{
+		Command: os.Args[0], Args: []string{"-test.run=TestACPHelperProcess"},
+		WorkingDirectory: t.TempDir(), Identity: testIdentity(),
+		Environment: []string{"TAXION_ACP_HELPER"},
+	})
+	if err != nil {
+		t.Fatalf("NewACPAdapter: %v", err)
+	}
+	return adapter
+}
+
+func TestACPAdapterCopiesConfigurationSlices(t *testing.T) {
+	args := []string{"--model", "test-model"}
+	environment := []string{"LANG"}
+	adapter, err := NewACPAdapter(ACPConfig{
+		Command: "copilot", Args: args, Environment: environment,
+		WorkingDirectory: t.TempDir(), Identity: testIdentity(),
+	})
+	if err != nil {
+		t.Fatalf("NewACPAdapter: %v", err)
+	}
+	args[0] = "--no-sandbox"
+	environment[0] = "GH_TOKEN"
+	if adapter.config.Args[0] != "--model" || adapter.config.Environment[0] != "LANG" {
+		t.Fatalf("adapter retained caller-owned slices: %#v", adapter.config)
+	}
+}
+
+func TestACPAdapterRejectsUnsupportedProtocolVersion(t *testing.T) {
+	t.Setenv("TAXION_ACP_HELPER", "1;protocol=2")
+	adapter := newACPTestAdapter(t)
+	defer adapter.Close()
+	_, err := adapter.Start(context.Background(), newACPTestStartRequest("start", "role_execution_1"), nil)
+	var operationErr *OperationError
+	if !errors.As(err, &operationErr) || operationErr.Code != OperationCodeUnsupported {
+		t.Fatalf("Start error = %v, want unsupported protocol version", err)
+	}
+	if len(adapter.byID) != 0 || len(adapter.byOp) != 0 {
+		t.Fatal("unsupported protocol version published a session or operation cache")
+	}
+}
+
+func TestACPAdapterInitialTurnIDIsBounded(t *testing.T) {
+	t.Setenv("TAXION_ACP_HELPER", "1")
+	adapter := newACPTestAdapter(t)
+	defer adapter.Close()
+	request := newACPTestStartRequest("start", strings.Repeat("r", 251))
+	if _, err := adapter.Start(context.Background(), request, nil); err != nil {
+		t.Fatalf("Start with maximum RoleExecutionID: %v", err)
+	}
+}
+
+func TestACPAdapterDoesNotCacheNonEndTurnResults(t *testing.T) {
+	t.Setenv("TAXION_ACP_HELPER", "1;stop=limit:max_tokens")
+	adapter := newACPTestAdapter(t)
+	defer adapter.Close()
+	start, err := adapter.Start(context.Background(), newACPTestStartRequest("start", "role_execution_1"), nil)
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	prompt := "limit"
+	_, err = adapter.Send(context.Background(), TurnRequest{
+		OperationID: "operation_turn_limit", TurnID: "turn_limit", SessionID: start.SessionID,
+		PromptSHA256: sha256Hex(prompt), Prompt: prompt, MaxTokens: 1000, Deadline: time.Now().Add(5 * time.Second),
+	}, nil)
+	var operationErr *OperationError
+	if !errors.As(err, &operationErr) || operationErr.Class != FailureAmbiguous {
+		t.Fatalf("Send error = %v, want ambiguous non-end-turn result", err)
+	}
+	session := adapter.byID[start.SessionID]
+	session.mu.RLock()
+	_, cached := session.turns["operation_turn_limit"]
+	session.mu.RUnlock()
+	if cached {
+		t.Fatal("non-end-turn result was cached as completed")
+	}
+}
+
+func TestACPAdapterInvalidatesSessionAfterCancelledPrompt(t *testing.T) {
+	t.Setenv("TAXION_ACP_HELPER", "1;block=block")
+	adapter := newACPTestAdapter(t)
+	defer adapter.Close()
+	start, err := adapter.Start(context.Background(), newACPTestStartRequest("start", "role_execution_1"), nil)
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	prompt := "block"
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	_, err = adapter.Send(ctx, TurnRequest{
+		OperationID: "operation_turn_cancel", TurnID: "turn_cancel", SessionID: start.SessionID,
+		PromptSHA256: sha256Hex(prompt), Prompt: prompt, MaxTokens: 1000, Deadline: time.Now().Add(time.Second),
+	}, nil)
+	var operationErr *OperationError
+	if !errors.As(err, &operationErr) || operationErr.Class != FailureAmbiguous {
+		t.Fatalf("cancelled Send error = %v, want ambiguous outcome", err)
+	}
+	_, err = adapter.Send(context.Background(), TurnRequest{
+		OperationID: "operation_turn_after_cancel", TurnID: "turn_after_cancel", SessionID: start.SessionID,
+		PromptSHA256: sha256Hex("again"), Prompt: "again", MaxTokens: 1000, Deadline: time.Now().Add(time.Second),
+	}, nil)
+	if !errors.As(err, &operationErr) || operationErr.Code != OperationCodeNotFound {
+		t.Fatalf("Send after cancellation error = %v, want session not found", err)
+	}
+}
+
+func TestACPAdapterCloseDuringStartDoesNotPublishOperationCache(t *testing.T) {
+	t.Setenv("TAXION_ACP_HELPER", "1;block=block")
+	adapter := newACPTestAdapter(t)
+	startResult := make(chan error, 1)
+	go func() {
+		_, err := adapter.Start(context.Background(), newACPTestStartRequest("block", "role_execution_1"), nil)
+		startResult <- err
+	}()
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		adapter.mu.Lock()
+		registered := len(adapter.byID) > 0
+		adapter.mu.Unlock()
+		if registered {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("Start did not register its session before prompt")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if err := adapter.Close(); err != nil {
+		t.Fatalf("Close during Start: %v", err)
+	}
+	if err := <-startResult; err == nil {
+		t.Fatal("Start reported success after concurrent Close")
+	}
+	adapter.mu.Lock()
+	defer adapter.mu.Unlock()
+	if len(adapter.byOp) != 0 || len(adapter.byID) != 0 || len(adapter.byRole) != 0 {
+		t.Fatal("Close left Start operation or session caches published")
+	}
+}
+
+func TestACPAdapterCloseInvalidatesStartCacheAndRejectsNewStarts(t *testing.T) {
+	t.Setenv("TAXION_ACP_HELPER", "1")
+	adapter := newACPTestAdapter(t)
+	request := newACPTestStartRequest("start", "role_execution_1")
+	if _, err := adapter.Start(context.Background(), request, nil); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if err := adapter.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if len(adapter.byOp) != 0 {
+		t.Fatal("Close retained cached Start results")
+	}
+	_, err := adapter.Start(context.Background(), request, nil)
+	var operationErr *OperationError
+	if !errors.As(err, &operationErr) || operationErr.Code != OperationCodeUnavailable {
+		t.Fatalf("Start after Close error = %v, want unavailable", err)
+	}
+}
+
+func TestACPAdapterStopInvalidatesStartCache(t *testing.T) {
+	t.Setenv("TAXION_ACP_HELPER", "1")
+	adapter := newACPTestAdapter(t)
+	defer adapter.Close()
+	request := newACPTestStartRequest("start", "role_execution_1")
+	start, err := adapter.Start(context.Background(), request, nil)
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	_, err = adapter.Stop(context.Background(), StopRequest{SessionID: start.SessionID}, nil)
+	var operationErr *OperationError
+	if !errors.As(err, &operationErr) || operationErr.Class != FailureAmbiguous {
+		t.Fatalf("Stop error = %v, want ambiguous outcome", err)
+	}
+	if len(adapter.byOp) != 0 || len(adapter.byID) != 0 || len(adapter.byRole) != 0 {
+		t.Fatal("Stop retained Start or session caches")
+	}
+}
+
+func TestACPAdapterAcceptsFinalResponseBeforePeerEOF(t *testing.T) {
+	t.Setenv("TAXION_ACP_HELPER", "1;exit=exit")
+	adapter := newACPTestAdapter(t)
+	defer adapter.Close()
+	if _, err := adapter.Start(context.Background(), newACPTestStartRequest("exit", "role_execution_1"), nil); err != nil {
+		t.Fatalf("Start lost final response sent before peer EOF: %v", err)
 	}
 }
