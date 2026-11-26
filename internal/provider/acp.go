@@ -480,8 +480,7 @@ func (a *ACPAdapter) send(ctx context.Context, session *acpSession, request Turn
 		OperationID: request.OperationID, TurnID: request.TurnID,
 		SessionID: request.SessionID, ReceiptID: acpReceiptID("acp-turn-", request.TurnID),
 		Status: "COMPLETED", Output: output.String(),
-		EvidenceSHA256: sha256Hex(string(response) + "
-" + output.String()),
+		EvidenceSHA256: sha256Hex(string(response) + "\n" + output.String()),
 	}
 	session.mu.Lock()
 	session.turns[request.OperationID] = result

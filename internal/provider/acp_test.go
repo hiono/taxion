@@ -1002,8 +1002,7 @@ func TestACPProcessWakesReaderWhenTurnConsumerExitsWithFullQueue(t *testing.T) {
 	process := newACPProcess(nil, &acpTestWriter{})
 	process.closing.Store(true)
 	process.beginUpdateConsumer()
-	notification := `{"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"agent_message_chunk"}}}` + "
-"
+	notification := `{"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"agent_message_chunk"}}}` + "\n"
 	go process.read(strings.NewReader(strings.Repeat(notification, cap(process.updates)+1)))
 	deadline := time.Now().Add(time.Second)
 	for len(process.updates) < cap(process.updates) && time.Now().Before(deadline) {
@@ -1027,8 +1026,7 @@ func TestACPProcessBoundsQueuedUpdateBytes(t *testing.T) {
 	process.closing.Store(true)
 	process.beginUpdateConsumer()
 	chunk := strings.Repeat("x", 2*1024*1024)
-	notification := `{"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"` + chunk + `"}}}}` + "
-"
+	notification := `{"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"` + chunk + `"}}}}` + "\n"
 	go process.read(strings.NewReader(strings.Repeat(notification, 5)))
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
