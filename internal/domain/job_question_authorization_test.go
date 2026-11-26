@@ -258,7 +258,7 @@ func TestJobQuestionAuthorizationRejectsScopeAndBudgetExpansion(t *testing.T) {
 		ReadOnlyBoundary: PlanningReadOnlyBoundary{
 			Mode: PlanningReadOnlyBoundarySnapshot, Reference: "question_snapshot_2", SHA256: strings.Repeat("d", 64),
 		},
-		Budget: PlanningBudget{MaxTurns: 1, MaxTokens: 100}, Deadline: contract.Deadline.Add(-time.Minute),
+		Budget:   PlanningBudget{MaxTurns: 1, MaxTokens: 100}, Deadline: contract.Deadline.Add(-time.Minute),
 	}
 	if _, err := NewJobQuestionAuthorization(job, base, now.Add(3*time.Minute)); err != nil {
 		t.Fatalf("unmodified JobQuestionAuthorization request is invalid: %v", err)
@@ -331,7 +331,7 @@ func TestJobQuestionAuthorizationReservesBudgetAcrossQuestions(t *testing.T) {
 		message, err := NewJobMessage(job, commandID, JobMessageRequest{
 			Sender: ActorRef{Kind: ActorCoder, ID: start.RoleExecution.ID},
 			Recipient: ActorRef{Kind: ActorPlanner, ID: planner.ID},
-			Body: body,
+			Body:      body,
 		}, at)
 		if err != nil {
 			t.Fatalf("NewJobMessage: %v", err)
@@ -350,7 +350,7 @@ func TestJobQuestionAuthorizationReservesBudgetAcrossQuestions(t *testing.T) {
 		JobID: job.ID, CommandID: "cmd_83838383838383838383838383838383",
 		QuestionMessageID: firstQuestion.ID, PlannerRoleExecutionID: planner.ID,
 		ProviderSessionID: startObservation.ProviderSessionID,
-		RepositoryID: contract.TargetRepositories[0], PlanningRepositoryID: grant.RepositoryID,
+		RepositoryID:      contract.TargetRepositories[0], PlanningRepositoryID: grant.RepositoryID,
 		ProviderID: grant.ProviderID, AccountID: grant.AccountID,
 		ConfigurationSHA256: grant.ConfigurationSHA256,
 		ReadOnlyBoundary: PlanningReadOnlyBoundary{
@@ -403,4 +403,3 @@ func TestJobQuestionAuthorizationReservesBudgetAcrossQuestions(t *testing.T) {
 		t.Fatal("Job.Validate accepted aggregate question grants beyond the approved Job budget")
 	}
 }
-
