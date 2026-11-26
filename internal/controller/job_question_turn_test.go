@@ -23,9 +23,9 @@ func (r fixedQuestionTurnContextResolver) ResolveReadOnlyBoundary(
 }
 
 type jobQuestionTurnFixture struct {
-	controller                                                        *JobQuestionTurnController
-	runtime                                                           *fakePlanningProviderRuntime
-	database                                                          *store.Store
+	controller                                                                        *JobQuestionTurnController
+	runtime                                                                           *fakePlanningProviderRuntime
+	database                                                                          *store.Store
 	jobID, authorizationID, questionID, coderID, coderSessionID, plannerID, sessionID string
 }
 
@@ -470,9 +470,9 @@ func TestOrchestratorContinuesAfterFailedQuestionAndCollectsErrors(t *testing.T)
 	secondQuestion, err := communication.SendFromRole(context.Background(), RoleMessageRequest{
 		JobID: fixture.jobID, RoleExecutionID: fixture.coderID,
 		ProviderSessionID: fixture.coderSessionID,
-		CommandID: "cmd_85858585858585858585858585858585",
-		Recipient: domain.ActorRef{Kind: domain.ActorPlanner, ID: fixture.plannerID},
-		Body: "Second independent question",
+		CommandID:         "cmd_85858585858585858585858585858585",
+		Recipient:         domain.ActorRef{Kind: domain.ActorPlanner, ID: fixture.plannerID},
+		Body:              "Second independent question",
 	})
 	if err != nil {
 		t.Fatalf("SendFromRole second question: %v", err)
@@ -635,4 +635,3 @@ func TestOrchestratorReplaysCompletedTurnAfterReplyPersistenceFailure(t *testing
 			second, fixture.runtime.sendCalls, err)
 	}
 }
-
