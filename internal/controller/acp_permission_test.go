@@ -2,8 +2,8 @@ package controller
 
 import (
 	"context"
-	"testing"
 	"strings"
+	"testing"
 	"time"
 
 	"github.com/hiono/taxion/internal/domain"
@@ -20,7 +20,7 @@ func bindACPTestWorktree(
 ) (domain.RoleExecution, domain.ProviderStartIntent, domain.WorktreeAssignment) {
 	t.Helper()
 	assignment := domain.WorktreeAssignment{
-		ID: domain.WorktreeAssignmentID(jobID, execution.TaskID, repositoryID),
+		ID:    domain.WorktreeAssignmentID(jobID, execution.TaskID, repositoryID),
 		JobID: jobID, TaskID: execution.TaskID, RepositoryID: repositoryID,
 		RepositoryPath: t.TempDir(), WorktreePath: t.TempDir(),
 		BaselineCommit: strings.Repeat("a", 40), OwnerRoleExecutionID: execution.ID,
