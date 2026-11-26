@@ -983,7 +983,9 @@ func TestACPAdapterAllowsOnlyAuthorizedTaskPermissionOnce(t *testing.T) {
 		WorkingDirectory: t.TempDir(), Identity: identity,
 		Environment: []string{"TAXION_ACP_HELPER"}, PermissionAuthorizer: authorizer,
 	})
-	if err != nil { t.Fatalf("NewACPAdapter: %v", err) }
+	if err != nil {
+		t.Fatalf("NewACPAdapter: %v", err)
+	}
 	defer adapter.Close()
 	prompt := "execute the approved task"
 	request := StartRequest{
@@ -995,7 +997,9 @@ func TestACPAdapterAllowsOnlyAuthorizedTaskPermissionOnce(t *testing.T) {
 	if _, err := adapter.Start(context.Background(), request, nil); err != nil {
 		t.Fatalf("Start with authorized Task tool request: %v", err)
 	}
-	if authorizer.calls != 1 { t.Fatalf("permission authorizer calls = %d, want 1", authorizer.calls) }
+	if authorizer.calls != 1 {
+		t.Fatalf("permission authorizer calls = %d, want 1", authorizer.calls)
+	}
 }
 
 func TestACPProcessWakesReaderWhenTurnConsumerExitsWithFullQueue(t *testing.T) {

@@ -281,8 +281,8 @@ func (a *ACPAdapter) Start(ctx context.Context, request StartRequest, _ Credenti
 				RoleExecutionID: request.RoleExecutionID, TaskID: request.TaskID,
 				ExecutionPermissionID: request.ExecutionPermissionID,
 				SessionID:             session.sessionID, RequestSHA256: request.RequestSHA256,
-				ProviderIdentity:      a.config.Identity,
-				ToolCall:              append([]byte(nil), permissionRequest.ToolCall...),
+				ProviderIdentity: a.config.Identity,
+				ToolCall:         append([]byte(nil), permissionRequest.ToolCall...),
 			})
 			return err == nil && !session.stopping.Load()
 		})
