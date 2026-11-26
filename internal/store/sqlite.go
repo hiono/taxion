@@ -42,16 +42,8 @@ WHEN
 		SELECT json_group_array(json(value) ORDER BY CAST(key AS INTEGER))
 		FROM json_each(OLD.payload_json, '$.job_messages')
 	), '[]')
-	OR COALESCE((
-		SELECT json_group_array(json(value) ORDER BY CAST(key AS INTEGER))
-		FROM json_each(NEW.payload_json, '$.job_question_authorizations')
-		WHERE CAST(key AS INTEGER) < json_array_length(OLD.payload_json, '$.job_question_authorizations')
-	), '[]') != COALESCE((
-		SELECT json_group_array(json(value) ORDER BY CAST(key AS INTEGER))
-		FROM json_each(OLD.payload_json, '$.job_question_authorizations')
-	), '[]')
 BEGIN
-	SELECT RAISE(ABORT, 'append-only v2 facts');
+	SELECT RAISE(ABORT, 'append-only JobMessages');
 END`
 
 const createLocalDraftJobCommandType = "CreateJob"
