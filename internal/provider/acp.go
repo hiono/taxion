@@ -262,7 +262,7 @@ func (a *ACPAdapter) Start(ctx context.Context, request StartRequest, _ Credenti
 	if request.TaskID != "" && request.ExecutionPermissionID != "" && a.config.PermissionAuthorizer != nil {
 		process.setPermissionHandler(func(permissionCtx context.Context, raw json.RawMessage) bool {
 			var permissionRequest struct {
-				SessionID string `json:"sessionId"`
+				SessionID string          `json:"sessionId"`
 				ToolCall  json.RawMessage `json:"toolCall"`
 			}
 			if json.Unmarshal(raw, &permissionRequest) != nil ||
@@ -275,9 +275,9 @@ func (a *ACPAdapter) Start(ctx context.Context, request StartRequest, _ Credenti
 				OperationID: request.OperationID, JobID: request.JobID,
 				RoleExecutionID: request.RoleExecutionID, TaskID: request.TaskID,
 				ExecutionPermissionID: request.ExecutionPermissionID,
-				SessionID: session.sessionID, RequestSHA256: request.RequestSHA256,
-				ProviderIdentity: a.config.Identity,
-				ToolCall: append([]byte(nil), permissionRequest.ToolCall...),
+				SessionID:             session.sessionID, RequestSHA256: request.RequestSHA256,
+				ProviderIdentity:      a.config.Identity,
+				ToolCall:              append([]byte(nil), permissionRequest.ToolCall...),
 			})
 			return err == nil && !session.stopping.Load()
 		})
@@ -423,9 +423,9 @@ func (a *ACPAdapter) send(ctx context.Context, session *acpSession, request Turn
 			Method string `json:"method"`
 			Params struct {
 				SessionID string `json:"sessionId"`
-				Update struct {
+				Update    struct {
 					SessionUpdate string `json:"sessionUpdate"`
-					Content struct {
+					Content       struct {
 						Type string `json:"type"`
 						Text string `json:"text"`
 					} `json:"content"`
@@ -798,7 +798,6 @@ func (p *acpProcess) read(stdout io.Reader) {
 	}
 }
 
-
 func (p *acpProcess) closePending() {
 	p.pending.Range(func(key, value any) bool {
 		if waiter, ok := p.pending.LoadAndDelete(key); ok {
@@ -903,7 +902,6 @@ func (p *acpProcess) drainUpdates(ctx context.Context, onUpdate func(json.RawMes
 		}
 	}
 }
-
 
 // The operation deadline takes precedence: a response received after expiry is not accepted.
 func (p *acpProcess) handleResponse(response acpMessage, ok bool, ctx context.Context, onUpdate func(json.RawMessage) error) (json.RawMessage, error) {
