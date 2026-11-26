@@ -259,7 +259,7 @@ func validTurnRequest() TurnRequest {
 		OperationID: "provider_turn_1", TurnID: "turn_1", SessionID: "session_1",
 		PromptSHA256: sha256Hex(prompt), Prompt: prompt,
 		ReadOnlyBoundary: ReadOnlyContextBoundary{Mode: "snapshot", Reference: "snapshot_1", SHA256: sha256Hex("snapshot")},
-		MaxTokens: 20,
+		MaxTokens:        20,
 		Deadline: time.Now().UTC().Add(time.Hour),
 	}
 }
