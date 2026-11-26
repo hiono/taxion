@@ -115,7 +115,8 @@ func (c *JobQuestionTurnController) Send(
 		if err != nil {
 			return outcome, err
 		}
-		if !capabilities.HasEvidenceAtLeast(provider.CapabilitySendIdempotency, c.minimumEvidence) {
+		if !capabilities.HasEvidenceAtLeast(provider.CapabilitySendIdempotency, c.minimumEvidence) ||
+			!capabilities.HasEvidenceAtLeast(provider.CapabilityReadOnlyContextEnforcement, c.minimumEvidence) {
 			return outcome, provider.ErrUnsupportedCapability
 		}
 		receipt, created, err := c.store.AddJobQuestionTurnIntent(ctx, job.ID, job.Revision, domain.JobQuestionTurnIntentRequest{

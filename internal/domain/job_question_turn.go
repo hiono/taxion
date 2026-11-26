@@ -199,7 +199,7 @@ func (t JobQuestionTurnIntent) Validate(job Job) error {
 	if providerStopIntentExists(job, t.RoleExecutionID, t.ProviderSessionID, t.CreatedRevision) {
 		return errors.New("JobQuestionTurnIntent follows a Provider Stop intent")
 	}
-	turnNumber, tokensUsed, err := jobQuestionTurnBudgetUsedBefore(job, grant.ID, t.CreatedRevision)
+	turnNumber, tokensUsed, err := jobQuestionTurnBudgetUsedBefore(job, grant.ID, t.CreatedRevision, t.CreatedAt)
 	if err != nil {
 		return err
 	}
@@ -467,17 +467,19 @@ func providerStartIntentForRoleExecution(job Job, roleExecutionID string) (Provi
 }
 
 func jobQuestionTurnBudgetUsed(job Job, authorizationID string) (uint32, uint64, error) {
-	return jobQuestionTurnBudgetUsedBefore(job, authorizationID, job.Revision+1)
+	return jobQuestionTurnBudgetUsedBefore(job, authorizationID, job.Revision+1, time.Time{})
 }
 
-func jobQuestionTurnBudgetUsedBefore(job Job, authorizationID string, beforeRevision uint64) (uint32, uint64, error) {
+func jobQuestionTurnBudgetUsedBefore(
+	job Job,
+	authorizationID string,
+	beforeRevision uint64,
+	beforeAt time.Time,
+) (uint32, uint64, error) {
 	observationsByIntent := make(map[string]JobQuestionTurnObservation, len(job.JobQuestionTurnObservations))
 	for _, observation := range job.JobQuestionTurnObservations {
-		if observation.CreatedRevision >= beforeRevision {
-			continue
-		}
-		intent, found := jobQuestionTurnIntentByID(job, observation.IntentID)
-		if !found || observation.CreatedAt.After(intent.CreatedAt) {
+		if observation.CreatedRevision >= beforeRevision ||
+			(!beforeAt.IsZero() && observation.CreatedAt.After(beforeAt)) {
 			continue
 		}
 		previous, found := observationsByIntent[observation.IntentID]
