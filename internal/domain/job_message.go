@@ -20,8 +20,8 @@ const (
 )
 
 const (
-	ControllerActorID   = "taxion.controller"
-	OrchestratorActorID = "taxion.orchestrator"
+	ControllerActorID      = "taxion.controller"
+	OrchestratorActorID    = "taxion.orchestrator"
 	maxJobMessageBodyBytes = 64 * 1024
 )
 
@@ -81,10 +81,10 @@ func NewJobMessage(job Job, commandID string, request JobMessageRequest, now tim
 	}
 
 	message := JobMessage{
-		ID: JobMessageID(commandID), CommandID: commandID, JobID: job.ID,
-		Sender: request.Sender, Recipient: request.Recipient,
+		ID              : JobMessageID(commandID), CommandID: commandID, JobID: job.ID,
+		Sender          : request.Sender, Recipient: request.Recipient,
 		ReplyToMessageID: request.ReplyToMessageID, Body: request.Body,
-		CreatedAt: now.UTC().Round(0), CreatedRevision: job.Revision + 1,
+		CreatedAt       : now.UTC().Round(0), CreatedRevision: job.Revision + 1,
 	}
 	if err := message.Validate(job); err != nil {
 		return JobMessage{}, err
@@ -151,7 +151,7 @@ func (a ActorRef) Validate(job Job) error {
 		if !found || execution.Role != string(a.Kind) {
 			return errors.New("Role Actor must reference a matching RoleExecution in the same Job")
 		}
-	default:
+	default: 
 		return errors.New("Actor kind is unsupported")
 	}
 	return nil

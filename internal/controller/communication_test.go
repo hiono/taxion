@@ -13,16 +13,16 @@ import (
 func TestCommunicationControllerPersistsCoderPlannerQuestionAndAnswer(t *testing.T) {
 	database, jobID, revision, task := approvedExecutionPermissionControllerFixture(t)
 	runtime := &fakePlanningProviderRuntime{identity: provider.Identity{
-		ProviderID: "provider.test", AccountID: "account.primary",
+		ProviderID         : "provider.test", AccountID: "account.primary",
 		ConfigurationSHA256: revision.Contract.ConfigurationSHA256,
-		SDKVersion:          "test-sdk/1",
+		SDKVersion         : "test-sdk/1",
 	}}
 	now := time.Now().UTC().Round(0)
 	runtime.capabilities = provider.Capabilities{
 		Identity: runtime.identity, StartIdempotency: true,
 		Evidence: []provider.CapabilityEvidence{{
-			Capability: provider.CapabilityStartIdempotency, Identity: runtime.identity,
-			TestID: "test_start_idempotency", EvidenceSHA256: strings.Repeat("a", 64),
+			Capability   : provider.CapabilityStartIdempotency, Identity: runtime.identity,
+			TestID       : "test_start_idempotency", EvidenceSHA256: strings.Repeat("a", 64),
 			EvidenceLevel: provider.EvidenceSynthetic, VerifiedAt: now,
 		}},
 	}
@@ -35,12 +35,12 @@ func TestCommunicationControllerPersistsCoderPlannerQuestionAndAnswer(t *testing
 	}
 	executionController.now = func() time.Time { return now }
 	permissionRequest := domain.ExecutionPermissionRequest{
-		JobID: jobID, TaskID: task.ID, CommandID: "cmd_92929292929292929292929292929292",
-		Role: domain.RoleCoder, Effect: "repository.write",
-		Resource:   revision.Contract.TargetRepositories[0],
-		ProviderID: runtime.identity.ProviderID, AccountID: runtime.identity.AccountID,
+		JobID              : jobID, TaskID: task.ID, CommandID: "cmd_92929292929292929292929292929292",
+		Role               : domain.RoleCoder, Effect: "repository.write",
+		Resource           : revision.Contract.TargetRepositories[0],
+		ProviderID         : runtime.identity.ProviderID, AccountID: runtime.identity.AccountID,
 		ConfigurationSHA256: revision.Contract.ConfigurationSHA256,
-		ReservedTurns:       1, ReservedTokens: 100, ExpiresAt: now.Add(30 * time.Minute),
+		ReservedTurns      : 1, ReservedTokens: 100, ExpiresAt: now.Add(30 * time.Minute),
 	}
 	_, permission, err := executionController.Authorize(context.Background(), permissionRequest)
 	if err != nil {
@@ -59,7 +59,7 @@ func TestCommunicationControllerPersistsCoderPlannerQuestionAndAnswer(t *testing
 	}
 	runtime.startResult = provider.StartResult{
 		OperationID: permission.OperationID, SessionID: "session_coder",
-		ReceiptID: "receipt_coder", EvidenceSHA256: strings.Repeat("f", 64),
+		ReceiptID  : "receipt_coder", EvidenceSHA256: strings.Repeat("f", 64),
 	}
 	coderStart, _, err := providerController.DispatchTaskExecution(
 		context.Background(), jobID, coderExecution.ID, permission.ID, permissionRequest,
@@ -98,10 +98,10 @@ func TestCommunicationControllerPersistsCoderPlannerQuestionAndAnswer(t *testing
 		t.Fatalf("NewCommunicationController: %v", err)
 	}
 	question, err := communication.SendFromRole(context.Background(), RoleMessageRequest{
-		JobID: jobID, RoleExecutionID: coderExecution.ID, ProviderSessionID: coderStart.ProviderSessionID,
+		JobID    : jobID, RoleExecutionID: coderExecution.ID, ProviderSessionID: coderStart.ProviderSessionID,
 		CommandID: "cmd_44444444444444444444444444444444",
 		Recipient: domain.ActorRef{Kind: domain.ActorPlanner, ID: plannerExecution.ID},
-		Body:      "この制約の優先順位を確認してください。\\n元のTaskとContextは維持してください。",
+		Body     : "この制約の優先順位を確認してください。\\n元のTaskとContextは維持してください。",
 	})
 	if err != nil {
 		t.Fatalf("SendFromRole Coder QUESTION: %v", err)
@@ -113,11 +113,11 @@ func TestCommunicationControllerPersistsCoderPlannerQuestionAndAnswer(t *testing
 	}
 
 	answer, err := communication.SendFromRole(context.Background(), RoleMessageRequest{
-		JobID: jobID, RoleExecutionID: plannerExecution.ID, ProviderSessionID: plannerSession,
-		CommandID: "cmd_55555555555555555555555555555555",
-		Recipient: domain.ActorRef{Kind: domain.ActorCoder, ID: coderExecution.ID},
+		JobID           : jobID, RoleExecutionID: plannerExecution.ID, ProviderSessionID: plannerSession,
+		CommandID       : "cmd_55555555555555555555555555555555",
+		Recipient       : domain.ActorRef{Kind: domain.ActorCoder, ID: coderExecution.ID},
 		ReplyToMessageID: question.Message.ID,
-		Body: "優先順位は安全性、次に完遂性です。",
+		Body            : "優先順位は安全性、次に完遂性です。",
 	})
 	if err != nil {
 		t.Fatalf("SendFromRole Planner ANSWER: %v", err)
@@ -151,10 +151,10 @@ func TestCommunicationControllerRejectsUnboundRoleSession(t *testing.T) {
 		t.Fatalf("NewCommunicationController: %v", err)
 	}
 	_, err = communication.SendFromRole(context.Background(), RoleMessageRequest{
-		JobID: jobID, RoleExecutionID: execution.ID, ProviderSessionID: "session_forged",
+		JobID    : jobID, RoleExecutionID: execution.ID, ProviderSessionID: "session_forged",
 		CommandID: "cmd_77777777777777777777777777777777",
 		Recipient: domain.ActorRef{Kind: domain.ActorHuman, ID: principal.PrincipalID()},
-		Body: "must be rejected",
+		Body     : "must be rejected",
 	})
 	if err == nil {
 		t.Fatal("CommunicationController accepted an unbound Provider Session")

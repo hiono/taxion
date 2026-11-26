@@ -75,9 +75,9 @@ func TestJobQuestionAuthorizationBindsOneApprovedQuestionAndPlannerSession(t *te
 		t.Fatal("approved Job fixture has no Planner RoleExecution")
 	}
 	message, err := NewJobMessage(job, "cmd_72727272727272727272727272727272", JobMessageRequest{
-		Sender:    ActorRef{Kind: ActorCoder, ID: start.RoleExecution.ID},
+		Sender   : ActorRef{Kind: ActorCoder, ID: start.RoleExecution.ID},
 		Recipient: ActorRef{Kind: ActorPlanner, ID: planner.ID},
-Body: "Please clarify the approved implementation constraint.",
+		Body     : "Please clarify the approved implementation constraint.",
 	}, now.Add(2*time.Minute))
 	if err != nil {
 		t.Fatalf("NewJobMessage: %v", err)
@@ -102,16 +102,16 @@ Body: "Please clarify the approved implementation constraint.",
 	}
 	authorizationTime := now.Add(3 * time.Minute)
 	request := JobQuestionAuthorizationRequest{
-		JobID: job.ID, CommandID: "cmd_73737373737373737373737373737373",
-		QuestionMessageID: message.ID, PlannerRoleExecutionID: planner.ID,
-		ProviderSessionID: startObservation.ProviderSessionID,
-		RepositoryID:      pinnedRepository, PlanningRepositoryID: planningGrant.RepositoryID,
-		ProviderID: planningGrant.ProviderID, AccountID: planningGrant.AccountID,
+		JobID              : job.ID, CommandID: "cmd_73737373737373737373737373737373",
+		QuestionMessageID  : message.ID, PlannerRoleExecutionID: planner.ID,
+		ProviderSessionID  : startObservation.ProviderSessionID,
+		RepositoryID       : pinnedRepository, PlanningRepositoryID: planningGrant.RepositoryID,
+		ProviderID         : planningGrant.ProviderID, AccountID: planningGrant.AccountID,
 		ConfigurationSHA256: planningGrant.ConfigurationSHA256,
-		ReadOnlyBoundary: PlanningReadOnlyBoundary{
+		ReadOnlyBoundary   : PlanningReadOnlyBoundary{
 			Mode: PlanningReadOnlyBoundarySnapshot, Reference: "question_snapshot_1", SHA256: strings.Repeat("d", 64),
 		},
-		Budget:   PlanningBudget{MaxTurns: 1, MaxTokens: 100},
+		Budget  : PlanningBudget{MaxTurns: 1, MaxTokens: 100},
 		Deadline: contract.Deadline.Add(-time.Minute),
 	}
 	authorization, err := NewJobQuestionAuthorization(job, request, authorizationTime)
@@ -190,9 +190,9 @@ func TestJobQuestionAuthorizationRejectsScopeAndBudgetExpansion(t *testing.T) {
 	job.UpdatedAt = start.RoleExecution.CreatedAt
 	planner := job.RoleExecutions[0]
 	message, err := NewJobMessage(job, "cmd_75757575757575757575757575757575", JobMessageRequest{
-		Sender:    ActorRef{Kind: ActorCoder, ID: start.RoleExecution.ID},
+		Sender   : ActorRef{Kind: ActorCoder, ID: start.RoleExecution.ID},
 		Recipient: ActorRef{Kind: ActorPlanner, ID: planner.ID},
-Body: "Please clarify the approved implementation constraint.",
+		Body     : "Please clarify the approved implementation constraint.",
 	}, now.Add(2*time.Minute))
 	if err != nil {
 		t.Fatalf("NewJobMessage: %v", err)
@@ -204,12 +204,12 @@ Body: "Please clarify the approved implementation constraint.",
 	startObservation, _ := latestProviderStartObservation(job, planner.ProviderStartOperationID)
 	contract := job.JobContractRevisions[len(job.JobContractRevisions)-1].Contract
 	base := JobQuestionAuthorizationRequest{
-		JobID: job.ID, CommandID: "cmd_76767676767676767676767676767676",
+		JobID            : job.ID, CommandID: "cmd_76767676767676767676767676767676",
 		QuestionMessageID: message.ID, PlannerRoleExecutionID: planner.ID,
 		ProviderSessionID: startObservation.ProviderSessionID,
-		RepositoryID:      contract.TargetRepositories[0], PlanningRepositoryID: grant.RepositoryID, ProviderID: grant.ProviderID,
-		AccountID: grant.AccountID, ConfigurationSHA256: grant.ConfigurationSHA256,
-		ReadOnlyBoundary: PlanningReadOnlyBoundary{
+		RepositoryID     : contract.TargetRepositories[0], PlanningRepositoryID: grant.RepositoryID, ProviderID: grant.ProviderID,
+		AccountID        : grant.AccountID, ConfigurationSHA256: grant.ConfigurationSHA256,
+		ReadOnlyBoundary : PlanningReadOnlyBoundary{
 			Mode: PlanningReadOnlyBoundarySnapshot, Reference: "question_snapshot_2", SHA256: strings.Repeat("d", 64),
 		},
 		Budget: PlanningBudget{MaxTurns: 1, MaxTokens: 100}, Deadline: contract.Deadline.Add(-time.Minute),
@@ -274,12 +274,12 @@ Body: "Please clarify the approved implementation constraint.",
 		permission.CanonicalHash = mismatchedHash
 		permission.ConfigurationSHA256 = mismatchedContract.ConfigurationSHA256
 		permissionRequest := ExecutionPermissionRequest{
-			JobID: permission.JobID, TaskID: permission.TaskID, CommandID: permission.CommandID,
-			Role: permission.Role, Effect: permission.Effect, Resource: permission.Resource,
-			ProviderID: permission.ProviderID, AccountID: permission.AccountID,
+			JobID              : permission.JobID, TaskID: permission.TaskID, CommandID: permission.CommandID,
+			Role               : permission.Role, Effect: permission.Effect, Resource: permission.Resource,
+			ProviderID         : permission.ProviderID, AccountID: permission.AccountID,
 			ConfigurationSHA256: permission.ConfigurationSHA256,
-			ReservedTurns:       permission.ReservedTurns, ReservedTokens: permission.ReservedTokens,
-			ExpiresAt: permission.ExpiresAt,
+			ReservedTurns      : permission.ReservedTurns, ReservedTokens: permission.ReservedTokens,
+			ExpiresAt          : permission.ExpiresAt,
 		}
 		permission.RequestSHA256, err = ExecutionPermissionRequestSHA256(permissionRequest)
 		if err != nil {

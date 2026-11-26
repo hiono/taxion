@@ -26,13 +26,13 @@ func createMessageTestPlanner(t *testing.T, database *Store, jobID string) (doma
 	}
 	now := time.Now().UTC()
 	request := domain.PlanningAuthorizationRequest{
-		ProviderID: "provider.test", AccountID: "account.primary",
+		ProviderID         : "provider.test", AccountID: "account.primary",
 		ConfigurationSHA256: strings.Repeat("a", 64),
-		RepositoryID: "https://github.com/example/project@" + strings.Repeat("b", 40),
-		ReadOnlyBoundary: domain.PlanningReadOnlyBoundary{
+		RepositoryID       : "https://github.com/example/project@" + strings.Repeat("b", 40),
+		ReadOnlyBoundary   : domain.PlanningReadOnlyBoundary{
 			Mode: domain.PlanningReadOnlyBoundarySnapshot, Reference: "snapshot_1", SHA256: strings.Repeat("c", 64),
 		},
-		Budget: domain.PlanningBudget{MaxTurns: 3, MaxTokens: 1000},
+		Budget  : domain.PlanningBudget{MaxTurns: 3, MaxTokens: 1000},
 		Deadline: now.Add(2 * time.Hour),
 	}
 	grant, err := domain.NewPlanningAuthorization(job, principal.PrincipalID(), grantCommand, request, now)
@@ -59,9 +59,9 @@ func TestJobMessageStoreCommandIsIdempotent(t *testing.T) {
 	ctx := context.Background()
 	job, planner := createMessageTestPlanner(t, database, "job_message_store")
 	request := domain.JobMessageRequest{
-		Sender: domain.ActorRef{Kind: domain.ActorPlanner, ID: planner.ID},
+		Sender   : domain.ActorRef{Kind: domain.ActorPlanner, ID: planner.ID},
 		Recipient: domain.ActorRef{Kind: domain.ActorHuman, ID: job.IntakeProvenance.PrincipalID},
-		Body: "この要件の意図を確認してください。",
+		Body     : "この要件の意図を確認してください。",
 	}
 	commandID := "cmd_dddddddddddddddddddddddddddddddd"
 	receipt, message, err := database.AddJobMessage(ctx, job.ID, job.Revision, commandID, request)

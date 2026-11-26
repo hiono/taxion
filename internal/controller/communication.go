@@ -27,10 +27,10 @@ type RoleMessageRequest struct {
 
 type HumanMessageRequest struct {
 	JobID            string
-	CommandID         string
-	Recipient         domain.ActorRef
+	CommandID        string
+	Recipient        domain.ActorRef
 	ReplyToMessageID string
-	Body              string
+	Body             string
 }
 
 type CommunicationOutcome struct {
@@ -74,9 +74,9 @@ func (c *CommunicationController) SendFromRole(ctx context.Context, request Role
 		return outcome, err
 	}
 	return c.persistMessage(ctx, request.JobID, request.CommandID, domain.JobMessageRequest{
-		Sender: domain.ActorRef{Kind: actorKind, ID: execution.ID},
+		Sender   : domain.ActorRef{Kind: actorKind, ID: execution.ID},
 		Recipient: request.Recipient, ReplyToMessageID: request.ReplyToMessageID,
-		Body: request.Body,
+		Body     : request.Body,
 	})
 }
 
@@ -100,9 +100,9 @@ func (c *CommunicationController) SendFromHuman(
 		return outcome, errors.New("HUMAN message Principal does not own the Job")
 	}
 	return c.persistMessage(ctx, request.JobID, request.CommandID, domain.JobMessageRequest{
-		Sender: domain.ActorRef{Kind: domain.ActorHuman, ID: principal.PrincipalID()},
+		Sender   : domain.ActorRef{Kind: domain.ActorHuman, ID: principal.PrincipalID()},
 		Recipient: request.Recipient, ReplyToMessageID: request.ReplyToMessageID,
-		Body: request.Body,
+		Body     : request.Body,
 	})
 }
 
@@ -174,7 +174,7 @@ func actorKindForRole(role string) (domain.ActorKind, error) {
 		return domain.ActorCoder, nil
 	case domain.RoleReviewer:
 		return domain.ActorReviewer, nil
-	default:
+	default: 
 		return "", errors.New("RoleExecution has an unsupported communication role")
 	}
 }
