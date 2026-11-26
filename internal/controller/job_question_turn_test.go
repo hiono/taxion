@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -26,13 +27,18 @@ type jobQuestionTurnFixture struct {
 	controller                                                        *JobQuestionTurnController
 	runtime                                                           *fakePlanningProviderRuntime
 	database                                                          *store.Store
-	jobID, authorizationID, questionID, coderID, plannerID, sessionID string
+	jobID, authorizationID, questionID, coderID, plannerID, sessionID, databasePath string
 }
 
 func newJobQuestionTurnFixture(t *testing.T) jobQuestionTurnFixture {
 	t.Helper()
+	return newJobQuestionTurnFixtureAtPath(t, filepath.Join(t.TempDir(), "job-question-turn.sqlite"))
+}
+
+func newJobQuestionTurnFixtureAtPath(t *testing.T, databasePath string) jobQuestionTurnFixture {
+	t.Helper()
 	ctx := context.Background()
-	planning, database, principal, jobID, _, sourceResult, contract := startContractPlanner(t)
+	planning, database, principal, jobID, _, sourceResult, contract := startContractPlannerWithResultContentAtPath(t, "", databasePath)
 	_, revision, err := planning.ProposeJobContract(ctx, jobID,
 		domain.RoleExecutionID("cmd_cccccccccccccccccccccccccccccccc"),
 		sourceResult.ID, "cmd_91919191919191919191919191919191", principal)
@@ -191,7 +197,7 @@ func newJobQuestionTurnFixture(t *testing.T) jobQuestionTurnFixture {
 	return jobQuestionTurnFixture{
 		controller: controller, runtime: runtime, database: database, jobID: jobID,
 		authorizationID: authorization.ID, questionID: question.ID,
-		coderID:   coderStart.RoleExecution.ID,
+		coderID: coderStart.RoleExecution.ID, databasePath: databasePath,
 		plannerID: plannerID, sessionID: sessionID,
 	}
 }
@@ -497,6 +503,97 @@ func TestOrchestratorRoutesPlannerInboxAndReturnsAnswerToOriginalCoder(t *testin
 			len(job.JobQuestionTurnObservations), len(job.JobMessages))
 	}
 }
+func TestOrchestratorRestoresQuestionTurnAndReplyAfterSQLiteRestart(t *testing.T) {
+	fixture := newJobQuestionTurnFixture(t)
+	communication, err := NewCommunicationController(fixture.database)
+	if err != nil {
+		t.Fatalf("NewCommunicationController: %v", err)
+	}
+	authorization, err := NewJobQuestionAuthorizationController(
+		fixture.database, fixedQuestionTurnContextResolver{
+			context: QuestionReadOnlyContext{
+				RepositoryID: "https://github.com/example/project",
+				Boundary: domain.PlanningReadOnlyBoundary{
+					Mode: domain.PlanningReadOnlyBoundarySnapshot, Reference: "question_snapshot_1",
+					SHA256: sha256String("immutable question snapshot"),
+				},
+			},
+		},
+	)
+	if err != nil {
+		t.Fatalf("NewJobQuestionAuthorizationController: %v", err)
+	}
+	orchestrator, err := NewOrchestratorController(
+		fixture.database, communication, authorization, fixture.controller,
+		domain.PlanningBudget{MaxTurns: 1, MaxTokens: 100},
+	)
+	if err != nil {
+		t.Fatalf("NewOrchestratorController: %v", err)
+	}
+	first, err := orchestrator.ProcessPlannerInbox(context.Background(), fixture.jobID, fixture.plannerID)
+	if err != nil || len(first) != 1 || first[0].Observation.Status != domain.JobQuestionTurnCompleted ||
+		fixture.runtime.sendCalls != 1 {
+		t.Fatalf("initial Planner inbox processing failed: outcomes=%#v sends=%d err=%v",
+			first, fixture.runtime.sendCalls, err)
+	}
+	if err := fixture.database.Close(); err != nil {
+		t.Fatalf("close SQLite before restart: %v", err)
+	}
+	reopened, err := store.Open(context.Background(), fixture.databasePath)
+	if err != nil {
+		t.Fatalf("reopen SQLite: %v", err)
+	}
+	t.Cleanup(func() { _ = reopened.Close() })
+	fixture.database = reopened
+
+	communication, err = NewCommunicationController(reopened)
+	if err != nil {
+		t.Fatalf("NewCommunicationController after restart: %v", err)
+	}
+	authorization, err = NewJobQuestionAuthorizationController(
+		reopened, fixedQuestionTurnContextResolver{
+			context: QuestionReadOnlyContext{
+				RepositoryID: "https://github.com/example/project",
+				Boundary: domain.PlanningReadOnlyBoundary{
+					Mode: domain.PlanningReadOnlyBoundarySnapshot, Reference: "question_snapshot_1",
+					SHA256: sha256String("immutable question snapshot"),
+				},
+			},
+		},
+	)
+	if err != nil {
+		t.Fatalf("NewJobQuestionAuthorizationController after restart: %v", err)
+	}
+	turnController, err := newJobQuestionTurnController(reopened, fixture.runtime, provider.EvidenceSynthetic)
+	if err != nil {
+		t.Fatalf("newJobQuestionTurnController after restart: %v", err)
+	}
+	orchestrator, err = NewOrchestratorController(
+		reopened, communication, authorization, turnController,
+		domain.PlanningBudget{MaxTurns: 1, MaxTokens: 100},
+	)
+	if err != nil {
+		t.Fatalf("NewOrchestratorController after restart: %v", err)
+	}
+	replayed, err := orchestrator.ProcessPlannerInbox(context.Background(), fixture.jobID, fixture.plannerID)
+	if err != nil || len(replayed) != 1 || replayed[0].Observation.Status != domain.JobQuestionTurnCompleted ||
+		replayed[0].Reply.Message.ReplyToMessageID != fixture.questionID || fixture.runtime.sendCalls != 1 {
+		t.Fatalf("SQLite restart replay changed the completed turn or resent Provider work: outcomes=%#v sends=%d err=%v",
+			replayed, fixture.runtime.sendCalls, err)
+	}
+	job, err := reopened.GetJob(context.Background(), fixture.jobID)
+	if err != nil {
+		t.Fatalf("GetJob after SQLite restart: %v", err)
+	}
+	if err := job.Validate(); err != nil {
+		t.Fatalf("Job.Validate after SQLite restart: %v", err)
+	}
+	if len(job.JobQuestionTurnIntents) != 1 || len(job.JobQuestionTurnObservations) != 1 || len(job.JobMessages) != 2 {
+		t.Fatalf("SQLite restart changed persisted question facts: intents=%d observations=%d messages=%d",
+			len(job.JobQuestionTurnIntents), len(job.JobQuestionTurnObservations), len(job.JobMessages))
+	}
+}
+
 func TestOrchestratorContinuesAfterFailedQuestionAndCollectsErrors(t *testing.T) {
 	fixture := newJobQuestionTurnFixture(t)
 	communication, err := NewCommunicationController(fixture.database)
