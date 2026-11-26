@@ -177,12 +177,13 @@ func (a *ACPAdapter) Start(ctx context.Context, request StartRequest, _ Credenti
 	a.byRole[request.RoleExecutionID] = session
 	a.byID[session.sessionID] = session
 	a.mu.Unlock()
+	initialPrompt := acpStartPrompt(request)
 	initialTurn := TurnRequest{
 		OperationID:  request.OperationID,
 		TurnID:       "start_" + request.RoleExecutionID,
 		SessionID:    session.sessionID,
-		PromptSHA256: request.PromptSHA256,
-		Prompt:       request.Prompt,
+		PromptSHA256: sha256Hex(initialPrompt),
+		Prompt:       initialPrompt,
 		MaxTokens:    request.MaxTokens,
 		Deadline:     request.Deadline,
 	}
@@ -193,6 +194,20 @@ func (a *ACPAdapter) Start(ctx context.Context, request StartRequest, _ Credenti
 	a.byOp[request.OperationID] = result
 	a.mu.Unlock()
 	return result, nil
+}
+
+func acpStartPrompt(request StartRequest) string {
+	var prompt strings.Builder
+	prompt.WriteString(request.Prompt)
+	for _, document := range request.Context {
+		prompt.WriteString("\\n\\n--- Context document: ")
+		prompt.WriteString(document.ID)
+		prompt.WriteString(" (sha256:")
+		prompt.WriteString(document.SHA256)
+		prompt.WriteString(") ---\\n")
+		prompt.WriteString(document.Content)
+	}
+	return prompt.String()
 }
 
 func (a *ACPAdapter) Send(ctx context.Context, request TurnRequest, _ CredentialLease) (TurnResult, error) {
