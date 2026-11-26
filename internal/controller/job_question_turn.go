@@ -1,0 +1,471 @@
+package controller
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"time"
+
+	"github.com/hiono/taxion/internal/domain"
+	"github.com/hiono/taxion/internal/provider"
+	"github.com/hiono/taxion/internal/store"
+)
+
+type JobQuestionTurnStore interface {
+	CommunicationStore
+	AddJobQuestionTurnIntent(
+		context.Context, string, uint64, domain.JobQuestionTurnIntentRequest,
+	) (store.CommandReceipt, domain.JobQuestionTurnIntent, error)
+	AddJobQuestionTurnObservation(
+		context.Context, string, uint64, domain.JobQuestionTurnObservationRequest,
+	) (store.CommandReceipt, domain.JobQuestionTurnObservation, error)
+}
+
+type JobQuestionTurnOutcome struct {
+	IntentReceipt      store.CommandReceipt
+	Intent             domain.JobQuestionTurnIntent
+	ObservationReceipt store.CommandReceipt
+	Observation        domain.JobQuestionTurnObservation
+	Reply              CommunicationOutcome
+}
+
+type JobQuestionTurnController struct {
+	store         JobQuestionTurnStore
+	runtime       PlanningProviderRuntime
+	communication *CommunicationController
+	now           func() time.Time
+}
+
+func NewJobQuestionTurnController(
+	turnStore JobQuestionTurnStore,
+	runtime PlanningProviderRuntime,
+) (*JobQuestionTurnController, error) {
+	if turnStore == nil || runtime == nil {
+		return nil, errors.New("JobQuestionTurnStore and Provider runtime are required")
+	}
+	if err := runtime.Identity().Validate(); err != nil {
+		return nil, fmt.Errorf("validate JobQuestionTurn Provider identity: %w", err)
+	}
+	communication, err := NewCommunicationController(turnStore)
+	if err != nil {
+		return nil, err
+	}
+	return &JobQuestionTurnController{
+		store: turnStore, runtime: runtime, communication: communication, now: time.Now,
+	}, nil
+}
+
+// Send executes the additional bounded read-only Planner turn for one persisted question.
+// The original question body remains natural language; its reply is persisted as a JobMessage.
+func (c *JobQuestionTurnController) Send(
+	ctx context.Context,
+	jobID, authorizationID, commandID string,
+	reservedTokens uint64,
+) (JobQuestionTurnOutcome, error) {
+	var outcome JobQuestionTurnOutcome
+	if ctx == nil || jobID == "" || authorizationID == "" || commandID == "" || reservedTokens == 0 {
+		return outcome, errors.New("JobQuestionTurn requires Job, authorization, Command, and token reservation")
+	}
+	job, err := c.store.GetJob(ctx, jobID)
+	if err != nil {
+		return outcome, err
+	}
+	if err := job.Validate(); err != nil {
+		return outcome, fmt.Errorf("validate Job before question turn: %w", err)
+	}
+	grant, found := findJobQuestionAuthorization(job, authorizationID)
+	if !found {
+		return outcome, errors.New("JobQuestionAuthorization was not found")
+	}
+	question, found := findJobMessage(job, grant.QuestionMessageID)
+	if !found {
+		return outcome, errors.New("JobQuestionAuthorization source Question was not found")
+	}
+	prompt := jobQuestionTurnPrompt(question.Body)
+	promptSHA256 := sha256String(prompt)
+
+	intent, existing := findJobQuestionTurnIntentByCommand(job, commandID)
+	if existing {
+		if intent.JobQuestionAuthorizationID != grant.ID ||
+			intent.PromptSHA256 != promptSHA256 || intent.ReservedTokens != reservedTokens {
+			return outcome, store.ErrIdempotencyConflict
+		}
+		outcome.Intent = intent
+	} else {
+		now := c.now().UTC().Round(0)
+		if err := grant.ValidateFor(job, question.ID, grant.PlannerRoleExecutionID, grant.ProviderSessionID, now); err != nil {
+			return outcome, err
+		}
+		capabilities, err := c.verifiedCapabilities(ctx, grant)
+		if err != nil {
+			return outcome, err
+		}
+		if !capabilities.SupportsSafeSend() {
+			return outcome, provider.ErrUnsupportedCapability
+		}
+		receipt, created, err := c.store.AddJobQuestionTurnIntent(ctx, job.ID, job.Revision, domain.JobQuestionTurnIntentRequest{
+			JobQuestionAuthorizationID: grant.ID,
+			CommandID:                  commandID,
+			PromptSHA256:               promptSHA256,
+			ReservedTokens:             reservedTokens,
+		})
+		if err != nil {
+			return outcome, err
+		}
+		outcome.IntentReceipt, outcome.Intent = receipt, created
+		intent = created
+		job, err = c.store.GetJob(ctx, jobID)
+		if err != nil {
+			return outcome, err
+		}
+	}
+
+	if err := intent.Validate(job); err != nil {
+		return outcome, fmt.Errorf("validate persisted JobQuestionTurnIntent: %w", err)
+	}
+	if latest, found := latestJobQuestionTurnObservation(job, intent.ID); found {
+		outcome.Observation = latest
+		if latest.Status == domain.JobQuestionTurnCompleted {
+			reply, err := c.persistQuestionReply(ctx, jobID, grant, question, intent, latest)
+			outcome.Reply = reply
+			return outcome, err
+		}
+		if latest.Status == domain.JobQuestionTurnFailed {
+			return outcome, errors.New("Planner question turn completed with a Provider failure")
+		}
+		return c.reconcileUnknown(ctx, outcome, job, grant, question, intent)
+	}
+
+	now := c.now().UTC().Round(0)
+	if err := grant.ValidateFor(job, question.ID, grant.PlannerRoleExecutionID, grant.ProviderSessionID, now); err != nil {
+		return outcome, err
+	}
+	capabilities, err := c.verifiedCapabilities(ctx, grant)
+	if err != nil {
+		return outcome, err
+	}
+	if !capabilities.SupportsSafeSend() {
+		return outcome, provider.ErrUnsupportedCapability
+	}
+	return c.dispatch(ctx, outcome, grant, question, intent, capabilities)
+}
+
+func (c *JobQuestionTurnController) reconcileUnknown(
+	ctx context.Context,
+	outcome JobQuestionTurnOutcome,
+	job domain.Job,
+	grant domain.JobQuestionAuthorization,
+	question domain.JobMessage,
+	intent domain.JobQuestionTurnIntent,
+) (JobQuestionTurnOutcome, error) {
+	capabilities, err := c.verifiedCapabilities(ctx, grant)
+	if err != nil {
+		return outcome, err
+	}
+	if capabilities.SendLookup && capabilities.HasEvidenceAtLeast(provider.CapabilitySendLookup, provider.EvidenceLive) {
+		request := provider.LookupRequest{
+			OperationID: intent.OperationID, SessionID: intent.ProviderSessionID, TurnID: intent.ID,
+		}
+		lookup, lookupErr := c.runtime.Lookup(ctx, request)
+		if lookupErr != nil {
+			return outcome, fmt.Errorf("lookup UNKNOWN Planner question turn: %w", lookupErr)
+		}
+		if err := lookup.Validate(request); err != nil {
+			return outcome, fmt.Errorf("validate UNKNOWN Planner question lookup: %w", err)
+		}
+		if lookup.Found {
+			if lookup.Status != domain.JobQuestionTurnCompleted && lookup.Status != domain.JobQuestionTurnFailed {
+				return outcome, errors.New("Planner question Provider operation remains unresolved")
+			}
+			if !capabilities.HasEvidenceAtLeast(provider.CapabilityFinalOutput, provider.EvidenceLive) ||
+				!capabilities.HasEvidenceAtLeast(provider.CapabilityUsageIdentity, provider.EvidenceLive) ||
+				!capabilities.HasEvidenceAtLeast(provider.CapabilityUsageCompleteness, provider.EvidenceLive) {
+				return outcome, provider.ErrUnsupportedCapability
+			}
+			result, err := c.runtime.Result(ctx, provider.ResultRequest{
+				OperationID: intent.OperationID, SessionID: intent.ProviderSessionID, TurnID: intent.ID,
+			})
+			if err != nil {
+				return outcome, fmt.Errorf("retrieve UNKNOWN Planner question result: %w", err)
+			}
+			usage, err := c.runtime.Usage(ctx, provider.UsageRequest{
+				OperationID: intent.OperationID, SessionID: intent.ProviderSessionID, TurnID: intent.ID,
+			})
+			if err != nil {
+				return outcome, fmt.Errorf("retrieve UNKNOWN Planner question usage: %w", err)
+			}
+			if result.OperationID != intent.OperationID || result.SessionID != intent.ProviderSessionID ||
+				result.TurnID != intent.ID || !result.Final || result.ResultSHA256 != sha256String(result.Content) ||
+				!validQuestionTurnEvidence(result.EvidenceSHA256) ||
+				usage.OperationID != intent.OperationID || usage.SessionID != intent.ProviderSessionID ||
+				usage.TurnID != intent.ID || usage.UsageID == "" || usage.UsageID != lookup.UsageID ||
+				!usage.Complete || usage.Tokens > intent.ReservedTokens ||
+				!validQuestionTurnEvidence(usage.EvidenceSHA256) ||
+				lookup.ResultSHA256 == "" || lookup.ResultSHA256 != result.ResultSHA256 {
+				return outcome, provider.ErrProviderInvalidResult
+			}
+			evidence := sha256String(lookup.EvidenceSHA256 + ":" + result.EvidenceSHA256 + ":" + usage.EvidenceSHA256)
+			receipt, observation, err := c.persistObservation(
+				ctx, job.ID, intent.ID, lookup.Status, usage.Tokens, result.Content,
+				lookup.ReceiptID, evidence,
+			)
+			if err != nil {
+				return outcome, err
+			}
+			outcome.ObservationReceipt, outcome.Observation = receipt, observation
+			if observation.Status == domain.JobQuestionTurnCompleted {
+				reply, err := c.persistQuestionReply(ctx, job.ID, grant, question, intent, observation)
+				outcome.Reply = reply
+				return outcome, err
+			}
+			return outcome, errors.New("Planner question Provider operation failed")
+		}
+	}
+
+	now := c.now().UTC().Round(0)
+	if err := grant.ValidateFor(job, question.ID, grant.PlannerRoleExecutionID, grant.ProviderSessionID, now); err != nil {
+		return outcome, err
+	}
+	if !capabilities.SupportsSafeSend() {
+		return outcome, provider.ErrUnsupportedCapability
+	}
+	return c.dispatch(ctx, outcome, grant, question, intent, capabilities)
+}
+
+func (c *JobQuestionTurnController) dispatch(
+	ctx context.Context,
+	outcome JobQuestionTurnOutcome,
+	grant domain.JobQuestionAuthorization,
+	question domain.JobMessage,
+	intent domain.JobQuestionTurnIntent,
+	capabilities provider.Capabilities,
+) (JobQuestionTurnOutcome, error) {
+	prompt := jobQuestionTurnPrompt(question.Body)
+	request := provider.TurnRequest{
+		OperationID: intent.OperationID,
+		TurnID: intent.ID,
+		SessionID: intent.ProviderSessionID,
+		PromptSHA256: intent.PromptSHA256,
+		Prompt: prompt,
+		ReadOnlyBoundary: provider.ReadOnlyContextBoundary{
+			Mode: string(grant.ReadOnlyBoundary.Mode),
+			Reference: grant.ReadOnlyBoundary.Reference,
+			SHA256: grant.ReadOnlyBoundary.SHA256,
+		},
+		MaxTokens: intent.ReservedTokens,
+		Deadline: intent.Deadline,
+	}
+	if err := request.Validate(); err != nil {
+		return outcome, fmt.Errorf("validate bounded Planner question Provider Turn: %w", err)
+	}
+	result, err := c.runtime.Send(ctx, request)
+	if err != nil {
+		if providerOperationMayHaveStarted(err) {
+			receipt, observation, persistErr := c.persistObservation(
+				ctx, intent.JobID, intent.ID, domain.JobQuestionTurnUnknown, 0, "", "", "",
+			)
+			if persistErr != nil {
+				return outcome, fmt.Errorf("persist UNKNOWN Planner question turn after ambiguous Send: %w", persistErr)
+			}
+			outcome.ObservationReceipt, outcome.Observation = receipt, observation
+		}
+		return outcome, err
+	}
+	lookup := provider.LookupResult{
+		Found: true, OperationID: result.OperationID, Status: result.Status,
+		ReceiptID: result.ReceiptID, SessionID: result.SessionID, TurnID: result.TurnID,
+		EvidenceSHA256: result.EvidenceSHA256,
+	}
+	if err := lookup.Validate(provider.LookupRequest{
+		OperationID: intent.OperationID, SessionID: intent.ProviderSessionID, TurnID: intent.ID,
+	}); err != nil || result.TokensUsed > intent.ReservedTokens {
+		receipt, observation, persistErr := c.persistObservation(
+			ctx, intent.JobID, intent.ID, domain.JobQuestionTurnUnknown, 0, "", "", "",
+		)
+		if persistErr == nil {
+			outcome.ObservationReceipt, outcome.Observation = receipt, observation
+		}
+		if err != nil {
+			return outcome, fmt.Errorf("Provider returned an invalid Planner question Turn: %w", err)
+		}
+		return outcome, provider.ErrProviderInvalidResult
+	}
+	if result.Status != domain.JobQuestionTurnCompleted && result.Status != domain.JobQuestionTurnFailed {
+		receipt, observation, persistErr := c.persistObservation(
+			ctx, intent.JobID, intent.ID, domain.JobQuestionTurnUnknown, 0, "", "", "",
+		)
+		if persistErr != nil {
+			return outcome, persistErr
+		}
+		outcome.ObservationReceipt, outcome.Observation = receipt, observation
+		return outcome, errors.New("Planner question Provider Turn is not terminal")
+	}
+	receipt, observation, err := c.persistObservation(
+		ctx, intent.JobID, intent.ID, result.Status, result.TokensUsed, result.Output,
+		result.ReceiptID, result.EvidenceSHA256,
+	)
+	if err != nil {
+		return outcome, err
+	}
+	outcome.ObservationReceipt, outcome.Observation = receipt, observation
+	if observation.Status == domain.JobQuestionTurnFailed {
+		return outcome, errors.New("Planner question Provider Turn failed")
+	}
+	reply, err := c.persistQuestionReply(ctx, intent.JobID, grant, question, intent, observation)
+	outcome.Reply = reply
+	return outcome, err
+}
+
+func (c *JobQuestionTurnController) persistObservation(
+	ctx context.Context,
+	jobID, intentID, status string,
+	tokens uint64,
+	content, receiptID, evidenceSHA256 string,
+) (store.CommandReceipt, domain.JobQuestionTurnObservation, error) {
+	var empty domain.JobQuestionTurnObservation
+	for attempt := 0; attempt < 2; attempt++ {
+		job, err := c.store.GetJob(ctx, jobID)
+		if err != nil {
+			return store.CommandReceipt{}, empty, err
+		}
+		previous, found := latestJobQuestionTurnObservation(job, intentID)
+		if found {
+			if previous.Status == domain.JobQuestionTurnUnknown && status == domain.JobQuestionTurnUnknown {
+				return store.CommandReceipt{}, previous, nil
+			}
+			if previous.Status != domain.JobQuestionTurnUnknown {
+				if previous.Status == status && previous.TokensUsed == tokens &&
+					previous.Content == content && previous.ReceiptID == receiptID &&
+					previous.EvidenceSHA256 == evidenceSHA256 {
+					return store.CommandReceipt{}, previous, nil
+				}
+				return store.CommandReceipt{}, empty, errors.New("terminal Planner question observation cannot be replaced")
+			}
+		}
+		reconcilesUnknown := found && previous.Status == domain.JobQuestionTurnUnknown
+		commandID := jobQuestionTurnObservationCommandID(
+			intentID, status, tokens, content, receiptID, evidenceSHA256, reconcilesUnknown,
+		)
+		request := domain.JobQuestionTurnObservationRequest{
+			IntentID: intentID, CommandID: commandID, Status: status, TokensUsed: tokens,
+			Content: content, ReceiptID: receiptID, EvidenceSHA256: evidenceSHA256,
+			ReconcilesUnknown: reconcilesUnknown,
+		}
+		receipt, observation, err := c.store.AddJobQuestionTurnObservation(
+			ctx, jobID, job.Revision, request,
+		)
+		if err == nil {
+			return receipt, observation, nil
+		}
+		if !errors.Is(err, store.ErrIdempotencyConflict) || attempt != 0 {
+			return store.CommandReceipt{}, empty, err
+		}
+	}
+	return store.CommandReceipt{}, empty, store.ErrIdempotencyConflict
+}
+
+func (c *JobQuestionTurnController) persistQuestionReply(
+	ctx context.Context,
+	jobID string,
+	grant domain.JobQuestionAuthorization,
+	question domain.JobMessage,
+	intent domain.JobQuestionTurnIntent,
+	observation domain.JobQuestionTurnObservation,
+) (CommunicationOutcome, error) {
+	return c.communication.SendFromRole(ctx, RoleMessageRequest{
+		JobID: jobID,
+		RoleExecutionID: grant.PlannerRoleExecutionID,
+		ProviderSessionID: grant.ProviderSessionID,
+		CommandID: jobQuestionReplyCommandID(intent.ID),
+		Recipient: question.Sender,
+		ReplyToMessageID: question.ID,
+		Body: observation.Content,
+	})
+}
+
+func (c *JobQuestionTurnController) verifiedCapabilities(
+	ctx context.Context,
+	grant domain.JobQuestionAuthorization,
+) (provider.Capabilities, error) {
+	identity := c.runtime.Identity()
+	if identity.ProviderID != grant.ProviderID || identity.AccountID != grant.AccountID ||
+		identity.ConfigurationSHA256 != grant.ConfigurationSHA256 {
+		return provider.Capabilities{}, errors.New("Provider identity differs from JobQuestionAuthorization")
+	}
+	capabilities, err := c.runtime.Capabilities(ctx)
+	if err != nil {
+		return provider.Capabilities{}, err
+	}
+	if err := capabilities.Validate(identity); err != nil {
+		return provider.Capabilities{}, fmt.Errorf("validate question Provider capabilities: %w", err)
+	}
+	return capabilities, nil
+}
+
+func findJobQuestionAuthorization(job domain.Job, id string) (domain.JobQuestionAuthorization, bool) {
+	for _, grant := range job.JobQuestionAuthorizations {
+		if grant.ID == id {
+			return grant, true
+		}
+	}
+	return domain.JobQuestionAuthorization{}, false
+}
+
+func findJobMessage(job domain.Job, id string) (domain.JobMessage, bool) {
+	for _, message := range job.JobMessages {
+		if message.ID == id {
+			return message, true
+		}
+	}
+	return domain.JobMessage{}, false
+}
+
+func findJobQuestionTurnIntentByCommand(job domain.Job, commandID string) (domain.JobQuestionTurnIntent, bool) {
+	for _, intent := range job.JobQuestionTurnIntents {
+		if intent.CommandID == commandID {
+			return intent, true
+		}
+	}
+	return domain.JobQuestionTurnIntent{}, false
+}
+
+func latestJobQuestionTurnObservation(job domain.Job, intentID string) (domain.JobQuestionTurnObservation, bool) {
+	var latest domain.JobQuestionTurnObservation
+	found := false
+	for _, observation := range job.JobQuestionTurnObservations {
+		if observation.IntentID == intentID && (!found || observation.CreatedRevision > latest.CreatedRevision) {
+			latest, found = observation, true
+		}
+	}
+	return latest, found
+}
+
+func jobQuestionTurnPrompt(question string) string {
+	return "Answer the following question using only the authorized read-only context. Do not modify resources or perform external side effects.\n\n" + question
+}
+
+func jobQuestionTurnObservationCommandID(
+	intentID, status string, tokens uint64, content, receiptID, evidenceSHA256 string, reconcilesUnknown bool,
+) string {
+	material := fmt.Sprintf(
+		"taxion:job-question-turn-observation:%s:%s:%d:%s:%s:%s:%t",
+		intentID, status, tokens, sha256String(content), receiptID, evidenceSHA256, reconcilesUnknown,
+	)
+	return "cmd_" + sha256String(material)[:32]
+}
+
+func jobQuestionReplyCommandID(intentID string) string {
+	return "cmd_" + sha256String("taxion:job-question-reply:v1:"+intentID)[:32]
+}
+
+func validQuestionTurnEvidence(value string) bool {
+	if len(value) != 64 {
+		return false
+	}
+	for _, char := range value {
+		if !((char >= '0' && char <= '9') || (char >= 'a' && char <= 'f')) {
+			return false
+		}
+	}
+	return true
+}
