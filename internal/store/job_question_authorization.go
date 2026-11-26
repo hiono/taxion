@@ -76,6 +76,13 @@ func (s *Store) GetJobQuestionAuthorizationCommand(
 	if err := authorization.Validate(job); err != nil {
 		return CommandReceipt{}, domain.JobQuestionAuthorization{}, false, fmt.Errorf("%w: persisted question authorization is invalid: %v", ErrIntegrity, err)
 	}
+	persistedPayloadHash, err := jobQuestionAuthorizationRequestSHA256(authorization)
+	if err != nil {
+		return CommandReceipt{}, domain.JobQuestionAuthorization{}, false, err
+	}
+	if persistedPayloadHash != payloadHash {
+		return CommandReceipt{}, domain.JobQuestionAuthorization{}, false, fmt.Errorf("%w: question authorization receipt payload does not describe its grant", ErrIntegrity)
+	}
 	if receipt.Revision != authorization.CreatedRevision ||
 		!receipt.CreatedAt.Equal(authorization.CreatedAt) {
 		return CommandReceipt{}, domain.JobQuestionAuthorization{}, false, fmt.Errorf("%w: question authorization fact does not match its command receipt", ErrIntegrity)
@@ -113,9 +120,36 @@ func (s *Store) AddJobQuestionAuthorization(
 	if err != nil {
 		return CommandReceipt{}, domain.JobQuestionAuthorization{}, err
 	}
+	persistedPayloadHash, err := jobQuestionAuthorizationRequestSHA256(authorization)
+	if err != nil {
+		return CommandReceipt{}, domain.JobQuestionAuthorization{}, err
+	}
+	if persistedPayloadHash != receipt.PayloadSHA256 {
+		return CommandReceipt{}, domain.JobQuestionAuthorization{}, fmt.Errorf("%w: question authorization receipt payload does not describe its grant", ErrIntegrity)
+	}
 	if receipt.Revision != authorization.CreatedRevision ||
 		!receipt.CreatedAt.Equal(authorization.CreatedAt) {
 		return CommandReceipt{}, domain.JobQuestionAuthorization{}, fmt.Errorf("%w: question authorization fact does not match its command receipt", ErrIntegrity)
 	}
 	return receipt, authorization, nil
+}
+
+func jobQuestionAuthorizationRequestSHA256(authorization domain.JobQuestionAuthorization) (string, error) {
+	request := domain.JobQuestionAuthorizationRequest{
+		JobID: authorization.JobID, CommandID: authorization.CommandID,
+		QuestionMessageID: authorization.QuestionMessageID,
+		PlannerRoleExecutionID: authorization.PlannerRoleExecutionID,
+		ProviderSessionID: authorization.ProviderSessionID,
+		RepositoryID: authorization.RepositoryID,
+		PlanningRepositoryID: authorization.PlanningRepositoryID,
+		ProviderID: authorization.ProviderID, AccountID: authorization.AccountID,
+		ConfigurationSHA256: authorization.ConfigurationSHA256,
+		ReadOnlyBoundary: authorization.ReadOnlyBoundary,
+		Budget: authorization.Budget, Deadline: authorization.Deadline.UTC().Round(0),
+	}
+	requestJSON, err := json.Marshal(request)
+	if err != nil {
+		return "", fmt.Errorf("encode persisted question authorization request: %w", err)
+	}
+	return digest(requestJSON), nil
 }
