@@ -139,6 +139,11 @@ func (a *ACPAdapter) Start(ctx context.Context, request StartRequest, _ Credenti
 		a.mu.Unlock()
 		return StartResult{}, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown}
 	}
+	if err := process.notify("initialized", map[string]any{}); err != nil {
+		process.close()
+		a.mu.Unlock()
+		return StartResult{}, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown}
+	}
 	created, err := process.call(ctx, "session/new", map[string]any{
 		"cwd":        a.config.WorkingDirectory,
 		"mcpServers": []any{},
