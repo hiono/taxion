@@ -401,8 +401,9 @@ func validateJobQuestionTurnFacts(job Job) error {
 				return fmt.Errorf("JobQuestionAuthorization %s has a turn after an unresolved turn", grant.ID)
 			}
 			turnNumber++
-			observation, found := latestJobQuestionTurnObservation(job, intent.ID)
-			if !found || observation.Status == JobQuestionTurnUnknown {
+			observation, found := latestJobQuestionTurnObservationBefore(job, intent.ID, intent.CreatedRevision)
+			if !found || observation.CreatedAt.After(intent.CreatedAt) ||
+				observation.Status == JobQuestionTurnUnknown {
 				unresolvedTurn = true
 				continue
 			}
@@ -437,10 +438,19 @@ func jobQuestionTurnIntentByID(job Job, intentID string) (JobQuestionTurnIntent,
 }
 
 func latestJobQuestionTurnObservation(job Job, intentID string) (JobQuestionTurnObservation, bool) {
+	return latestJobQuestionTurnObservationBefore(job, intentID, job.Revision+1)
+}
+
+func latestJobQuestionTurnObservationBefore(
+	job Job,
+	intentID string,
+	beforeRevision uint64,
+) (JobQuestionTurnObservation, bool) {
 	var latest JobQuestionTurnObservation
 	found := false
 	for _, observation := range job.JobQuestionTurnObservations {
-		if observation.IntentID == intentID && (!found || observation.CreatedRevision > latest.CreatedRevision) {
+		if observation.IntentID == intentID && observation.CreatedRevision < beforeRevision &&
+			(!found || observation.CreatedRevision > latest.CreatedRevision) {
 			latest, found = observation, true
 		}
 	}
@@ -464,6 +474,10 @@ func jobQuestionTurnBudgetUsedBefore(job Job, authorizationID string, beforeRevi
 	observationsByIntent := make(map[string]JobQuestionTurnObservation, len(job.JobQuestionTurnObservations))
 	for _, observation := range job.JobQuestionTurnObservations {
 		if observation.CreatedRevision >= beforeRevision {
+			continue
+		}
+		intent, found := jobQuestionTurnIntentByID(job, observation.IntentID)
+		if !found || observation.CreatedAt.After(intent.CreatedAt) {
 			continue
 		}
 		previous, found := observationsByIntent[observation.IntentID]

@@ -337,6 +337,14 @@ func (c *JobQuestionTurnController) dispatch(
 	); err != nil {
 		return outcome, err
 	}
+	for _, message := range job.JobMessages {
+		if message.ReplyToMessageID == question.ID &&
+			message.Sender == (domain.ActorRef{Kind: domain.ActorPlanner, ID: question.Recipient.ID}) &&
+			message.Recipient == question.Sender {
+			outcome.Reply = CommunicationOutcome{Message: message}
+			return outcome, nil
+		}
+	}
 	result, err := c.runtime.Send(ctx, request)
 	if err != nil {
 		if providerOperationMayHaveStarted(err) {
@@ -488,9 +496,6 @@ func (c *JobQuestionTurnController) verifiedCapabilities(
 	}
 	if err := capabilities.Validate(identity); err != nil {
 		return provider.Capabilities{}, fmt.Errorf("validate question Provider capabilities: %w", err)
-	}
-	if !capabilities.HasEvidenceAtLeast(provider.CapabilityReadOnlyContextEnforcement, c.minimumEvidence) {
-		return provider.Capabilities{}, provider.ErrUnsupportedCapability
 	}
 	return capabilities, nil
 }

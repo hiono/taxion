@@ -72,7 +72,21 @@ func (c *OrchestratorController) SendRoleMessage(
 			}
 			outcome.ResumedContexts = append(outcome.ResumedContexts, resumed)
 		}
-		if len(outcome.ResumedContexts) == 0 {
+		replyContextRestored := false
+		for _, resumed := range outcome.ResumedContexts {
+			for _, reply := range resumed.Messages {
+				if reply.ReplyToMessageID == message.Message.ID &&
+					reply.Sender == (domain.ActorRef{Kind: domain.ActorPlanner, ID: request.Recipient.ID}) &&
+					reply.Recipient == message.Message.Sender {
+					replyContextRestored = true
+					break
+				}
+			}
+			if replyContextRestored {
+				break
+			}
+		}
+		if !replyContextRestored {
 			resumed, found, contextErr := c.contextForPlannerReply(ctx, request.JobID, message.Message.ID)
 			if contextErr != nil {
 				return outcome, contextErr

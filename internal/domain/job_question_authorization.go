@@ -224,7 +224,8 @@ func (a JobQuestionAuthorization) Validate(job Job) error {
 	startObservation, observed := latestProviderStartObservation(job, start.ID)
 	if !observed || startObservation.Status != ProviderStartAccepted ||
 		startObservation.ProviderSessionID != a.ProviderSessionID ||
-		startObservation.CreatedRevision >= a.CreatedRevision {
+		startObservation.CreatedRevision >= a.CreatedRevision ||
+		startObservation.CreatedAt.After(a.IssuedAt) {
 		return errors.New("JobQuestionAuthorization does not bind the accepted Planner Session")
 	}
 	return nil
