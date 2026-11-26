@@ -128,7 +128,7 @@ func (a *ACPAdapter) Capabilities(ctx context.Context) (Capabilities, error) {
 	return Capabilities{Identity: a.config.Identity}, nil
 }
 
-func (a *ACPAdapter) Start(ctx context.Context, request StartRequest, _ CredentialLease) (StartResult, error) {
+func (a *ACPAdapter) Start(ctx context.Context, request StartRequest, lease CredentialLease) (StartResult, error) {
 	if a == nil || ctx == nil || request.Validate() != nil {
 		return StartResult{}, ErrProviderInvalidRequest
 	}
