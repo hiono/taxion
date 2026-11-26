@@ -1,4 +1,4 @@
-# ADR-506: Job内の質問実行権限を独立したgrantとして扱う
+# ADR-506: Job内の質問に伴う追加Provider実行を限定認可する
 
 Date: 2026-11-23
 
@@ -8,20 +8,22 @@ Accepted
 
 ## Context
 
-承認済みJob内でRoleがPlannerへ質問し、追加のread-only context acquisitionを必要とする場合があります。質問やメッセージの存在だけでProvider実行権限を与えると、情報交換と外部実行の境界が失われます。
+承認済みJob内でRoleがPlannerへ質問する場合があります。質問文を受け取り、既に利用可能なSession / Contextの範囲で自然言語回答を返す情報交換と、回答のためにProviderを新たに実行して追加のread-only context acquisitionを行うことは異なる操作です。両者を混同すると、通常の情報交換に不要な認可を要求するか、Provider実行権限を暗黙に付与することになります。
 
 ## Decision
 
-**承認済みJob内のTaskless Plannerによる個別質問実行には、元のQuestionと実行範囲に束縛した独立のJobQuestionAuthorizationを使用します。**
+**JobQuestionAuthorizationは、承認済みJob内の質問を契機にTaskless Plannerの追加bounded read-only Provider実行が必要な場合に限って使用します。**
 
-JobMessage、QUESTIONというMessageKind、質問本文だけではgrantを発行しません。JobQuestionAuthorizationはJobApprovalやExecutionPermissionを拡張せず、質問に必要な限定的read-only実行だけを許可します。
-
-Controllerは、現在有効なJobApproval、永続化済みのRole QUESTION、Taskless PLANNER RoleExecution、受理済みProvider Session、および信頼されたimmutable read-only contextを検証した後にのみgrantを発行します。grantは元のQuestion・Planner RoleExecution・Provider Session・Repository・Provider identity・context digest・budget・deadlineへ束縛し、別Questionや別Sessionへ再利用できません。Repositoryは承認済みJobContractのTargetRepositoriesに含まれるものを選び、元PlanningAuthorizationのRepository identityも別途固定します。Provider configurationは承認済みJobContractと受理済みStartの両方に一致させ、grant deadlineはStart deadlineを超えず、既存Stop intentがあるSessionには発行・使用しません。grantの発行はJobApprovalやExecutionPermissionを拡張せず、Task assignmentや実行責任の移転も行いません。
+- JobMessageの保存・参照・転送、自然言語の質問・回答、既存Contextを使った応答にはJobQuestionAuthorizationを要求しません。
+- JobMessage、QUESTIONというMessageKind、質問本文だけではgrantを発行しません。
+- 追加のProvider実行が必要な場合は、現在有効なJobApprovalと承認済みscopeを確認し、元Questionと実行対象へ束縛した独立grantを発行します。
+- grantはJobApproval、元Question、Planner RoleExecution、Provider / account / configuration、必要なread-only context、budget、deadlineに限定して束縛します。他のQuestionやSessionへ再利用できません。
+- grantはJobApproval、ExecutionPermission、Task assignment、実行責任を拡張しません。禁止副作用を許可しません。
 
 ## Consequences
 
-情報交換とProvider実行を区別し、質問経由の暗黙の権限付与を防止します。質問の保存・相関はADR-301、Job内のauthority factはADR-201、実行時の認可原則はADR-507に従います。
+通常のAgent間情報交換は通信専用認可なしで成立し、追加Provider実行だけが明示的な認可境界に従います。質問の保存・相関はADR-301、Job内のauthority factはADR-201、外部副作用の認可はADR-507に従います。
 
 ## Relationship to other ADRs
 
-ADR-300はCollaborationの基本方針、ADR-301は内部通信契約、ADR-500はAuthorization & Securityの基本方針、ADR-505はDRAFT planning、ADR-507はoperation単位の実行権限を定義します。
+ADR-300はCollaborationの基本方針、ADR-301は内部メッセージ契約、ADR-500はAuthorization & Securityの基本方針、ADR-505はDRAFT planning、ADR-507はoperation単位の実行権限を定義します。
