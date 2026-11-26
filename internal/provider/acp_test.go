@@ -673,7 +673,7 @@ func TestACPAdapterStopInvalidatesStartCache(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
-	_, err = adapter.Stop(context.Background(), StopRequest{SessionID: start.SessionID}, nil)
+	_, err = adapter.Stop(context.Background(), StopRequest{OperationID: "operation_stop_1", SessionID: start.SessionID}, nil)
 	var operationErr *OperationError
 	if !errors.As(err, &operationErr) || operationErr.Class != FailureAmbiguous {
 		t.Fatalf("Stop error = %v, want ambiguous outcome", err)
