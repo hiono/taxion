@@ -31,7 +31,7 @@ var (
 // Increment it when older binaries could discard newly added aggregate fields.
 const schemaVersion = 3
 
-const preserveJobAggregateFactsTrigger = `CREATE TRIGGER job_aggregates_preserve_v2_facts
+const preserveJobAggregateFactsTrigger = `CREATE TRIGGER IF NOT EXISTS job_aggregates_preserve_v2_facts
 BEFORE UPDATE OF payload_json ON job_aggregates
 WHEN
 	EXISTS (
@@ -165,38 +165,8 @@ func (s *Store) initialize(ctx context.Context) error {
 		)`,
 		`CREATE INDEX IF NOT EXISTS job_aggregates_updated_at
 			ON job_aggregates(updated_at DESC, job_id ASC)`,
-		// This database-level guard covers every aggregate UPDATE, including
-		// processes opened before the schema upgrade that cannot preserve v2 fields.
-		`CREATE TRIGGER IF NOT EXISTS protect_job_v2_append_only_facts
-			BEFORE UPDATE OF payload_json ON job_aggregates
-			WHEN
-				COALESCE(json_array_length(NEW.payload_json, '$.job_messages'), 0) <
-					COALESCE(json_array_length(OLD.payload_json, '$.job_messages'), 0)
-				OR EXISTS (
-					SELECT 1 FROM json_each(OLD.payload_json, '$.job_messages') AS previous
-					WHERE json(json_extract(
-						NEW.payload_json, '$.job_messages[' || previous.key || ']'
-					)) IS NOT json(previous.value)
-				)
-				OR COALESCE(json_array_length(NEW.payload_json, '$.delivery_observations'), 0) <
-					COALESCE(json_array_length(OLD.payload_json, '$.delivery_observations'), 0)
-				OR EXISTS (
-					SELECT 1 FROM json_each(OLD.payload_json, '$.delivery_observations') AS previous
-					WHERE json(json_extract(
-						NEW.payload_json, '$.delivery_observations[' || previous.key || ']'
-					)) IS NOT json(previous.value)
-				)
-				OR COALESCE(json_array_length(NEW.payload_json, '$.job_question_authorizations'), 0) <
-					COALESCE(json_array_length(OLD.payload_json, '$.job_question_authorizations'), 0)
-				OR EXISTS (
-					SELECT 1 FROM json_each(OLD.payload_json, '$.job_question_authorizations') AS previous
-					WHERE json(json_extract(
-						NEW.payload_json, '$.job_question_authorizations[' || previous.key || ']'
-					)) IS NOT json(previous.value)
-				)
-			BEGIN
-				SELECT RAISE(ABORT, 'JobAggregate update would remove or modify append-only aggregate facts');
-			END`,
+		`DROP TRIGGER IF EXISTS protect_job_v2_append_only_facts`,
+		preserveJobAggregateFactsTrigger,
 		`CREATE TABLE IF NOT EXISTS job_commands (
 			command_id TEXT PRIMARY KEY,
 			job_id TEXT NOT NULL REFERENCES job_aggregates(job_id),
@@ -213,14 +183,6 @@ func (s *Store) initialize(ctx context.Context) error {
 		}
 	}
 	if version < schemaVersion {
-		// The database trigger also fences processes that opened the prior schema
-		// before this migration and would otherwise drop unknown aggregate fields.
-		if _, err := tx.ExecContext(ctx, "DROP TRIGGER IF EXISTS job_aggregates_preserve_v2_facts"); err != nil {
-			return fmt.Errorf("replace JobAggregate fact-preservation trigger: %w", err)
-		}
-		if _, err := tx.ExecContext(ctx, preserveJobAggregateFactsTrigger); err != nil {
-			return fmt.Errorf("install JobAggregate fact-preservation trigger: %w", err)
-		}
 		if _, err := tx.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d", schemaVersion)); err != nil {
 			return fmt.Errorf("upgrade schema version: %w", err)
 		}
