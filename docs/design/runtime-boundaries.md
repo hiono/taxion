@@ -32,7 +32,7 @@ Provider Adapter design: [Provider Adapter 詳細設計書](provider-adapter-det
 
 ### 3.1 Human ingress
 
-利用者principalは、管理者が明示設定したOIDC issuerによるAuthorization Code Flow with PKCEを検証したTrusted Ingressからのみ確定します。Principalはissuer / subjectに束縛し、email、body、query、任意headerから推定しません。Ingress adapterは検証済みAuthenticatedPrincipalとserver-derived sourceをControllerへ渡し、Controllerは原文依頼digest、request identity、受信時刻とともにIntakeProvenanceをJobAggregateへ保存します。生tokenやcookieは保存しません。自然言語Bodyは意図と情報の入力であり、本人性、承認、実行権限を含む信頼済みmetadataではありません。A2A Agentとservice identityはHUMAN Principalと分離します。認証の詳細はADR-501に従います。UI / ControllerがJobID、MessageID、ThreadID、Recipient等のEnvelopeを生成・検証します。
+利用者principalは、管理者が明示設定したOIDC issuerによるAuthorization Code Flow with PKCEを検証したTrusted Ingressからのみ確定します。Principalはissuer / subjectに束縛し、email、body、query、任意headerから推定しません。Ingress adapterは検証済みAuthenticatedPrincipalとserver-derived sourceをControllerへ渡し、Controllerは原文依頼digest、request identity、受信時刻とともにIntakeProvenanceをJobAggregateへ保存します。生tokenやcookieは保存しません。自然言語Bodyは意図と情報の入力であり、本人性、承認、実行権限を含む信頼済みmetadataではありません。A2A Agentとservice identityはHUMAN Principalと分離します。認証の詳細はADR-501に従います。ControllerはJobと送受信Actorを信頼できるContextから確定し、JobMessageには必要最小限の識別情報だけを記録します。ReplyToは元の会話へ戻る必要がある場合だけ保持します。
 
 ### 3.2 Role execution
 
@@ -86,11 +86,12 @@ Context Managerは各turnで必要なContextだけを選択し、Skill / Fileを
 ### 4.3 Internal communication
 
 1. Sender identityはTrusted Ingressまたは現在のRoleExecutionから確定する。
-2. ControllerがJobMessage Envelope、Recipient、MessageKind、ReplyTo、scopeを検証する。
-3. JobMessageをJobAggregateへappend-only factとして保存する。
-4. DeliveryをRecipient単位のappend-only observationとして保存する。
-5. Message、Delivery、Provider operation、RoleExecutionを別々の事実として扱う。
-6. HANDOFFは通常Message送信と異なるJob commandであり、Provider stop / result / usage / Worktree release gateを通過するまで受信Roleをrunnableにしない。
+2. Controllerは同一Job内のRecipientを信頼できるContextから確定する。曖昧な場合だけ確認する。
+3. 自然言語BodyをJobMessageとしてJobAggregateへappend-onlyで保存する。MessageKind、BatchID、通信専用grantは要求しない。
+4. Orchestratorは保存済みメッセージをRecipientの既存RoleExecution / Sessionへ渡し、受信側は元のJob / Contextで回答する。配送専用の状態機械は設けない。
+5. 情報交換はTask assignment、Execution Permission、JobApproval、Worktree ownershipを変更しない。
+6. Provider Send / Turnや外部副作用はメッセージ受け渡しと別のoperationとして扱い、必要な認可をADR-506 / ADR-507に従って検証する。
+7. 実行責任とWorktree ownershipの移転は通常メッセージと分離し、既存のHandoff条件を検証する。
 
 ### 4.4 External A2A communication
 
