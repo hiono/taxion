@@ -76,6 +76,10 @@ func (s *Store) GetJobQuestionAuthorizationCommand(
 	if err := authorization.Validate(job); err != nil {
 		return CommandReceipt{}, domain.JobQuestionAuthorization{}, false, fmt.Errorf("%w: persisted question authorization is invalid: %v", ErrIntegrity, err)
 	}
+	if receipt.Revision != authorization.CreatedRevision ||
+		!receipt.CreatedAt.Equal(authorization.CreatedAt) {
+		return CommandReceipt{}, domain.JobQuestionAuthorization{}, false, fmt.Errorf("%w: question authorization fact does not match its command receipt", ErrIntegrity)
+	}
 	if err := tx.Commit(); err != nil {
 		return CommandReceipt{}, domain.JobQuestionAuthorization{}, false, fmt.Errorf("commit question authorization receipt lookup: %w", err)
 	}
@@ -88,7 +92,7 @@ func (s *Store) AddJobQuestionAuthorization(
 	expectedRevision uint64,
 	request domain.JobQuestionAuthorizationRequest,
 ) (CommandReceipt, domain.JobQuestionAuthorization, error) {
-	return persistPlanningFact(
+	receipt, authorization, err := persistPlanningFact(
 		ctx, s, jobID, expectedRevision, request.CommandID, addJobQuestionAuthorizationCommandType, request,
 		func(job domain.Job, now time.Time) (domain.JobQuestionAuthorization, error) {
 			return domain.NewJobQuestionAuthorization(job, request, now)
@@ -105,4 +109,12 @@ func (s *Store) AddJobQuestionAuthorization(
 			return domain.JobQuestionAuthorization{}, false
 		},
 	)
+	if err != nil {
+		return CommandReceipt{}, domain.JobQuestionAuthorization{}, err
+	}
+	if receipt.Revision != authorization.CreatedRevision ||
+		!receipt.CreatedAt.Equal(authorization.CreatedAt) {
+		return CommandReceipt{}, domain.JobQuestionAuthorization{}, fmt.Errorf("%w: question authorization fact does not match its command receipt", ErrIntegrity)
+	}
+	return receipt, authorization, nil
 }
