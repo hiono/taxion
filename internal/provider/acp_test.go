@@ -175,7 +175,7 @@ func (a *syntheticACPTestAdapter) Capabilities(ctx context.Context) (Capabilitie
 			Identity:       identity,
 			TestID:         "runtime-test",
 			EvidenceSHA256: sha256Hex("synthetic ACP fake-peer evidence"),
-			EvidenceLevel: EvidenceSynthetic,
+			EvidenceLevel:  EvidenceSynthetic,
 			VerifiedAt:     time.Now().UTC(),
 		}
 	}
@@ -183,7 +183,7 @@ func (a *syntheticACPTestAdapter) Capabilities(ctx context.Context) (Capabilitie
 		Identity:         identity,
 		StartIdempotency: true,
 		SendIdempotency:  true,
-		Evidence:         []CapabilityEvidence{
+		Evidence: []CapabilityEvidence{
 			evidence(CapabilityStartIdempotency),
 			evidence(CapabilitySendIdempotency),
 		},
