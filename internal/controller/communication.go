@@ -76,7 +76,7 @@ func (c *CommunicationController) SendFromRole(ctx context.Context, request Role
 	return c.persistMessage(ctx, request.JobID, request.CommandID, domain.JobMessageRequest{
 		Sender:    domain.ActorRef{Kind: actorKind, ID: execution.ID},
 		Recipient: request.Recipient, ReplyToMessageID: request.ReplyToMessageID,
-		Body     : request.Body,
+		Body:      request.Body,
 	})
 }
 
@@ -102,7 +102,7 @@ func (c *CommunicationController) SendFromHuman(
 	return c.persistMessage(ctx, request.JobID, request.CommandID, domain.JobMessageRequest{
 		Sender:    domain.ActorRef{Kind: domain.ActorHuman, ID: principal.PrincipalID()},
 		Recipient: request.Recipient, ReplyToMessageID: request.ReplyToMessageID,
-		Body     : request.Body,
+		Body:      request.Body,
 	})
 }
 
@@ -156,7 +156,7 @@ func findMessageByCommand(job domain.Job, commandID string) (domain.JobMessage, 
 func hasAcceptedRoleSession(job domain.Job, execution domain.RoleExecution, sessionID string) bool {
 	var latest *domain.ProviderStartObservation
 	for i := range job.ProviderStartObservations {
-		observation := &job.ProviderStartObservations[i]
+		observation: = &job.ProviderStartObservations[i]
 		if observation.OperationID == execution.ProviderStartOperationID &&
 			(latest == nil || observation.CreatedRevision > latest.CreatedRevision) {
 			latest = observation
@@ -174,7 +174,7 @@ func actorKindForRole(role string) (domain.ActorKind, error) {
 		return domain.ActorCoder, nil
 	case domain.RoleReviewer:
 		return domain.ActorReviewer, nil
-	default:
+	default: 
 		return "", errors.New("RoleExecution has an unsupported communication role")
 	}
 }
