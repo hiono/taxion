@@ -965,7 +965,7 @@ func (a *acpTestPermissionAuthorizer) Authorize(_ context.Context, request ACPTo
 	if request.OperationID != "operation_start_1" || request.JobID != "job_1" ||
 		request.RoleExecutionID != "role_execution_1" || request.TaskID != "task_1" ||
 		request.ExecutionPermissionID != "permission_1" || request.SessionID != "fake-session" ||
-		request.RequestSHA256 != strings.Repeat("a", 64) || request.ProviderIdentity.ProviderID != "provider" ||
+		request.RequestSHA256 != strings.Repeat("a", 64) || request.ProviderIdentity.ProviderID != "provider.test" ||
 		!strings.Contains(string(request.ToolCall), "git status") {
 		return errors.New("ACP permission request did not preserve its exact Task authority")
 	}
