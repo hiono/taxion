@@ -10,7 +10,7 @@ if ! command -v go >/dev/null 2>&1 || ! command -v gofmt >/dev/null 2>&1; then
 fi
 
 required_go_version="$(awk '$1 == "go" { print $2; exit }' go.mod)"
-actual_go_version="$(go env GOVERSION)"
+actual_go_version="$(GOTOOLCHAIN=local go env GOVERSION)"
 required_go_series="\${required_go_version%.*}"
 actual_go_series="\${actual_go_version#go}"
 actual_go_series="\${actual_go_series%.*}"
