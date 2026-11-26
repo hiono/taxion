@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
-	"database/sql"
 	"crypto/rsa"
 	"crypto/tls"
 	"crypto/x509"
