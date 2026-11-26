@@ -14,6 +14,9 @@ func TestACPHelperProcess(t *testing.T) {
 	if os.Getenv("TAXION_ACP_HELPER") != "1" {
 		return
 	}
+	if os.Getenv("COPILOT_GITHUB_TOKEN") == "" || os.Getenv("GH_TOKEN") != "" || os.Getenv("GITHUB_TOKEN") != "" {
+		return
+	}
 	scanner := bufio.NewScanner(os.Stdin)
 	writer := bufio.NewWriter(os.Stdout)
 	write := func(value any) {
@@ -70,12 +73,15 @@ func TestACPHelperProcess(t *testing.T) {
 
 func TestACPAdapterUsesOneProcessPerRoleAndDeniesToolRequests(t *testing.T) {
 	t.Setenv("TAXION_ACP_HELPER", "1")
+	t.Setenv("GH_TOKEN", "host-gh-token")
+	t.Setenv("GITHUB_TOKEN", "host-github-token")
 	identity := testIdentity()
 	adapter, err := NewACPAdapter(ACPConfig{
 		Command:          os.Args[0],
 		Args:             []string{"-test.run=TestACPHelperProcess"},
 		WorkingDirectory: t.TempDir(),
 		Identity:         identity,
+		Environment:      []string{"TAXION_ACP_HELPER"},
 	})
 	if err != nil {
 		t.Fatalf("NewACPAdapter: %v", err)
@@ -100,7 +106,12 @@ func TestACPAdapterUsesOneProcessPerRoleAndDeniesToolRequests(t *testing.T) {
 		MaxTokens:       1000,
 		Deadline:        time.Now().Add(8 * time.Second),
 	}
-	result, err := adapter.Start(ctx, start, nil)
+	lease, err := NewCredentialLease([]byte("test-token"))
+	if err != nil {
+		t.Fatalf("NewCredentialLease: %v", err)
+	}
+	defer lease.Close()
+	result, err := adapter.Start(ctx, start, lease)
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -140,6 +151,13 @@ func TestACPAdapterUsesOneProcessPerRoleAndDeniesToolRequests(t *testing.T) {
 }
 
 func TestACPAdapterRejectsMissingConfiguration(t *testing.T) {
+	identity := testIdentity()
+	if _, err := NewACPAdapter(ACPConfig{
+		Command: "copilot", WorkingDirectory: t.TempDir(), Identity: identity,
+		Environment: []string{"GH_TOKEN"},
+	}); err == nil {
+		t.Fatal("secret-bearing environment variable was allowed")
+	}
 	if _, err := NewACPAdapter(ACPConfig{}); err == nil {
 		t.Fatal("empty ACP configuration was accepted")
 	}
@@ -192,12 +210,15 @@ func (a *syntheticACPTestAdapter) Capabilities(ctx context.Context) (Capabilitie
 
 func TestACPFakePeerThroughProviderRuntime(t *testing.T) {
 	t.Setenv("TAXION_ACP_HELPER", "1")
+	t.Setenv("GH_TOKEN", "host-gh-token")
+	t.Setenv("GITHUB_TOKEN", "host-github-token")
 	identity := testIdentity()
 	adapter, err := NewACPAdapter(ACPConfig{
 		Command:          os.Args[0],
 		Args:             []string{"-test.run=TestACPHelperProcess"},
 		WorkingDirectory: t.TempDir(),
 		Identity:         identity,
+		Environment:      []string{"TAXION_ACP_HELPER"},
 	})
 	if err != nil {
 		t.Fatalf("NewACPAdapter: %v", err)
