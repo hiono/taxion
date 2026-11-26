@@ -206,7 +206,6 @@ func TestCommunicationControllerPersistsCoderPlannerQuestionAndAnswer(t *testing
 		t.Fatalf("Coder QUESTION identity was not preserved: %#v", question.Message)
 	}
 
-
 	if answer.Message.ReplyToMessageID != question.Message.ID ||
 		answer.Message.Sender.ID != plannerExecution.ID ||
 		answer.Message.Recipient.ID != coderExecution.ID {
@@ -241,10 +240,10 @@ func TestCommunicationControllerPersistsCoderPlannerQuestionAndAnswer(t *testing
 	reviewerPermissionRequest := domain.ExecutionPermissionRequest{
 		JobID: jobID, TaskID: task.ID, CommandID: "cmd_66666666666666666666666666666666",
 		Role: domain.RoleReviewer, Effect: "repository.read",
-		Resource: revision.Contract.TargetRepositories[0],
+		Resource:   revision.Contract.TargetRepositories[0],
 		ProviderID: runtime.identity.ProviderID, AccountID: runtime.identity.AccountID,
 		ConfigurationSHA256: revision.Contract.ConfigurationSHA256,
-		ReservedTurns: 1, ReservedTokens: 100, ExpiresAt: now.Add(30 * time.Minute),
+		ReservedTurns:       1, ReservedTokens: 100, ExpiresAt: now.Add(30 * time.Minute),
 	}
 	reviewerRequestSHA, err := domain.ExecutionPermissionRequestSHA256(reviewerPermissionRequest)
 	if err != nil {
@@ -253,9 +252,9 @@ func TestCommunicationControllerPersistsCoderPlannerQuestionAndAnswer(t *testing
 	reviewerAssessment := domain.ExecutionEffectAssessment{
 		Role: reviewerPermissionRequest.Role, Effect: reviewerPermissionRequest.Effect,
 		Resource: reviewerPermissionRequest.Resource, ProviderID: reviewerPermissionRequest.ProviderID,
-		AccountID: reviewerPermissionRequest.AccountID,
+		AccountID:           reviewerPermissionRequest.AccountID,
 		ConfigurationSHA256: reviewerPermissionRequest.ConfigurationSHA256,
-		RequestSHA256: reviewerRequestSHA, Reversible: true, Contained: true,
+		RequestSHA256:       reviewerRequestSHA, Reversible: true, Contained: true,
 		Mutating: false, ValidUntil: reviewerPermissionRequest.ExpiresAt.Add(time.Minute),
 		EvidenceSHA256: strings.Repeat("e", 64),
 	}
@@ -285,10 +284,10 @@ func TestCommunicationControllerPersistsCoderPlannerQuestionAndAnswer(t *testing
 
 	coderOutput, err := orchestrator.SendRoleMessage(context.Background(), RoleMessageRequest{
 		JobID: jobID, RoleExecutionID: coderExecution.ID, ProviderSessionID: coderStart.ProviderSessionID,
-		CommandID: "cmd_68686868686868686868686868686868",
-		Recipient: domain.ActorRef{Kind: domain.ActorReviewer, ID: reviewerExecution.ID},
+		CommandID:        "cmd_68686868686868686868686868686868",
+		Recipient:        domain.ActorRef{Kind: domain.ActorReviewer, ID: reviewerExecution.ID},
 		ReplyToMessageID: answer.Message.ID,
-		Body: "実装結果を確認してください。固定された成果を提示します。",
+		Body:             "実装結果を確認してください。固定された成果を提示します。",
 	})
 	if err != nil {
 		t.Fatalf("SendRoleMessage Coder output: %v", err)
@@ -301,10 +300,10 @@ func TestCommunicationControllerPersistsCoderPlannerQuestionAndAnswer(t *testing
 
 	review, err := orchestrator.SendRoleMessage(context.Background(), RoleMessageRequest{
 		JobID: jobID, RoleExecutionID: reviewerExecution.ID, ProviderSessionID: reviewerStart.ProviderSessionID,
-		CommandID: "cmd_69696969696969696969696969696969",
-		Recipient: domain.ActorRef{Kind: domain.ActorCoder, ID: coderExecution.ID},
+		CommandID:        "cmd_69696969696969696969696969696969",
+		Recipient:        domain.ActorRef{Kind: domain.ActorCoder, ID: coderExecution.ID},
 		ReplyToMessageID: coderOutput.Message.Message.ID,
-		Body: "指摘: 境界条件の検証を追加してください。対象は同じTaskの変更範囲です。",
+		Body:             "指摘: 境界条件の検証を追加してください。対象は同じTaskの変更範囲です。",
 	})
 	if err != nil {
 		t.Fatalf("SendRoleMessage Reviewer feedback: %v", err)
@@ -317,10 +316,10 @@ func TestCommunicationControllerPersistsCoderPlannerQuestionAndAnswer(t *testing
 
 	correction, err := orchestrator.SendRoleMessage(context.Background(), RoleMessageRequest{
 		JobID: jobID, RoleExecutionID: coderExecution.ID, ProviderSessionID: coderStart.ProviderSessionID,
-		CommandID: "cmd_70707070707070707070707070707070",
-		Recipient: domain.ActorRef{Kind: domain.ActorReviewer, ID: reviewerExecution.ID},
+		CommandID:        "cmd_70707070707070707070707070707070",
+		Recipient:        domain.ActorRef{Kind: domain.ActorReviewer, ID: reviewerExecution.ID},
 		ReplyToMessageID: review.Message.Message.ID,
-		Body: "修正しました。境界条件のテストを追加しました。",
+		Body:             "修正しました。境界条件のテストを追加しました。",
 	})
 	if err != nil {
 		t.Fatalf("SendRoleMessage Coder correction: %v", err)
@@ -333,10 +332,10 @@ func TestCommunicationControllerPersistsCoderPlannerQuestionAndAnswer(t *testing
 
 	rereview, err := orchestrator.SendRoleMessage(context.Background(), RoleMessageRequest{
 		JobID: jobID, RoleExecutionID: reviewerExecution.ID, ProviderSessionID: reviewerStart.ProviderSessionID,
-		CommandID: "cmd_71717171717171717171717171717171",
-		Recipient: domain.ActorRef{Kind: domain.ActorCoder, ID: coderExecution.ID},
+		CommandID:        "cmd_71717171717171717171717171717171",
+		Recipient:        domain.ActorRef{Kind: domain.ActorCoder, ID: coderExecution.ID},
 		ReplyToMessageID: correction.Message.Message.ID,
-		Body: "再レビュー結果: 指摘を解消し、対象成果をPASSと判定します。",
+		Body:             "再レビュー結果: 指摘を解消し、対象成果をPASSと判定します。",
 	})
 	if err != nil {
 		t.Fatalf("SendRoleMessage Reviewer re-review: %v", err)
