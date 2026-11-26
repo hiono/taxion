@@ -848,7 +848,7 @@ func TestJobQuestionTurnControllerDoesNotDispatchAfterDeadlineWhenLookupReportsN
 	if !found {
 		t.Fatal("JobQuestionAuthorization not found")
 	}
-	const commandID = "cmd_b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+	const commandID = "cmd_b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
 	f.runtime.sendErr = errors.New("simulated failure before Provider acceptance")
 	if _, err := f.controller.Send(context.Background(), f.jobID, f.authorizationID, commandID, 100); err == nil {
 		t.Fatal("initial Provider failure was not returned")
