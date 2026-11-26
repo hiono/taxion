@@ -260,7 +260,7 @@ func validTurnRequest() TurnRequest {
 		PromptSHA256: sha256Hex(prompt), Prompt: prompt,
 		ReadOnlyBoundary: ReadOnlyContextBoundary{Mode: "snapshot", Reference: "snapshot_1", SHA256: sha256Hex("snapshot")},
 		MaxTokens:        20,
-		Deadline: time.Now().UTC().Add(time.Hour),
+		Deadline:         time.Now().UTC().Add(time.Hour),
 	}
 }
 
