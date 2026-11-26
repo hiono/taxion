@@ -4,9 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
-	"fmt"
 	"os"
-	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -143,5 +141,3 @@ func TestACPAdapterRejectsMissingConfiguration(t *testing.T) {
 	}
 }
 
-var _ = exec.ErrNotFound
-var _ = fmt.Sprintf
