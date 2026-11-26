@@ -272,6 +272,35 @@ func TestStartAndTurnRequestsValidateImmutablePromptAndContextDigests(t *testing
 	}
 }
 
+func TestTurnLookupRequiresResultDigestForCompletedButNotFailed(t *testing.T) {
+	request := LookupRequest{
+		OperationID: "operation_turn_123",
+		SessionID:   "session_turn_123",
+		TurnID:      "turn_123",
+	}
+	failed := LookupResult{
+		Found: true, OperationID: request.OperationID, Status: "FAILED",
+		ReceiptID: "receipt_turn_123", SessionID: request.SessionID, TurnID: request.TurnID,
+		UsageID: "usage_turn_123", EvidenceSHA256: strings.Repeat("a", 64),
+	}
+	if err := failed.Validate(request); err != nil {
+		t.Fatalf("FAILED Turn Lookup without result digest: %v", err)
+	}
+	completed := failed
+	completed.Status = "COMPLETED"
+	if err := completed.Validate(request); err == nil {
+		t.Fatal("COMPLETED Turn Lookup without result digest was accepted")
+	}
+	completed.ResultSHA256 = strings.Repeat("b", 64)
+	if err := completed.Validate(request); err != nil {
+		t.Fatalf("COMPLETED Turn Lookup with result digest: %v", err)
+	}
+	failed.UsageID = ""
+	if err := failed.Validate(request); err == nil {
+		t.Fatal("terminal Turn Lookup without usage identity was accepted")
+	}
+}
+
 func TestTurnRequestValidatesReadOnlyContextBoundary(t *testing.T) {
 	prompt := "Answer using the authorized context only"
 	request := TurnRequest{
