@@ -191,13 +191,6 @@ func (c *CommunicationController) persistMessage(
 		if !errors.Is(err, store.ErrIdempotencyConflict) || attempt != 0 {
 			return outcome, err
 		}
-		current, readErr := c.store.GetJob(ctx, jobID)
-		if readErr != nil {
-			return outcome, errors.Join(err, readErr)
-		}
-		if _, exists := findMessageByCommand(current, commandID); exists {
-			return outcome, err
-		}
 	}
 	return outcome, store.ErrIdempotencyConflict
 }
@@ -209,15 +202,6 @@ func findRoleExecution(job domain.Job, roleExecutionID string) (domain.RoleExecu
 		}
 	}
 	return domain.RoleExecution{}, false
-}
-
-func findMessageByCommand(job domain.Job, commandID string) (domain.JobMessage, bool) {
-	for _, message := range job.JobMessages {
-		if message.CommandID == commandID {
-			return message, true
-		}
-	}
-	return domain.JobMessage{}, false
 }
 
 func hasAcceptedRoleSession(job domain.Job, execution domain.RoleExecution, sessionID string) bool {

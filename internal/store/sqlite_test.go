@@ -94,39 +94,51 @@ func TestPlanningFactTransactionAcquiresWriterLockBeforeReading(t *testing.T) {
 	}
 	defer second.Close()
 
+	if _, err := second.db.ExecContext(ctx, "PRAGMA busy_timeout = 0"); err != nil {
+		t.Fatalf("disable second writer busy timeout: %v", err)
+	}
 	firstTransaction, err := beginImmediateSQLiteTransaction(ctx, first.db)
 	if err != nil {
 		t.Fatalf("begin first immediate transaction: %v", err)
 	}
-	secondStarted := make(chan error, 1)
-	go func() {
-		secondTransaction, err := beginImmediateSQLiteTransaction(ctx, second.db)
-		if err == nil {
-			err = secondTransaction.Rollback()
-		}
-		secondStarted <- err
-	}()
-
-	select {
-	case err := <-secondStarted:
+	if _, err := beginImmediateSQLiteTransaction(ctx, second.db); err == nil ||
+		(!strings.Contains(strings.ToLower(err.Error()), "locked") && !strings.Contains(strings.ToLower(err.Error()), "busy")) {
 		_ = firstTransaction.Rollback()
-		if err == nil {
-			t.Fatal("second writer acquired the lock before the first transaction completed")
-		}
-		t.Fatalf("second writer failed while waiting for the lock: %v", err)
-	case <-time.After(100 * time.Millisecond):
+		t.Fatalf("second writer error = %v, want SQLITE_BUSY while first transaction is active", err)
 	}
-
 	if err := firstTransaction.Commit(); err != nil {
 		t.Fatalf("commit first immediate transaction: %v", err)
 	}
-	select {
-	case err := <-secondStarted:
-		if err != nil {
-			t.Fatalf("second writer did not proceed after the first transaction committed: %v", err)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("second writer did not acquire the lock after the first transaction committed")
+	secondTransaction, err := beginImmediateSQLiteTransaction(ctx, second.db)
+	if err != nil {
+		t.Fatalf("second writer did not proceed after the first transaction committed: %v", err)
+	}
+	if err := secondTransaction.Rollback(); err != nil {
+		t.Fatalf("rollback second immediate transaction: %v", err)
+	}
+}
+
+
+func TestOpenCurrentSchemaDoesNotRequireSQLiteWriterLock(t *testing.T) {
+	first, path := newTestStore(t)
+	ctx := context.Background()
+	writer, err := first.db.Conn(ctx)
+	if err != nil {
+		t.Fatalf("acquire writer connection: %v", err)
+	}
+	defer writer.Close()
+	if _, err := writer.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
+		t.Fatalf("hold writer lock: %v", err)
+	}
+	defer func() { _, _ = writer.ExecContext(context.Background(), "ROLLBACK") }()
+	openContext, cancel := context.WithTimeout(ctx, 1500*time.Millisecond)
+	defer cancel()
+	reopened, err := Open(openContext, path)
+	if err != nil {
+		t.Fatalf("Open() blocked on a writer lock for a complete schema: %v", err)
+	}
+	if err := reopened.Close(); err != nil {
+		t.Fatalf("close reopened Store: %v", err)
 	}
 }
 
@@ -155,7 +167,7 @@ func TestPreUpgradeProcessCannotOverwriteV2AggregateFacts(t *testing.T) {
 			created_at TEXT NOT NULL,
 			updated_at TEXT NOT NULL
 		)`,
-		`PRAGMA user_version = 2`,
+		`PRAGMA user_version = 1`,
 	} {
 		if _, err := legacyConn.ExecContext(ctx, statement); err != nil {
 			t.Fatalf("initialize v1 database: %v", err)
@@ -346,6 +358,14 @@ func TestAggregateUpdateCannotRemoveAppendOnlyFacts(t *testing.T) {
 		WHERE job_id = ?`, job.ID); err != nil {
 		t.Fatalf("append facts while preserving existing entries: %v", err)
 	}
+	if _, err := upgraded.db.ExecContext(ctx, `UPDATE job_aggregates
+		SET payload_json = json_set(
+			payload_json,
+			'$.job_messages', json('{"0":{"id":"message-1"}}')
+		)
+		WHERE job_id = ?`, job.ID); err == nil || !strings.Contains(err.Error(), "append-only JobMessages") {
+		t.Fatalf("non-array replacement error = %v, want append-only JobMessage guard rejection", err)
+	}
 	if _, err := oldWriteStatement.ExecContext(ctx, job.ID); err == nil ||
 		!strings.Contains(err.Error(), "append-only JobMessages") {
 		t.Fatalf("pre-upgrade prepared writer error = %v, want append-only fact trigger rejection", err)
@@ -370,8 +390,11 @@ func TestAggregateUpdateCannotRemoveAppendOnlyFacts(t *testing.T) {
 	}
 }
 
-func TestOpenRejectsFutureSchemaVersion(t *testing.T) {
+func TestOpenRejectsFutureSchemaVersionWithoutChangingJournalMode(t *testing.T) {
 	database, path := newTestStore(t)
+	if _, err := database.db.ExecContext(context.Background(), "PRAGMA journal_mode = DELETE"); err != nil {
+		t.Fatalf("set DELETE journal mode: %v", err)
+	}
 	if _, err := database.db.ExecContext(context.Background(), "PRAGMA user_version = 99"); err != nil {
 		t.Fatalf("set future schema version: %v", err)
 	}
@@ -380,6 +403,18 @@ func TestOpenRejectsFutureSchemaVersion(t *testing.T) {
 	}
 	if _, err := Open(context.Background(), path); !errors.Is(err, ErrUnsupportedSchema) {
 		t.Fatalf("Open() error = %v, want ErrUnsupportedSchema", err)
+	}
+	check, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("reopen future-version database for journal-mode check: %v", err)
+	}
+	defer check.Close()
+	var journalMode string
+	if err := check.QueryRowContext(context.Background(), "PRAGMA journal_mode").Scan(&journalMode); err != nil {
+		t.Fatalf("read journal mode after rejected Open: %v", err)
+	}
+	if journalMode != "delete" {
+		t.Fatalf("journal mode after rejected Open = %q, want delete", journalMode)
 	}
 }
 

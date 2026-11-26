@@ -14,7 +14,7 @@ Accepted
 
 **JobQuestionAuthorizationは、承認済みJob内の質問を契機にTaskless Plannerの追加bounded read-only Provider実行が必要な場合に限って使用します。**
 
-- JobMessageの保存・参照・転送、自然言語の質問・回答、既存Contextを使った応答にはJobQuestionAuthorizationを要求しません。
+- JobMessageの保存・参照・転送、自然言語の質問・回答、既存Contextだけを使い新たなProvider Send / Turnを発生させない応答にはJobQuestionAuthorizationを要求しません。
 - JobMessage、QUESTIONというMessageKind、質問本文だけではgrantを発行しません。
 - 追加のProvider実行が必要な場合は、現在有効なJobApprovalと承認済みscopeを確認し、元Questionと実行対象へ束縛した独立grantを発行します。
 - grantはJobApproval、元Question、Planner RoleExecution、Provider / account / configuration、必要なread-only context、budget、deadlineに限定して束縛します。他のQuestionやSessionへ再利用できません。

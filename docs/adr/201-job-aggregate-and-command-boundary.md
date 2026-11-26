@@ -28,7 +28,7 @@ Job、Task、RoleExecution、通信、Provider実行、Worktree、成果・証�
 
 - JobAggregateの変更はexpected revisionと安定したidempotency identityを持つ明示的Commandで実行します。
 - 一つのJobに属するCommandと関連factsは一つのtransactionで確定します。同じCommand ID・同じ内容の再送は同じreceiptへ収束させ、異なる内容の再利用は拒否します。
-- SQLiteの`user_version`はJobAggregateの保存形式との互換性を表します。schema versionを進め、Storeは対応可能な旧versionをupgradeし、未対応の新versionをread / write前に拒否します。upgrade前から稼働中の旧processが新しいJobMessageを破壊しないよう、`job_aggregates.payload_json`のUPDATE triggerで既存JobMessage配列の順序付きprefix保持を強制します。schema migrationは`BEGIN IMMEDIATE`でSQLite writer lockを先に取得し、同じtransaction内で`user_version`を読み取ります。
+- SQLiteの`user_version`はJobAggregateの保存形式とappend-only guardの互換性を表します。Storeは接続時にversionを先行確認し、未対応の新versionをjournal mode等の変更前に拒否します。migration時は`BEGIN IMMEDIATE`取得後にもversionを再確認し、対応可能な旧versionだけをupgradeします。upgrade前から稼働中の旧processが新しいJobMessageを破壊しないよう、`job_aggregates.payload_json`のUPDATE triggerで既存JobMessage配列の順序付きprefix保持を強制します。
 - Job、Task、RoleExecution、Message、Provider operation、Worktree ownership、Output、Evidence、Usage、Effect decisionに独立したproduction write pathを設けません。
 - Coreはドメイン整合性を検証し、Controllerは認証・承認・Provider等の外部事実を検証します。
 

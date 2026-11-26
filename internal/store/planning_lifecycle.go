@@ -134,33 +134,49 @@ type planningFactTransaction interface {
 	Rollback() error
 }
 
-type immediateSQLiteTransaction struct {
+type sqliteConnectionTransaction struct {
 	connection *sql.Conn
+	ctx        context.Context
 }
 
-func beginImmediateSQLiteTransaction(ctx context.Context, database *sql.DB) (*immediateSQLiteTransaction, error) {
+func beginSQLiteConnectionTransaction(ctx context.Context, database *sql.DB, statement, label string) (*sqliteConnectionTransaction, error) {
 	connection, err := database.Conn(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("acquire SQLite planning-fact connection: %w", err)
 	}
-	if _, err := connection.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
-		_ = connection.Close()
-		return nil, fmt.Errorf("begin immediate planning-fact transaction: %w", err)
+	if _, err := connection.ExecContext(ctx, statement); err != nil {
+		beginErr := fmt.Errorf("%s: %w", label, err)
+		rollbackErr := rollbackSQLiteConnection(connection)
+		closeErr := connection.Close()
+		return nil, errors.Join(beginErr, rollbackErr, closeErr)
 	}
-	return &immediateSQLiteTransaction{connection: connection}, nil
+	return &sqliteConnectionTransaction{connection: connection, ctx: ctx}, nil
 }
 
-func (tx *immediateSQLiteTransaction) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
+func beginImmediateSQLiteTransaction(ctx context.Context, database *sql.DB) (*sqliteConnectionTransaction, error) {
+	return beginSQLiteConnectionTransaction(ctx, database, "BEGIN IMMEDIATE", "begin immediate planning-fact transaction")
+}
+
+func beginDeferredSQLiteTransaction(ctx context.Context, database *sql.DB) (*sqliteConnectionTransaction, error) {
+	return beginSQLiteConnectionTransaction(ctx, database, "BEGIN", "begin planning-fact read transaction")
+}
+
+func (tx *sqliteConnectionTransaction) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
 	return tx.connection.ExecContext(ctx, query, args...)
 }
 
-func (tx *immediateSQLiteTransaction) QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row {
+func (tx *sqliteConnectionTransaction) QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row {
 	return tx.connection.QueryRowContext(ctx, query, args...)
 }
 
-func (tx *immediateSQLiteTransaction) Commit() error {
+func (tx *sqliteConnectionTransaction) Commit() error {
 	if tx.connection == nil {
 		return sql.ErrTxDone
+	}
+	if tx.ctx != nil {
+		if err := tx.ctx.Err(); err != nil {
+			return err
+		}
 	}
 	if _, err := tx.connection.ExecContext(context.Background(), "COMMIT"); err != nil {
 		return err
@@ -170,18 +186,15 @@ func (tx *immediateSQLiteTransaction) Commit() error {
 	return connection.Close()
 }
 
-func (tx *immediateSQLiteTransaction) Rollback() error {
+func (tx *sqliteConnectionTransaction) Rollback() error {
 	if tx.connection == nil {
 		return nil
 	}
 	connection := tx.connection
 	tx.connection = nil
-	_, rollbackErr := connection.ExecContext(context.Background(), "ROLLBACK")
+	rollbackErr := rollbackSQLiteConnection(connection)
 	closeErr := connection.Close()
-	if rollbackErr != nil {
-		return rollbackErr
-	}
-	return closeErr
+	return errors.Join(rollbackErr, closeErr)
 }
 
 func persistPlanningFact[T any](ctx context.Context, s *Store, jobID string, expectedRevision uint64, commandID, commandType string, request any,
@@ -195,46 +208,40 @@ func persistPlanningFact[T any](ctx context.Context, s *Store, jobID string, exp
 		return CommandReceipt{}, zero, fmt.Errorf("encode planning lifecycle command: %w", err)
 	}
 	requestHash := digest(requestJSON)
+
+	readTx, err := beginDeferredSQLiteTransaction(ctx, s.db)
+	if err != nil {
+		return CommandReceipt{}, zero, err
+	}
+	defer readTx.Rollback()
+	receipt, fact, found, err := readPlanningFactReceipt(ctx, readTx, jobID, commandID, commandType, requestHash, findFact)
+	if err != nil {
+		return CommandReceipt{}, zero, err
+	}
+	if found {
+		if err := readTx.Commit(); err != nil {
+			return CommandReceipt{}, zero, fmt.Errorf("commit planning lifecycle read-only replay: %w", err)
+		}
+		return receipt, fact, nil
+	}
+	if err := readTx.Rollback(); err != nil {
+		return CommandReceipt{}, zero, fmt.Errorf("release planning lifecycle read snapshot: %w", err)
+	}
+
 	tx, err := beginImmediateSQLiteTransaction(ctx, s.db)
 	if err != nil {
 		return CommandReceipt{}, zero, err
 	}
 	defer tx.Rollback()
-
-	var existingType, existingJobID, existingHash, receiptJSON, createdAtText string
-	var resultingRevision int64
-	err = tx.QueryRowContext(ctx, "SELECT command_type, job_id, payload_sha256, receipt_json, created_at, resulting_revision FROM job_commands WHERE command_id = ?", commandID).
-		Scan(&existingType, &existingJobID, &existingHash, &receiptJSON, &createdAtText, &resultingRevision)
-	if err == nil {
-		if existingType != commandType || existingJobID != jobID || existingHash != requestHash {
-			return CommandReceipt{}, zero, ErrIdempotencyConflict
-		}
-		var receipt CommandReceipt
-		if err := json.Unmarshal([]byte(receiptJSON), &receipt); err != nil {
-			return CommandReceipt{}, zero, fmt.Errorf("%w: decode planning lifecycle receipt: %v", ErrIntegrity, err)
-		}
-		createdAt, err := time.Parse(time.RFC3339Nano, createdAtText)
-		if err != nil {
-			return CommandReceipt{}, zero, fmt.Errorf("%w: invalid planning lifecycle receipt time: %v", ErrIntegrity, err)
-		}
-		if receipt.CommandID != commandID || receipt.JobID != jobID || receipt.Revision != uint64(resultingRevision) || receipt.PayloadSHA256 != requestHash || !receipt.CreatedAt.Equal(createdAt) {
-			return CommandReceipt{}, zero, fmt.Errorf("%w: planning lifecycle receipt metadata mismatch", ErrIntegrity)
-		}
-		job, err := readJobAggregateTx(ctx, tx, jobID)
-		if err != nil {
-			return CommandReceipt{}, zero, err
-		}
-		fact, found := findFact(job)
-		if !found {
-			return CommandReceipt{}, zero, fmt.Errorf("%w: persisted planning lifecycle fact is missing", ErrIntegrity)
-		}
+	receipt, fact, found, err = readPlanningFactReceipt(ctx, tx, jobID, commandID, commandType, requestHash, findFact)
+	if err != nil {
+		return CommandReceipt{}, zero, err
+	}
+	if found {
 		if err := tx.Commit(); err != nil {
-			return CommandReceipt{}, zero, fmt.Errorf("commit planning lifecycle retry: %w", err)
+			return CommandReceipt{}, zero, fmt.Errorf("commit planning lifecycle concurrent replay: %w", err)
 		}
 		return receipt, fact, nil
-	}
-	if !errors.Is(err, sql.ErrNoRows) {
-		return CommandReceipt{}, zero, fmt.Errorf("read planning lifecycle receipt: %w", err)
 	}
 
 	job, err := readJobAggregateTx(ctx, tx, jobID)
@@ -290,6 +297,50 @@ func persistPlanningFact[T any](ctx context.Context, s *Store, jobID string, exp
 		return CommandReceipt{}, zero, fmt.Errorf("commit planning lifecycle fact: %w", err)
 	}
 	return receipt, fact, nil
+}
+
+
+func readPlanningFactReceipt[T any](
+	ctx context.Context,
+	tx planningFactTransaction,
+	jobID, commandID, commandType, requestHash string,
+	findFact func(domain.Job) (T, bool),
+) (CommandReceipt, T, bool, error) {
+	var zero T
+	var existingType, existingJobID, existingHash, receiptJSON, createdAtText string
+	var resultingRevision int64
+	err := tx.QueryRowContext(ctx, "SELECT command_type, job_id, payload_sha256, receipt_json, created_at, resulting_revision FROM job_commands WHERE command_id = ?", commandID).
+		Scan(&existingType, &existingJobID, &existingHash, &receiptJSON, &createdAtText, &resultingRevision)
+	if errors.Is(err, sql.ErrNoRows) {
+		return CommandReceipt{}, zero, false, nil
+	}
+	if err != nil {
+		return CommandReceipt{}, zero, false, fmt.Errorf("read planning lifecycle receipt: %w", err)
+	}
+	if existingType != commandType || existingJobID != jobID || existingHash != requestHash {
+		return CommandReceipt{}, zero, false, ErrIdempotencyConflict
+	}
+	var receipt CommandReceipt
+	if err := json.Unmarshal([]byte(receiptJSON), &receipt); err != nil {
+		return CommandReceipt{}, zero, false, fmt.Errorf("%w: decode planning lifecycle receipt: %v", ErrIntegrity, err)
+	}
+	createdAt, err := time.Parse(time.RFC3339Nano, createdAtText)
+	if err != nil {
+		return CommandReceipt{}, zero, false, fmt.Errorf("%w: invalid planning lifecycle receipt time: %v", ErrIntegrity, err)
+	}
+	if receipt.CommandID != commandID || receipt.JobID != jobID || receipt.Revision != uint64(resultingRevision) ||
+		receipt.PayloadSHA256 != requestHash || !receipt.CreatedAt.Equal(createdAt) {
+		return CommandReceipt{}, zero, false, fmt.Errorf("%w: planning lifecycle receipt metadata mismatch", ErrIntegrity)
+	}
+	job, err := readJobAggregateTx(ctx, tx, jobID)
+	if err != nil {
+		return CommandReceipt{}, zero, false, err
+	}
+	fact, found := findFact(job)
+	if !found {
+		return CommandReceipt{}, zero, false, fmt.Errorf("%w: persisted planning lifecycle fact is missing", ErrIntegrity)
+	}
+	return receipt, fact, true, nil
 }
 
 func readJobAggregateTx(ctx context.Context, tx planningFactTransaction, jobID string) (domain.Job, error) {

@@ -8,7 +8,53 @@ import (
 
 	"github.com/hiono/taxion/internal/domain"
 	"github.com/hiono/taxion/internal/provider"
+	"github.com/hiono/taxion/internal/store"
 )
+
+
+type conflictReplayCommunicationStore struct {
+	job     domain.Job
+	message domain.JobMessage
+	calls   int
+}
+
+func (s *conflictReplayCommunicationStore) GetJob(context.Context, string) (domain.Job, error) {
+	return s.job, nil
+}
+
+func (s *conflictReplayCommunicationStore) AddJobMessage(_ context.Context, jobID string, expectedRevision uint64, commandID string, _ domain.JobMessageRequest) (store.CommandReceipt, domain.JobMessage, error) {
+	s.calls++
+	if s.calls == 1 {
+		s.job.Revision++
+		s.message = domain.JobMessage{CommandID: commandID}
+		s.job.JobMessages = append(s.job.JobMessages, s.message)
+		return store.CommandReceipt{}, domain.JobMessage{}, store.ErrIdempotencyConflict
+	}
+	if expectedRevision != s.job.Revision {
+		return store.CommandReceipt{}, domain.JobMessage{}, store.ErrIdempotencyConflict
+	}
+	return store.CommandReceipt{CommandID: commandID, JobID: jobID, Revision: s.job.Revision}, s.message, nil
+}
+
+func TestPersistMessageReplaysConcurrentIdenticalCommandAfterRevisionConflict(t *testing.T) {
+	const commandID = "cmd_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	fake := &conflictReplayCommunicationStore{job: domain.Job{ID: "job_message_replay", Revision: 1}}
+	controller, err := NewCommunicationController(fake)
+	if err != nil {
+		t.Fatalf("NewCommunicationController: %v", err)
+	}
+	outcome, err := controller.persistMessage(context.Background(), fake.job.ID, commandID, domain.JobMessageRequest{
+		Sender: domain.ActorRef{Kind: domain.ActorCoder, ID: "role_coder"},
+		Recipient: domain.ActorRef{Kind: domain.ActorPlanner, ID: "role_planner"},
+		Body: "retry the same command",
+	})
+	if err != nil {
+		t.Fatalf("persistMessage() error = %v", err)
+	}
+	if fake.calls != 2 || outcome.Message.CommandID != commandID || outcome.MessageReceipt.CommandID != commandID {
+		t.Fatalf("replayed result = %#v, calls=%d", outcome, fake.calls)
+	}
+}
 
 func TestCommunicationControllerPersistsCoderPlannerQuestionAndAnswer(t *testing.T) {
 	database, jobID, revision, task := approvedExecutionPermissionControllerFixture(t)

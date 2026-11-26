@@ -66,6 +66,42 @@ func (f *fakePlanningLifecycleStore) AddPlanningBoundaryDecision(_ context.Conte
 	return store.CommandReceipt{}, decision, nil
 }
 
+
+type planningRevisionSequence struct {
+	revisions []uint64
+	reads     int
+}
+
+func (s *planningRevisionSequence) GetJob(_ context.Context, jobID string) (domain.Job, error) {
+	index := s.reads
+	if index >= len(s.revisions) {
+		index = len(s.revisions) - 1
+	}
+	s.reads++
+	return domain.Job{ID: jobID, Revision: s.revisions[index]}, nil
+}
+
+func TestRetryPlanningRevisionUsesFreshRevisionAfterConflict(t *testing.T) {
+	reader := &planningRevisionSequence{revisions: []uint64{4, 5}}
+	var attempted []uint64
+	receipt, result, err := retryPlanningRevision(context.Background(), reader, "job_retry", func(revision uint64) (store.CommandReceipt, string, error) {
+		attempted = append(attempted, revision)
+		if len(attempted) == 1 {
+			return store.CommandReceipt{}, "", store.ErrIdempotencyConflict
+		}
+		return store.CommandReceipt{JobID: "job_retry", Revision: revision + 1}, "persisted", nil
+	})
+	if err != nil {
+		t.Fatalf("retryPlanningRevision() error = %v", err)
+	}
+	if result != "persisted" || receipt.Revision != 6 {
+		t.Fatalf("retry result = %q, receipt %#v", result, receipt)
+	}
+	if len(attempted) != 2 || attempted[0] != 4 || attempted[1] != 5 {
+		t.Fatalf("attempted revisions = %#v, want [4 5]", attempted)
+	}
+}
+
 func TestBeginTurnPersistsTypedBoundaryDenial(t *testing.T) {
 	fake := &fakePlanningLifecycleStore{
 		job: domain.Job{ID: "job_1", Revision: 5},
