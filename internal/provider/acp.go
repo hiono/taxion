@@ -517,6 +517,57 @@ func (a *ACPAdapter) send(ctx context.Context, session *acpSession, request Turn
 	return result, nil
 }
 
+func (a *ACPAdapter) detachSession(session *acpSession) {
+	if a == nil || session == nil {
+		return
+	}
+	a.mu.Lock()
+	owned := a.byID[session.sessionID] == session
+	if owned {
+		delete(a.byID, session.sessionID)
+	}
+	if a.byRole[session.roleExecutionID] == session {
+		delete(a.byRole, session.roleExecutionID)
+	}
+	if owned {
+		for operationID, result := range a.byOp {
+			if result.SessionID == session.sessionID {
+				delete(a.byOp, operationID)
+			}
+		}
+	}
+	a.mu.Unlock()
+}
+
+func (a *ACPAdapter) Stop(ctx context.Context, request StopRequest, _ CredentialLease) (StopResult, error) {
+	if ctx == nil || request.Validate() != nil {
+		return StopResult{}, ErrProviderInvalidRequest
+	}
+	a.mu.Lock()
+	session := a.byID[request.SessionID]
+	a.mu.Unlock()
+	if session == nil {
+		return StopResult{}, &OperationError{Class: FailureDefinitive, Code: OperationCodeNotFound}
+	}
+	session.stopping.Store(true)
+	a.detachSession(session)
+	cancelCtx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
+	_ = session.process.notify(cancelCtx, "session/cancel", map[string]string{"sessionId": request.SessionID})
+	cancel()
+	session.process.terminate()
+	// Cancellation is not proof that tools or child processes are quiescent.
+	return StopResult{}, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown}
+}
+
+func (a *ACPAdapter) Resume(context.Context, ResumeRequest, CredentialLease) (ResumeResult, error) {
+	return ResumeResult{}, ErrUnsupportedCapability
+}
+
+func (a *ACPAdapter) Lookup(context.Context, LookupRequest, CredentialLease) (LookupResult, error) {
+	return LookupResult{}, ErrUnsupportedCapability
+}
+
+
 func (a *ACPAdapter) Result(ctx context.Context, request ResultRequest, _ CredentialLease) (Result, error) {
 	if ctx == nil || request.Validate() != nil {
 		return Result{}, ErrProviderInvalidRequest
@@ -829,6 +880,48 @@ func (p *acpProcess) read(stdout io.Reader) {
 		p.fail(errors.New("ACP stdout closed"))
 	}
 }
+
+func validateACPMessage(message acpMessage) error {
+	if message.JSONRPC != "2.0" {
+		return errors.New("ACP JSON-RPC version is invalid")
+	}
+	hasID := len(bytes.TrimSpace(message.ID)) > 0
+	hasMethod := message.Method != ""
+	hasResult := len(bytes.TrimSpace(message.Result)) > 0
+	errorValue := bytes.TrimSpace(message.Error)
+	hasError := len(errorValue) > 0 && !bytes.Equal(errorValue, []byte("null"))
+	if hasMethod {
+		if hasResult || hasError {
+			return errors.New("ACP JSON-RPC request contains response fields")
+		}
+		if hasID && !validACPJSONRPCID(message.ID) {
+			return errors.New("ACP JSON-RPC request ID is invalid")
+		}
+		return nil
+	}
+	if !hasID || !validACPJSONRPCID(message.ID) || hasResult == hasError {
+		return errors.New("ACP JSON-RPC response envelope is invalid")
+	}
+	return nil
+}
+
+func validACPJSONRPCID(raw json.RawMessage) bool {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	var value any
+	if decoder.Decode(&value) != nil {
+		return false
+	}
+	switch typed := value.(type) {
+	case string:
+		return typed != ""
+	case json.Number:
+		return typed != ""
+	default:
+		return false
+	}
+}
+
 
 func (p *acpProcess) closePending() {
 	p.pending.Range(func(key, value any) bool {
