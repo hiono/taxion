@@ -47,9 +47,9 @@ type ACPToolCallEvaluator interface {
 }
 
 type ACPExecutionPermissionAuthorizer struct {
-	store ProviderExecutionStore
+	store     ProviderExecutionStore
 	evaluator ACPToolCallEvaluator
-	now func() time.Time
+	now       func() time.Time
 }
 
 func NewACPExecutionPermissionAuthorizer(executionStore ProviderExecutionStore, evaluator ACPToolCallEvaluator) (*ACPExecutionPermissionAuthorizer, error) {
@@ -78,7 +78,10 @@ func (a *ACPExecutionPermissionAuthorizer) Authorize(ctx context.Context, reques
 	var execution domain.RoleExecution
 	executionFound := false
 	for _, candidate := range job.RoleExecutions {
-		if candidate.ID == request.RoleExecutionID { execution, executionFound = candidate, true; break }
+		if candidate.ID == request.RoleExecutionID {
+			execution, executionFound = candidate, true
+			break
+		}
 	}
 	if !executionFound || execution.JobID != request.JobID || execution.TaskID != request.TaskID ||
 		execution.Role != domain.RoleCoder || execution.ExecutionPermissionID != request.ExecutionPermissionID ||
@@ -88,7 +91,10 @@ func (a *ACPExecutionPermissionAuthorizer) Authorize(ctx context.Context, reques
 	var startIntent domain.ProviderStartIntent
 	intentFound := false
 	for _, candidate := range job.ProviderStartIntents {
-		if candidate.ID == request.OperationID { startIntent, intentFound = candidate, true; break }
+		if candidate.ID == request.OperationID {
+			startIntent, intentFound = candidate, true
+			break
+		}
 	}
 	if !intentFound || startIntent.JobID != request.JobID || startIntent.RoleExecutionID != request.RoleExecutionID ||
 		startIntent.TaskID != request.TaskID || startIntent.ExecutionPermissionID != request.ExecutionPermissionID ||
@@ -101,7 +107,10 @@ func (a *ACPExecutionPermissionAuthorizer) Authorize(ctx context.Context, reques
 	var permission domain.ExecutionPermission
 	permissionFound := false
 	for _, candidate := range job.ExecutionPermissions {
-		if candidate.ID == request.ExecutionPermissionID { permission, permissionFound = candidate, true; break }
+		if candidate.ID == request.ExecutionPermissionID {
+			permission, permissionFound = candidate, true
+			break
+		}
 	}
 	if !permissionFound || permission.TaskID != request.TaskID || permission.RequestSHA256 != request.RequestSHA256 ||
 		permission.ProviderID != request.ProviderIdentity.ProviderID || permission.AccountID != request.ProviderIdentity.AccountID ||
