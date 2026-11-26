@@ -87,7 +87,7 @@ func TestACPHelperProcess(t *testing.T) {
 				"jsonrpc": "2.0", "id": 77, "method": "session/request_permission",
 				"params": map[string]any{
 					"sessionId": "fake-session",
-					"toolCall": map[string]any{"title": "run", "kind": "execute", "rawInput": map[string]string{"command": "git status", "cwd": "/tmp/worktree"}},
+					"toolCall":  map[string]any{"title": "run", "kind": "execute", "rawInput": map[string]string{"command": "git status", "cwd": "/tmp/worktree"}},
 					"options": []map[string]string{
 						{"optionId": "allow-once", "name": "Allow once", "kind": "allow_once"},
 						{"optionId": "reject-once", "name": "Reject", "kind": "reject_once"},
@@ -100,7 +100,7 @@ func TestACPHelperProcess(t *testing.T) {
 			var permissionReply struct {
 				Result struct {
 					Outcome struct {
-						Outcome string
+						Outcome  string
 						OptionID string
 					}
 				}
@@ -828,13 +828,13 @@ func TestACPAdapterStopDoesNotWaitForAnotherRoleStartNegotiation(t *testing.T) {
 	second.OperationID = "operation_start_2"
 	secondDone := make(chan struct {
 		result StartResult
-		err error
+		err    error
 	}, 1)
 	go func() {
 		result, startErr := adapter.Start(context.Background(), second, nil)
 		secondDone <- struct {
 			result StartResult
-			err error
+			err    error
 		}{result: result, err: startErr}
 	}()
 	deadline := time.Now().Add(3 * time.Second)
