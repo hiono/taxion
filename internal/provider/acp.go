@@ -302,7 +302,6 @@ func (a *ACPAdapter) Start(ctx context.Context, request StartRequest, _ Credenti
 		return StartResult{}, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown}
 	}
 	delete(a.startingRole, request.RoleExecutionID)
-	delete(a.startingOp, request.OperationID)
 	a.byRole[request.RoleExecutionID] = session
 	a.byID[session.sessionID] = session
 	a.mu.Unlock()
@@ -315,7 +314,7 @@ func (a *ACPAdapter) Start(ctx context.Context, request StartRequest, _ Credenti
 		MaxTokens:    request.MaxTokens,
 		Deadline:     request.Deadline,
 	}
-	if _, err := a.Send(operationCtx, initialTurn, nil); err != nil {
+	if _, err := a.send(operationCtx, session, initialTurn, nil); err != nil {
 		a.detachSession(session)
 		session.process.terminate()
 		return StartResult{}, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown}
@@ -327,6 +326,9 @@ func (a *ACPAdapter) Start(ctx context.Context, request StartRequest, _ Credenti
 		return StartResult{}, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown}
 	}
 	a.byOp[request.OperationID] = result
+	if a.startingOp[request.OperationID] == reservation {
+		delete(a.startingOp, request.OperationID)
+	}
 	a.mu.Unlock()
 	return result, nil
 }
@@ -356,18 +358,32 @@ func acpStartPrompt(request StartRequest) string {
 	return prompt.String()
 }
 
-func (a *ACPAdapter) Send(ctx context.Context, request TurnRequest, _ CredentialLease) (TurnResult, error) {
+func (a *ACPAdapter) Send(ctx context.Context, request TurnRequest, lease CredentialLease) (TurnResult, error) {
 	if a == nil || ctx == nil || request.Validate() != nil {
 		return TurnResult{}, ErrProviderInvalidRequest
 	}
-	operationCtx, cancel := context.WithDeadline(ctx, request.Deadline)
-	defer cancel()
-
 	a.mu.Lock()
 	session := a.byID[request.SessionID]
 	a.mu.Unlock()
 	if session == nil {
 		return TurnResult{}, &OperationError{Class: FailureDefinitive, Code: OperationCodeNotFound}
+	}
+	return a.send(ctx, session, request, lease)
+}
+
+func (a *ACPAdapter) send(ctx context.Context, session *acpSession, request TurnRequest, _ CredentialLease) (TurnResult, error) {
+	if a == nil || ctx == nil || session == nil || request.Validate() != nil ||
+		request.SessionID != session.sessionID {
+		return TurnResult{}, ErrProviderInvalidRequest
+	}
+	operationCtx, cancel := context.WithDeadline(ctx, request.Deadline)
+	defer cancel()
+	a.mu.Lock()
+	owned := !a.closed && a.byID[session.sessionID] == session &&
+		a.byRole[session.roleExecutionID] == session
+	a.mu.Unlock()
+	if !owned || session.stopping.Load() {
+		return TurnResult{}, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown}
 	}
 	session.mu.RLock()
 	existing, cached := session.turns[request.OperationID]
@@ -387,6 +403,13 @@ func (a *ACPAdapter) Send(ctx context.Context, request TurnRequest, _ Credential
 	case <-session.process.failed:
 		return TurnResult{}, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown}
 	}
+	a.mu.Lock()
+	owned = !a.closed && a.byID[session.sessionID] == session &&
+		a.byRole[session.roleExecutionID] == session
+	a.mu.Unlock()
+	if !owned || session.stopping.Load() {
+		return TurnResult{}, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown}
+	}
 	session.mu.RLock()
 	existing, cached = session.turns[request.OperationID]
 	session.mu.RUnlock()
@@ -400,9 +423,9 @@ func (a *ACPAdapter) Send(ctx context.Context, request TurnRequest, _ Credential
 			Method string `json:"method"`
 			Params struct {
 				SessionID string `json:"sessionId"`
-				Update    struct {
+				Update struct {
 					SessionUpdate string `json:"sessionUpdate"`
-					Content       struct {
+					Content struct {
 						Type string `json:"type"`
 						Text string `json:"text"`
 					} `json:"content"`
@@ -446,66 +469,24 @@ func (a *ACPAdapter) Send(ctx context.Context, request TurnRequest, _ Credential
 	if json.Unmarshal(response, &promptReply) != nil || promptReply.StopReason != "end_turn" || output.Len() == 0 {
 		return TurnResult{}, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown}
 	}
+	a.mu.Lock()
+	owned = !a.closed && a.byID[session.sessionID] == session &&
+		a.byRole[session.roleExecutionID] == session
+	a.mu.Unlock()
+	if !owned || session.stopping.Load() {
+		return TurnResult{}, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown}
+	}
 	result := TurnResult{
 		OperationID: request.OperationID, TurnID: request.TurnID,
 		SessionID: request.SessionID, ReceiptID: acpReceiptID("acp-turn-", request.TurnID),
 		Status: "COMPLETED", Output: output.String(),
-		EvidenceSHA256: sha256Hex(string(response) + "\n" + output.String()),
+		EvidenceSHA256: sha256Hex(string(response) + "
+" + output.String()),
 	}
 	session.mu.Lock()
 	session.turns[request.OperationID] = result
 	session.mu.Unlock()
 	return result, nil
-}
-
-func (a *ACPAdapter) detachSession(session *acpSession) {
-	if a == nil || session == nil {
-		return
-	}
-	a.mu.Lock()
-	owned := a.byID[session.sessionID] == session
-	if owned {
-		delete(a.byID, session.sessionID)
-	}
-	if a.byRole[session.roleExecutionID] == session {
-		delete(a.byRole, session.roleExecutionID)
-	}
-	if owned {
-		for operationID, result := range a.byOp {
-			if result.SessionID == session.sessionID {
-				delete(a.byOp, operationID)
-			}
-		}
-	}
-	a.mu.Unlock()
-}
-
-func (a *ACPAdapter) Stop(ctx context.Context, request StopRequest, _ CredentialLease) (StopResult, error) {
-	if ctx == nil || request.Validate() != nil {
-		return StopResult{}, ErrProviderInvalidRequest
-	}
-	a.mu.Lock()
-	session := a.byID[request.SessionID]
-	a.mu.Unlock()
-	if session == nil {
-		return StopResult{}, &OperationError{Class: FailureDefinitive, Code: OperationCodeNotFound}
-	}
-	session.stopping.Store(true)
-	a.detachSession(session)
-	cancelCtx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
-	_ = session.process.notify(cancelCtx, "session/cancel", map[string]string{"sessionId": request.SessionID})
-	cancel()
-	session.process.terminate()
-	// Cancellation is not proof that tools or child processes are quiescent.
-	return StopResult{}, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown}
-}
-
-func (a *ACPAdapter) Resume(context.Context, ResumeRequest, CredentialLease) (ResumeResult, error) {
-	return ResumeResult{}, ErrUnsupportedCapability
-}
-
-func (a *ACPAdapter) Lookup(context.Context, LookupRequest, CredentialLease) (LookupResult, error) {
-	return LookupResult{}, ErrUnsupportedCapability
 }
 
 func (a *ACPAdapter) Result(ctx context.Context, request ResultRequest, _ CredentialLease) (Result, error) {
@@ -558,9 +539,14 @@ func (a *ACPAdapter) Close() error {
 	for _, session := range a.byID {
 		sessions = append(sessions, session)
 	}
-	reservations := make(map[*acpStartReservation]struct{}, len(a.startingRole))
+	reservations := make(map[*acpStartReservation]struct{}, len(a.startingRole)+len(a.startingOp))
 	for _, reservation := range a.startingRole {
 		reservations[reservation] = struct{}{}
+	}
+	for _, reservation := range a.startingOp {
+		reservations[reservation] = struct{}{}
+	}
+	for reservation := range reservations {
 		reservation.cancel()
 	}
 	a.startingRole = make(map[string]*acpStartReservation)

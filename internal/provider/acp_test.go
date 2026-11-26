@@ -54,6 +54,13 @@ func TestACPHelperProcess(t *testing.T) {
 		}
 		switch request.Method {
 		case "initialize":
+			if signalPath := os.Getenv("TAXION_ACP_TEST_SIGNAL"); signalPath != "" {
+				file, openErr := os.OpenFile(signalPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
+				if openErr == nil {
+					_, _ = io.WriteString(file, "initialize\n")
+					_ = file.Close()
+				}
+			}
 			if delay := acpHelperSetting("delay-initialize"); delay != "" {
 				milliseconds, _ := strconv.Atoi(delay)
 				time.Sleep(time.Duration(milliseconds) * time.Millisecond)
@@ -115,6 +122,13 @@ func TestACPHelperProcess(t *testing.T) {
 				return
 			}
 			if block := acpHelperSetting("block"); block != "" && promptText == block {
+				if signalPath := os.Getenv("TAXION_ACP_TEST_SIGNAL"); signalPath != "" {
+					file, openErr := os.OpenFile(signalPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
+					if openErr == nil {
+						_, _ = io.WriteString(file, "prompt\n")
+						_ = file.Close()
+					}
+				}
 				write(map[string]any{
 					"jsonrpc": "2.0", "method": "session/update",
 					"params": map[string]any{"sessionId": "fake-session", "update": map[string]any{
@@ -786,23 +800,54 @@ func TestACPAdapterCloseReapsCLIWhenDescendantKeepsStdoutOpen(t *testing.T) {
 }
 
 func TestACPAdapterStopDoesNotWaitForAnotherRoleStartNegotiation(t *testing.T) {
+	signalFile, err := os.CreateTemp(t.TempDir(), "acp-init-signal-")
+	if err != nil {
+		t.Fatalf("CreateTemp: %v", err)
+	}
+	signalPath := signalFile.Name()
+	if err := signalFile.Close(); err != nil {
+		t.Fatalf("Close signal file: %v", err)
+	}
 	t.Setenv("TAXION_ACP_HELPER", "1;delay-initialize=700")
-	adapter := newACPTestAdapter(t)
+	t.Setenv("TAXION_ACP_TEST_SIGNAL", signalPath)
+	adapter, err := NewACPAdapter(ACPConfig{
+		Command: os.Args[0], Args: []string{"-test.run=TestACPHelperProcess"},
+		WorkingDirectory: t.TempDir(), Identity: testIdentity(),
+		Environment: []string{"TAXION_ACP_HELPER", "TAXION_ACP_TEST_SIGNAL"},
+	})
+	if err != nil {
+		t.Fatalf("NewACPAdapter: %v", err)
+	}
 	defer adapter.Close()
 	first := newACPTestStartRequest("first", "role_execution_first")
-	first.Deadline = time.Now().Add(5 * time.Second)
 	started, err := adapter.Start(context.Background(), first, nil)
 	if err != nil {
 		t.Fatalf("Start first role: %v", err)
 	}
 	second := newACPTestStartRequest("second", "role_execution_second")
-	second.Deadline = time.Now().Add(5 * time.Second)
-	secondDone := make(chan error, 1)
+	second.OperationID = "operation_start_2"
+	secondDone := make(chan struct {
+		result StartResult
+		err error
+	}, 1)
 	go func() {
-		_, startErr := adapter.Start(context.Background(), second, nil)
-		secondDone <- startErr
+		result, startErr := adapter.Start(context.Background(), second, nil)
+		secondDone <- struct {
+			result StartResult
+			err error
+		}{result: result, err: startErr}
 	}()
-	time.Sleep(50 * time.Millisecond)
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		data, readErr := os.ReadFile(signalPath)
+		if readErr == nil && strings.Count(string(data), "initialize\n") >= 2 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("second ACP peer did not enter initialize negotiation")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
 	stopStarted := time.Now()
 	_, stopErr := adapter.Stop(context.Background(), StopRequest{
 		OperationID: "operation_stop_first", SessionID: started.SessionID,
@@ -814,13 +859,108 @@ func TestACPAdapterStopDoesNotWaitForAnotherRoleStartNegotiation(t *testing.T) {
 		t.Fatalf("Stop blocked behind another role's Start negotiation: %s", elapsed)
 	}
 	select {
-	case <-secondDone:
+	case outcome := <-secondDone:
+		if outcome.err != nil {
+			t.Fatalf("second Start failed after negotiation: %v", outcome.err)
+		}
+		if outcome.result.OperationID != second.OperationID {
+			t.Fatalf("second Start result operation = %q, want %q", outcome.result.OperationID, second.OperationID)
+		}
 	case <-time.After(6 * time.Second):
 		t.Fatal("second Start did not finish")
 	}
 }
 
-type acpTestPermissionAuthorizer struct { calls int }
+func TestACPAdapterKeepsOperationIDReservedUntilInitialPromptCompletes(t *testing.T) {
+	signalFile, err := os.CreateTemp(t.TempDir(), "acp-prompt-signal-")
+	if err != nil {
+		t.Fatalf("CreateTemp: %v", err)
+	}
+	signalPath := signalFile.Name()
+	if err := signalFile.Close(); err != nil {
+		t.Fatalf("Close signal file: %v", err)
+	}
+	t.Setenv("TAXION_ACP_HELPER", "1;block=blocked-start")
+	t.Setenv("TAXION_ACP_TEST_SIGNAL", signalPath)
+	adapter, err := NewACPAdapter(ACPConfig{
+		Command: os.Args[0], Args: []string{"-test.run=TestACPHelperProcess"},
+		WorkingDirectory: t.TempDir(), Identity: testIdentity(),
+		Environment: []string{"TAXION_ACP_HELPER", "TAXION_ACP_TEST_SIGNAL"},
+	})
+	if err != nil {
+		t.Fatalf("NewACPAdapter: %v", err)
+	}
+	first := newACPTestStartRequest("blocked-start", "role_execution_first")
+	firstDone := make(chan error, 1)
+	go func() {
+		_, startErr := adapter.Start(context.Background(), first, nil)
+		firstDone <- startErr
+	}()
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		data, readErr := os.ReadFile(signalPath)
+		if readErr == nil && strings.Contains(string(data), "prompt\n") {
+			break
+		}
+		if time.Now().After(deadline) {
+			_ = adapter.Close()
+			t.Fatal("initial prompt did not reach the blocked fake peer")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	second := newACPTestStartRequest("second", "role_execution_second")
+	_, err = adapter.Start(context.Background(), second, nil)
+	var operationErr *OperationError
+	if !errors.As(err, &operationErr) || operationErr.Class != FailureAmbiguous {
+		_ = adapter.Close()
+		t.Fatalf("duplicate in-flight OperationID error = %v, want ambiguous", err)
+	}
+	if err := adapter.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	select {
+	case startErr := <-firstDone:
+		if startErr == nil {
+			t.Fatal("blocked Start unexpectedly succeeded after Close")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("blocked Start did not finish after Close")
+	}
+}
+
+func TestACPAdapterInitialSendRejectsDetachedSessionInstance(t *testing.T) {
+	t.Setenv("TAXION_ACP_HELPER", "1")
+	adapter := newACPTestAdapter(t)
+	defer adapter.Close()
+	first := newACPTestStartRequest("first", "role_execution_first")
+	started, err := adapter.Start(context.Background(), first, nil)
+	if err != nil {
+		t.Fatalf("Start first session: %v", err)
+	}
+	adapter.mu.Lock()
+	firstSession := adapter.byID[started.SessionID]
+	adapter.mu.Unlock()
+	if firstSession == nil {
+		t.Fatal("first Session was not registered")
+	}
+	_, _ = adapter.Stop(context.Background(), StopRequest{
+		OperationID: "operation_stop_first", SessionID: started.SessionID,
+	}, nil)
+	second := newACPTestStartRequest("second", "role_execution_second")
+	second.OperationID = "operation_start_2"
+	if _, err := adapter.Start(context.Background(), second, nil); err != nil {
+		t.Fatalf("Start replacement session: %v", err)
+	}
+	staleTurn := TurnRequest{
+		OperationID: "operation_stale_turn", TurnID: "turn_stale",
+		SessionID: firstSession.sessionID, Prompt: "must not be sent",
+		PromptSHA256: sha256Hex("must not be sent"), MaxTokens: 100,
+		Deadline: time.Now().Add(time.Second),
+	}
+	if _, err := adapter.send(context.Background(), firstSession, staleTurn, nil); err == nil {
+		t.Fatal("stale session instance was allowed to send through its replacement")
+	}
+}
 
 func (a *acpTestPermissionAuthorizer) Authorize(_ context.Context, request ACPToolPermissionRequest) error {
 	a.calls++
