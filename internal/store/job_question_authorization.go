@@ -137,15 +137,15 @@ func (s *Store) AddJobQuestionAuthorization(
 func jobQuestionAuthorizationRequestSHA256(authorization domain.JobQuestionAuthorization) (string, error) {
 	request := domain.JobQuestionAuthorizationRequest{
 		JobID: authorization.JobID, CommandID: authorization.CommandID,
-		QuestionMessageID: authorization.QuestionMessageID,
+		QuestionMessageID:      authorization.QuestionMessageID,
 		PlannerRoleExecutionID: authorization.PlannerRoleExecutionID,
-		ProviderSessionID: authorization.ProviderSessionID,
-		RepositoryID: authorization.RepositoryID,
-		PlanningRepositoryID: authorization.PlanningRepositoryID,
-		ProviderID: authorization.ProviderID, AccountID: authorization.AccountID,
+		ProviderSessionID:      authorization.ProviderSessionID,
+		RepositoryID:           authorization.RepositoryID,
+		PlanningRepositoryID:   authorization.PlanningRepositoryID,
+		ProviderID:             authorization.ProviderID, AccountID: authorization.AccountID,
 		ConfigurationSHA256: authorization.ConfigurationSHA256,
-		ReadOnlyBoundary: authorization.ReadOnlyBoundary,
-		Budget: authorization.Budget, Deadline: authorization.Deadline.UTC().Round(0),
+		ReadOnlyBoundary:    authorization.ReadOnlyBoundary,
+		Budget:              authorization.Budget, Deadline: authorization.Deadline.UTC().Round(0),
 	}
 	requestJSON, err := json.Marshal(request)
 	if err != nil {
