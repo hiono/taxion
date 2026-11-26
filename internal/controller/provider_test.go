@@ -1205,6 +1205,48 @@ func TestProviderControllerTreatsExistingStopIntentWithoutObservationAsUnknown(t
 	}
 }
 
+type providerTestWorktreeStore interface {
+	GetJob(context.Context, string) (domain.Job, error)
+}
+
+func bindProviderTestWorktree(
+	t *testing.T,
+	database providerTestWorktreeStore,
+	executionController *ExecutionController,
+	jobID, commandID, repositoryID string,
+	execution domain.RoleExecution,
+) (domain.RoleExecution, domain.ProviderStartIntent) {
+	t.Helper()
+	assignment := domain.WorktreeAssignment{
+		ID: domain.WorktreeAssignmentID(jobID, execution.TaskID, repositoryID),
+		JobID: jobID, TaskID: execution.TaskID, RepositoryID: repositoryID,
+		RepositoryPath: t.TempDir(), WorktreePath: t.TempDir(),
+		BaselineCommit: strings.Repeat("a", 40), OwnerRoleExecutionID: execution.ID,
+	}
+	if _, _, err := executionController.BindWorktree(context.Background(), execution.ID, commandID, assignment); err != nil {
+		t.Fatalf("BindWorktree: %v", err)
+	}
+	job, err := database.GetJob(context.Background(), jobID)
+	if err != nil {
+		t.Fatalf("GetJob after Worktree binding: %v", err)
+	}
+	var updatedExecution domain.RoleExecution
+	var intent domain.ProviderStartIntent
+	for _, candidate := range job.RoleExecutions {
+		if candidate.ID == execution.ID {
+			updatedExecution = candidate
+			break
+		}
+	}
+	for _, candidate := range job.ProviderStartIntents {
+		if candidate.RoleExecutionID == execution.ID {
+			intent = candidate
+			break
+		}
+	}
+	return updatedExecution, intent
+}
+
 func TestProviderControllerDispatchesTaskCoderStartWithDurableIntentAndReconcilesUnknown(t *testing.T) {
 	database, jobID, revision, task := approvedExecutionPermissionControllerFixture(t)
 	ctx := context.Background()
@@ -1234,6 +1276,10 @@ func TestProviderControllerDispatchesTaskCoderStartWithDurableIntentAndReconcile
 	if err != nil {
 		t.Fatalf("StartTaskExecution: %v", err)
 	}
+	execution, intent = bindProviderTestWorktree(
+		t, database, executionController, jobID, "cmd_c1111111111111111111111111111111",
+		revision.Contract.TargetRepositories[0], execution,
+	)
 	runtime := &fakePlanningProviderRuntime{
 		identity: provider.Identity{
 			ProviderID: permission.ProviderID, AccountID: permission.AccountID,

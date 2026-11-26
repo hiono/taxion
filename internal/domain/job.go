@@ -317,6 +317,9 @@ func NewWorktreeAssignmentBinding(
 	if !found || assignment.RepositoryID != permission.Resource {
 		return WorktreeAssignment{}, errors.New("Worktree repository must equal the exact approved ExecutionPermission resource")
 	}
+	if err := permission.ValidateFor(job, permission.OperationID, permission.RequestSHA256, now.UTC().Round(0)); err != nil {
+		return WorktreeAssignment{}, fmt.Errorf("ExecutionPermission is no longer valid for Worktree binding: %w", err)
+	}
 	if assignment.ID != WorktreeAssignmentID(job.ID, execution.TaskID, assignment.RepositoryID) ||
 		assignment.JobID != job.ID || assignment.TaskID != execution.TaskID ||
 		assignment.OwnerRoleExecutionID != execution.ID {
