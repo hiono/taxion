@@ -57,7 +57,7 @@ func TestOpenUpgradesOlderSchemaVersionAndPreservesJob(t *testing.T) {
 	if _, err := database.createJob(ctx, job, "cmd_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", createLocalDraftJobCommandType); err != nil {
 		t.Fatalf("create Job before schema upgrade: %v", err)
 	}
-	if _, err := database.db.ExecContext(ctx, "DROP TRIGGER IF EXISTS job_aggregates_preserve_v2_facts"); err != nil {
+	if _, err := database.db.ExecContext(ctx, "DROP TRIGGER IF EXISTS job_aggregates_preserve_job_messages"); err != nil {
 		t.Fatalf("remove trigger to simulate the prior schema: %v", err)
 	}
 	if _, err := database.db.ExecContext(ctx, "PRAGMA user_version = 1"); err != nil {
@@ -294,7 +294,7 @@ func TestAggregateUpdateCannotRemoveAppendOnlyFacts(t *testing.T) {
 	if _, err := database.createJob(ctx, job, "cmd_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", createLocalDraftJobCommandType); err != nil {
 		t.Fatalf("create Job: %v", err)
 	}
-	if _, err := database.db.ExecContext(ctx, "DROP TRIGGER IF EXISTS job_aggregates_preserve_v2_facts"); err != nil {
+	if _, err := database.db.ExecContext(ctx, "DROP TRIGGER IF EXISTS job_aggregates_preserve_job_messages"); err != nil {
 		t.Fatalf("remove trigger to simulate a version 2 database: %v", err)
 	}
 	if _, err := database.db.ExecContext(ctx, "PRAGMA user_version = 2"); err != nil {
