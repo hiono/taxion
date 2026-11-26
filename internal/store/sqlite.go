@@ -30,6 +30,41 @@ var (
 // schemaVersion covers both SQLite tables and the serialized JobAggregate contract.
 // Increment it when older binaries could discard newly added aggregate fields.
 const schemaVersion = 3
+
+const preserveJobAggregateFactsTrigger = `CREATE TRIGGER job_aggregates_preserve_v2_facts
+BEFORE UPDATE OF payload_json ON job_aggregates
+WHEN
+	EXISTS (
+		SELECT 1
+		FROM json_each(OLD.payload_json, '$.job_messages') AS old_fact
+		WHERE NOT EXISTS (
+			SELECT 1
+			FROM json_each(NEW.payload_json, '$.job_messages') AS new_fact
+			WHERE json(new_fact.value) = json(old_fact.value)
+		)
+	)
+	OR EXISTS (
+		SELECT 1
+		FROM json_each(OLD.payload_json, '$.delivery_observations') AS old_fact
+		WHERE NOT EXISTS (
+			SELECT 1
+			FROM json_each(NEW.payload_json, '$.delivery_observations') AS new_fact
+			WHERE json(new_fact.value) = json(old_fact.value)
+		)
+	)
+	OR EXISTS (
+		SELECT 1
+		FROM json_each(OLD.payload_json, '$.job_question_authorizations') AS old_fact
+		WHERE NOT EXISTS (
+			SELECT 1
+			FROM json_each(NEW.payload_json, '$.job_question_authorizations') AS new_fact
+			WHERE json(new_fact.value) = json(old_fact.value)
+		)
+	)
+BEGIN
+	SELECT RAISE(ABORT, 'append-only v2 facts');
+END`
+
 const createLocalDraftJobCommandType = "CreateJob"
 const createTrustedDraftJobCommandType = "CreateTrustedDraftJob"
 const addPlanningAuthorizationCommandType = "AddPlanningAuthorization"
@@ -178,6 +213,14 @@ func (s *Store) initialize(ctx context.Context) error {
 		}
 	}
 	if version < schemaVersion {
+		// The database trigger also fences processes that opened the prior schema
+		// before this migration and would otherwise drop unknown aggregate fields.
+		if _, err := tx.ExecContext(ctx, "DROP TRIGGER IF EXISTS job_aggregates_preserve_v2_facts"); err != nil {
+			return fmt.Errorf("replace JobAggregate fact-preservation trigger: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, preserveJobAggregateFactsTrigger); err != nil {
+			return fmt.Errorf("install JobAggregate fact-preservation trigger: %w", err)
+		}
 		if _, err := tx.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d", schemaVersion)); err != nil {
 			return fmt.Errorf("upgrade schema version: %w", err)
 		}
