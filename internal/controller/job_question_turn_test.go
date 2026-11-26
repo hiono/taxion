@@ -546,7 +546,7 @@ func TestOrchestratorContinuesAfterFailedQuestionAndCollectsErrors(t *testing.T)
 	if outcomes[1].Reply.Message.ReplyToMessageID != secondQuestion.ID {
 		t.Fatalf("second question reply correlation = %q, want %q", outcomes[1].Reply.Message.ReplyToMessageID, secondQuestion.ID)
 	}
-	job, err := fixture.database.GetJob(context.Background(), fixture.jobID)
+	job, err = fixture.database.GetJob(context.Background(), fixture.jobID)
 	if err != nil {
 		t.Fatalf("GetJob after inbox processing: %v", err)
 	}
