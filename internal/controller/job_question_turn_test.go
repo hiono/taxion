@@ -23,9 +23,9 @@ func (r fixedQuestionTurnContextResolver) ResolveReadOnlyBoundary(
 }
 
 type jobQuestionTurnFixture struct {
-	controller                                                                        *JobQuestionTurnController
-	runtime                                                                           *fakePlanningProviderRuntime
-	database                                                                          *store.Store
+	controller                                                        *JobQuestionTurnController
+	runtime                                                           *fakePlanningProviderRuntime
+	database                                                          *store.Store
 	jobID, authorizationID, questionID, coderID, plannerID, sessionID string
 }
 
@@ -191,7 +191,7 @@ func newJobQuestionTurnFixture(t *testing.T) jobQuestionTurnFixture {
 	return jobQuestionTurnFixture{
 		controller: controller, runtime: runtime, database: database, jobID: jobID,
 		authorizationID: authorization.ID, questionID: question.ID,
-		coderID: coderStart.RoleExecution.ID,
+		coderID:   coderStart.RoleExecution.ID,
 		plannerID: plannerID, sessionID: sessionID,
 	}
 }
@@ -474,9 +474,9 @@ func TestOrchestratorContinuesAfterFailedQuestionAndCollectsErrors(t *testing.T)
 	_, secondQuestion, err := fixture.database.AddJobMessage(
 		context.Background(), fixture.jobID, job.Revision, "cmd_85858585858585858585858585858585",
 		domain.JobMessageRequest{
-			Sender: domain.ActorRef{Kind: domain.ActorCoder, ID: fixture.coderID},
+			Sender:    domain.ActorRef{Kind: domain.ActorCoder, ID: fixture.coderID},
 			Recipient: domain.ActorRef{Kind: domain.ActorPlanner, ID: fixture.plannerID},
-			Body: "Second independent question",
+			Body:      "Second independent question",
 		},
 	)
 	if err != nil {
