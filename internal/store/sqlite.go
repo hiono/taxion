@@ -29,7 +29,7 @@ var (
 
 // schemaVersion covers both SQLite tables and the serialized JobAggregate contract.
 // Increment it when older binaries could discard newly added aggregate fields.
-const schemaVersion = 3
+const schemaVersion = 4
 
 const preserveJobAggregateFactsTrigger = `CREATE TRIGGER IF NOT EXISTS job_aggregates_preserve_v2_facts
 BEFORE UPDATE OF payload_json ON job_aggregates
