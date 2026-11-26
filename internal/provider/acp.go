@@ -37,6 +37,7 @@ type ACPAdapter struct {
 
 type acpSession struct {
 	roleExecutionID string
+	processID       int
 	sessionID       string
 	process         *acpProcess
 	mu              sync.Mutex
@@ -153,6 +154,7 @@ func (a *ACPAdapter) Start(ctx context.Context, request StartRequest, _ Credenti
 	}
 	session := &acpSession{
 		roleExecutionID: request.RoleExecutionID,
+		processID: process.cmd.Process.Pid,
 		sessionID: sessionReply.SessionID,
 		process: process,
 		turns: make(map[string]TurnResult),
