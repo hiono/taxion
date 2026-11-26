@@ -606,16 +606,6 @@ func (p *acpProcess) close(ctx context.Context) error {
 			_ = p.cmd.Process.Kill()
 		}
 	}
-	if _, hasDeadline := ctx.Deadline(); hasDeadline {
-		select {
-		case <-p.done:
-			return nil
-		case <-ctx.Done():
-			kill()
-			<-p.done
-			return ctx.Err()
-		}
-	}
 	timer := time.NewTimer(2 * time.Second)
 	defer timer.Stop()
 	select {
