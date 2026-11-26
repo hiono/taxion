@@ -158,6 +158,16 @@ func TestJobQuestionAuthorizationBindsOneApprovedQuestionAndPlannerSession(t *te
 	if err := job.Validate(); err != nil {
 		t.Fatalf("Job.Validate with pending JobQuestionTurnIntent: %v", err)
 	}
+	for _, invalidContent := range []string{" \t\n", strings.Repeat("x", MaxJobMessageBodyBytes+1)} {
+		if _, err := NewJobQuestionTurnObservation(job, JobQuestionTurnObservationRequest{
+			IntentID: turn.ID, CommandID: "cmd_74747474747474747474747474747475",
+			Status: JobQuestionTurnCompleted, TokensUsed: 1,
+			Content: invalidContent, ReceiptID: "receipt_invalid_output",
+			EvidenceSHA256: strings.Repeat("f", 64),
+		}, turnCreatedAt.Add(500*time.Millisecond)); err == nil {
+			t.Fatal("JobQuestionTurnObservation accepted completed output that cannot be delivered as a JobMessage")
+		}
+	}
 	if _, err := NewJobQuestionTurnIntent(job, JobQuestionTurnIntentRequest{
 		JobQuestionAuthorizationID: authorization.ID,
 		CommandID:                  "cmd_75757575757575757575757575757575",
