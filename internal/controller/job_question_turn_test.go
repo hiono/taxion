@@ -301,6 +301,49 @@ func TestJobQuestionTurnControllerReconcilesUnknownWithoutBlindResend(t *testing
 	}
 }
 
+func TestJobQuestionTurnControllerReconcilesFailedLookupWithoutResult(t *testing.T) {
+	f := newJobQuestionTurnFixture(t)
+	now := time.Now().UTC()
+	f.runtime.capabilities = provider.Capabilities{
+		Identity: f.runtime.identity, SendIdempotency: true, SendLookup: true,
+		ReadOnlyContextEnforcement: true, UsageIdentity: true, UsageCompleteness: true,
+		Evidence: []provider.CapabilityEvidence{
+			{Capability: provider.CapabilitySendIdempotency, Identity: f.runtime.identity, TestID: "send-idempotency", EvidenceSHA256: strings.Repeat("5", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
+			{Capability: provider.CapabilityReadOnlyContextEnforcement, Identity: f.runtime.identity, TestID: "read-only-context", EvidenceSHA256: strings.Repeat("6", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
+			{Capability: provider.CapabilitySendLookup, Identity: f.runtime.identity, TestID: "lookup", EvidenceSHA256: strings.Repeat("a", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
+			{Capability: provider.CapabilityUsageIdentity, Identity: f.runtime.identity, TestID: "usage-id", EvidenceSHA256: strings.Repeat("c", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
+			{Capability: provider.CapabilityUsageCompleteness, Identity: f.runtime.identity, TestID: "usage-complete", EvidenceSHA256: strings.Repeat("d", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
+		},
+	}
+	f.runtime.sendErr = &provider.OperationError{Class: provider.FailureAmbiguous, Code: provider.OperationCodeUnknown}
+	commandID := "cmd_a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5"
+	first, err := f.controller.Send(context.Background(), f.jobID, f.authorizationID, commandID, 100)
+	if err == nil || first.Observation.Status != domain.JobQuestionTurnUnknown || f.runtime.sendCalls != 1 {
+		t.Fatalf("ambiguous Send did not persist UNKNOWN: %#v calls=%d err=%v", first, f.runtime.sendCalls, err)
+	}
+	f.runtime.lookupResult = provider.LookupResult{
+		Found: true, OperationID: first.Intent.OperationID, Status: domain.JobQuestionTurnFailed,
+		ReceiptID: "receipt_question_failed", SessionID: f.sessionID, TurnID: first.Intent.ID,
+		UsageID: "usage_question_failed", EvidenceSHA256: strings.Repeat("e", 64),
+	}
+	f.runtime.usageResult = provider.Usage{
+		OperationID: first.Intent.OperationID, SessionID: f.sessionID, TurnID: first.Intent.ID,
+		UsageID: "usage_question_failed", Tokens: 9, Complete: true, EvidenceSHA256: strings.Repeat("f", 64),
+	}
+	f.runtime.sendErr = nil
+	failed, err := f.controller.Send(context.Background(), f.jobID, f.authorizationID, commandID, 100)
+	if err == nil {
+		t.Fatal("FAILED Provider lookup did not report the terminal operation failure")
+	}
+	if failed.Observation.Status != domain.JobQuestionTurnFailed || !failed.Observation.ReconcilesUnknown ||
+		failed.Observation.Content != "" || failed.Observation.TokensUsed != 9 ||
+		failed.Reply.Message.ID != "" || f.runtime.sendCalls != 1 ||
+		f.runtime.lookupCalls != 1 || f.runtime.resultCalls != 0 || f.runtime.usageCalls != 1 {
+		t.Fatalf("FAILED lookup was not persisted without Result retrieval: %#v calls(send=%d lookup=%d result=%d usage=%d)",
+			failed, f.runtime.sendCalls, f.runtime.lookupCalls, f.runtime.resultCalls, f.runtime.usageCalls)
+	}
+}
+
 func TestJobQuestionTurnControllerRejectsProviderWithoutSafeSend(t *testing.T) {
 	f := newJobQuestionTurnFixture(t)
 	now := time.Now().UTC()
