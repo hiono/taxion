@@ -361,9 +361,14 @@ func (f *fakePlanningProviderRuntime) Usage(_ context.Context, request provider.
 
 func newProviderControllerFixture(t *testing.T, runtime *fakePlanningProviderRuntime) (*ProviderController, *store.Store, auth.AuthenticatedPrincipal, string, string, []provider.ContextDocument) {
 	t.Helper()
+	return newProviderControllerFixtureAtPath(t, runtime, filepath.Join(t.TempDir(), "provider-controller.sqlite"))
+}
+
+func newProviderControllerFixtureAtPath(t *testing.T, runtime *fakePlanningProviderRuntime, databasePath string) (*ProviderController, *store.Store, auth.AuthenticatedPrincipal, string, string, []provider.ContextDocument) {
+	t.Helper()
 	ctx := context.Background()
 	principal := newProviderTestPrincipal(t)
-	database, err := store.Open(ctx, filepath.Join(t.TempDir(), "provider-controller.sqlite"))
+	database, err := store.Open(ctx, databasePath)
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
 	}
