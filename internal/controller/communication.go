@@ -46,6 +46,13 @@ type CommunicationOutcome struct {
 	Message        domain.JobMessage
 }
 
+type RoleExecutionContext struct {
+	JobID             string
+	RoleExecution     domain.RoleExecution
+	ProviderSessionID string
+	Messages          []domain.JobMessage
+}
+
 type CommunicationController struct {
 	store CommunicationStore
 }
@@ -119,6 +126,84 @@ func (c *CommunicationController) InboxForRole(
 		}
 	}
 	return inbox, nil
+}
+
+func (c *CommunicationController) ContextForMessage(
+	ctx context.Context,
+	jobID, messageID string,
+) (RoleExecutionContext, error) {
+	var result RoleExecutionContext
+	if ctx == nil || jobID == "" || messageID == "" {
+		return result, errors.New("Role context lookup requires Job and Message identities")
+	}
+	job, err := c.store.GetJob(ctx, jobID)
+	if err != nil {
+		return result, err
+	}
+	if err := job.Validate(); err != nil {
+		return result, fmt.Errorf("validate Job before restoring Role context: %w", err)
+	}
+	var message domain.JobMessage
+	messageFound := false
+	for _, candidate := range job.JobMessages {
+		if candidate.ID == messageID {
+			message, messageFound = candidate, true
+			break
+		}
+	}
+	if !messageFound || (message.Recipient.Kind != domain.ActorPlanner &&
+		message.Recipient.Kind != domain.ActorCoder && message.Recipient.Kind != domain.ActorReviewer) {
+		return result, errors.New("message recipient is not a persisted RoleExecution")
+	}
+	execution, found := findRoleExecution(job, message.Recipient.ID)
+	if !found {
+		return result, errors.New("message recipient RoleExecution was not found")
+	}
+	actorKind, err := actorKindForRole(execution.Role)
+	if err != nil || actorKind != message.Recipient.Kind {
+		return result, errors.New("message recipient does not match the RoleExecution identity")
+	}
+	sessionID, found := acceptedRoleSession(job, execution)
+	if !found {
+		return result, errors.New("RoleExecution has no currently accepted Provider Session")
+	}
+	actor := domain.ActorRef{Kind: actorKind, ID: execution.ID}
+	included := make(map[string]struct{})
+	for _, candidate := range job.JobMessages {
+		if candidate.Sender == actor || candidate.Recipient == actor {
+			included[candidate.ID] = struct{}{}
+		}
+	}
+	if _, found := included[message.ID]; !found {
+		return result, errors.New("message is not part of the recipient RoleExecution conversation")
+	}
+	changed := true
+	for changed {
+		changed = false
+		for _, candidate := range job.JobMessages {
+			if _, found := included[candidate.ID]; found && candidate.ReplyToMessageID != "" {
+				if _, exists := included[candidate.ReplyToMessageID]; !exists {
+					included[candidate.ReplyToMessageID] = struct{}{}
+					changed = true
+				}
+			}
+			if _, found := included[candidate.ReplyToMessageID]; found {
+				if _, exists := included[candidate.ID]; !exists {
+					included[candidate.ID] = struct{}{}
+					changed = true
+				}
+			}
+		}
+	}
+	conversation := make([]domain.JobMessage, 0, len(included))
+	for _, candidate := range job.JobMessages {
+		if _, found := included[candidate.ID]; found {
+			conversation = append(conversation, candidate)
+		}
+	}
+	return RoleExecutionContext{
+		JobID: job.ID, RoleExecution: execution, ProviderSessionID: sessionID, Messages: conversation,
+	}, nil
 }
 
 func (c *CommunicationController) SendFromHuman(
@@ -204,7 +289,7 @@ func findRoleExecution(job domain.Job, roleExecutionID string) (domain.RoleExecu
 	return domain.RoleExecution{}, false
 }
 
-func hasAcceptedRoleSession(job domain.Job, execution domain.RoleExecution, sessionID string) bool {
+func acceptedRoleSession(job domain.Job, execution domain.RoleExecution) (string, bool) {
 	var latest *domain.ProviderStartObservation
 	for i := range job.ProviderStartObservations {
 		observation := &job.ProviderStartObservations[i]
@@ -213,8 +298,15 @@ func hasAcceptedRoleSession(job domain.Job, execution domain.RoleExecution, sess
 			latest = observation
 		}
 	}
-	return latest != nil && latest.Status == domain.ProviderStartAccepted &&
-		latest.ProviderSessionID == sessionID
+	if latest == nil || latest.Status != domain.ProviderStartAccepted || latest.ProviderSessionID == "" {
+		return "", false
+	}
+	return latest.ProviderSessionID, true
+}
+
+func hasAcceptedRoleSession(job domain.Job, execution domain.RoleExecution, sessionID string) bool {
+	acceptedSessionID, found := acceptedRoleSession(job, execution)
+	return found && acceptedSessionID == sessionID
 }
 
 func actorKindForRole(role string) (domain.ActorKind, error) {

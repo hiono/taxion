@@ -13,6 +13,12 @@ type OrchestratorStore interface {
 	GetJob(context.Context, string) (domain.Job, error)
 }
 
+type OrchestratorMessageOutcome struct {
+	Message         CommunicationOutcome
+	QuestionTurns   []JobQuestionTurnOutcome
+	ResumedContexts []RoleExecutionContext
+}
+
 type OrchestratorController struct {
 	store                 OrchestratorStore
 	communication         *CommunicationController
@@ -41,6 +47,70 @@ func NewOrchestratorController(
 	}, nil
 }
 
+// SendRoleMessage persists a natural-language message and routes it to the recipient Role.
+func (c *OrchestratorController) SendRoleMessage(
+	ctx context.Context,
+	request RoleMessageRequest,
+) (OrchestratorMessageOutcome, error) {
+	var outcome OrchestratorMessageOutcome
+	message, err := c.communication.SendFromRole(ctx, request)
+	if err != nil {
+		return outcome, err
+	}
+	outcome.Message = message
+
+	switch request.Recipient.Kind {
+	case domain.ActorPlanner:
+		outcome.QuestionTurns, err = c.ProcessPlannerInbox(ctx, request.JobID, request.Recipient.ID)
+		for _, turn := range outcome.QuestionTurns {
+			if turn.Reply.Message.ID == "" {
+				continue
+			}
+			resumed, contextErr := c.communication.ContextForMessage(ctx, request.JobID, turn.Reply.Message.ID)
+			if contextErr != nil {
+				return outcome, fmt.Errorf("restore original Role context after Planner reply: %w", contextErr)
+			}
+			outcome.ResumedContexts = append(outcome.ResumedContexts, resumed)
+		}
+		if len(outcome.ResumedContexts) == 0 {
+			resumed, found, contextErr := c.contextForPlannerReply(ctx, request.JobID, message.Message.ID)
+			if contextErr != nil {
+				return outcome, contextErr
+			}
+			if found {
+				outcome.ResumedContexts = append(outcome.ResumedContexts, resumed)
+			}
+		}
+		return outcome, err
+	case domain.ActorCoder, domain.ActorReviewer:
+		resumed, contextErr := c.communication.ContextForMessage(ctx, request.JobID, message.Message.ID)
+		if contextErr != nil {
+			return outcome, contextErr
+		}
+		outcome.ResumedContexts = append(outcome.ResumedContexts, resumed)
+	}
+	return outcome, nil
+}
+
+func (c *OrchestratorController) contextForPlannerReply(
+	ctx context.Context,
+	jobID, questionMessageID string,
+) (RoleExecutionContext, bool, error) {
+	job, err := c.store.GetJob(ctx, jobID)
+	if err != nil {
+		return RoleExecutionContext{}, false, err
+	}
+	for _, message := range job.JobMessages {
+		if message.ReplyToMessageID != questionMessageID ||
+			message.Sender.Kind != domain.ActorPlanner {
+			continue
+		}
+		resumed, err := c.communication.ContextForMessage(ctx, jobID, message.ID)
+		return resumed, err == nil, err
+	}
+	return RoleExecutionContext{}, false, nil
+}
+
 // ProcessPlannerInbox routes persisted Coder / Reviewer questions to the same
 // Taskless Planner execution and returns the answer to each original sender.
 func (c *OrchestratorController) ProcessPlannerInbox(
@@ -66,6 +136,9 @@ func (c *OrchestratorController) ProcessPlannerInbox(
 		}
 		if err := job.Validate(); err != nil {
 			return outcomes, fmt.Errorf("validate Job before routing Planner question: %w", err)
+		}
+		if questionHasPlannerReply(job, question) {
+			continue
 		}
 		grant, found := questionAuthorizationForMessage(job, question.ID)
 		if !found {
@@ -117,6 +190,17 @@ func questionAuthorizationForMessage(
 		}
 	}
 	return latest, found
+}
+
+func questionHasPlannerReply(job domain.Job, question domain.JobMessage) bool {
+	for _, message := range job.JobMessages {
+		if message.ReplyToMessageID == question.ID &&
+			message.Sender == (domain.ActorRef{Kind: domain.ActorPlanner, ID: question.Recipient.ID}) &&
+			message.Recipient == question.Sender {
+			return true
+		}
+	}
+	return false
 }
 
 func latestQuestionTurnIntentForAuthorization(
