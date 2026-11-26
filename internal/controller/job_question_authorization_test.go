@@ -10,6 +10,21 @@ import (
 	"github.com/hiono/taxion/internal/store"
 )
 
+type fakeQuestionReadOnlyContextResolver struct {
+	err   error
+	calls int
+}
+
+func (r *fakeQuestionReadOnlyContextResolver) ResolveReadOnlyBoundary(
+	context.Context,
+	domain.Job,
+	domain.JobMessage,
+	domain.RoleExecution,
+) (QuestionReadOnlyContext, error) {
+	r.calls++
+	return QuestionReadOnlyContext{}, r.err
+}
+
 type replayQuestionAuthorizationStore struct {
 	receipt       store.CommandReceipt
 	authorization domain.JobQuestionAuthorization
