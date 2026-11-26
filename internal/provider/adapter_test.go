@@ -262,7 +262,7 @@ func TestStartAndTurnRequestsValidateImmutablePromptAndContextDigests(t *testing
 		OperationID: "provider_turn_123", TurnID: "planning_turn_123", SessionID: "session_123",
 		PromptSHA256: sha256Hex(prompt), Prompt: prompt,
 		ReadOnlyBoundary: ReadOnlyContextBoundary{Mode: "snapshot", Reference: "snapshot_123", SHA256: sha256Hex("authorized snapshot")},
-		MaxTokens: 500, Deadline: time.Now().UTC().Add(time.Hour),
+		MaxTokens:        500, Deadline: time.Now().UTC().Add(time.Hour),
 	}
 	if err := turn.Validate(); err != nil {
 		t.Fatalf("valid Turn request: %v", err)
