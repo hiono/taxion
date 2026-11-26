@@ -118,6 +118,9 @@ func (r *Runtime) Send(ctx context.Context, request TurnRequest) (TurnResult, er
 	if err != nil {
 		return TurnResult{}, err
 	}
+	if !capabilities.HasEvidenceAtLeast(CapabilityReadOnlyContextEnforcement, r.minimumEvidence) {
+		return TurnResult{}, ErrUnsupportedCapability
+	}
 	if !capabilities.HasEvidenceAtLeast(CapabilitySendIdempotency, r.minimumEvidence) &&
 		!capabilities.HasEvidenceAtLeast(CapabilitySendLookup, r.minimumEvidence) {
 		return TurnResult{}, ErrUnsupportedCapability
