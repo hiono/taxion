@@ -171,19 +171,19 @@ func (a *syntheticACPTestAdapter) Capabilities(ctx context.Context) (Capabilitie
 	identity := a.Identity()
 	evidence := func(capability Capability) CapabilityEvidence {
 		return CapabilityEvidence{
-			Capability: capability,
-			Identity: identity,
-			TestID: "runtime-test",
+			Capability:     capability,
+			Identity:       identity,
+			TestID:         "runtime-test",
 			EvidenceSHA256: sha256Hex("synthetic ACP fake-peer evidence"),
 			EvidenceLevel: EvidenceSynthetic,
-			VerifiedAt: time.Now().UTC(),
+			VerifiedAt:     time.Now().UTC(),
 		}
 	}
 	return Capabilities{
-		Identity: identity,
+		Identity:         identity,
 		StartIdempotency: true,
-		SendIdempotency: true,
-		Evidence: []CapabilityEvidence{
+		SendIdempotency:  true,
+		Evidence:         []CapabilityEvidence{
 			evidence(CapabilityStartIdempotency),
 			evidence(CapabilitySendIdempotency),
 		},
@@ -194,10 +194,10 @@ func TestACPFakePeerThroughProviderRuntime(t *testing.T) {
 	t.Setenv("TAXION_ACP_HELPER", "1")
 	identity := testIdentity()
 	adapter, err := NewACPAdapter(ACPConfig{
-		Command: os.Args[0],
-		Args: []string{"-test.run=TestACPHelperProcess"},
+		Command:          os.Args[0],
+		Args:             []string{"-test.run=TestACPHelperProcess"},
 		WorkingDirectory: t.TempDir(),
-		Identity: identity,
+		Identity:         identity,
 	})
 	if err != nil {
 		t.Fatalf("NewACPAdapter: %v", err)
@@ -213,15 +213,15 @@ func TestACPFakePeerThroughProviderRuntime(t *testing.T) {
 	defer cancel()
 	startPrompt := "start the approved task"
 	startRequest := StartRequest{
-		OperationID: "runtime_start_1",
-		JobID: "job_1",
+		OperationID:     "runtime_start_1",
+		JobID:           "job_1",
 		RoleExecutionID: "role_execution_1",
-		RequestSHA256: sha256Hex("immutable request"),
-		PromptSHA256: sha256Hex(startPrompt),
-		Prompt: startPrompt,
-		MaxTurns: 2,
-		MaxTokens: 1000,
-		Deadline: time.Now().Add(8 * time.Second),
+		RequestSHA256:   sha256Hex("immutable request"),
+		PromptSHA256:    sha256Hex(startPrompt),
+		Prompt:          startPrompt,
+		MaxTurns:        2,
+		MaxTokens:       1000,
+		Deadline:        time.Now().Add(8 * time.Second),
 	}
 	startResult, err := runtime.Start(ctx, startRequest)
 	if err != nil {
@@ -229,13 +229,13 @@ func TestACPFakePeerThroughProviderRuntime(t *testing.T) {
 	}
 	prompt := "continue the same task"
 	turnResult, err := runtime.Send(ctx, TurnRequest{
-		OperationID: "runtime_turn_1",
-		TurnID: "turn_1",
-		SessionID: startResult.SessionID,
+		OperationID:  "runtime_turn_1",
+		TurnID:       "turn_1",
+		SessionID:    startResult.SessionID,
 		PromptSHA256: sha256Hex(prompt),
-		Prompt: prompt,
-		MaxTokens: 1000,
-		Deadline: time.Now().Add(8 * time.Second),
+		Prompt:       prompt,
+		MaxTokens:    1000,
+		Deadline:     time.Now().Add(8 * time.Second),
 	})
 	if err != nil {
 		t.Fatalf("Runtime.Send with fake ACP peer: %v", err)
