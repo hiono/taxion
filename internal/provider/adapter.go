@@ -34,6 +34,7 @@ const (
 	CapabilityStartLookup                Capability = "start.lookup"
 	CapabilitySendIdempotency            Capability = "send.idempotency"
 	CapabilitySendLookup                 Capability = "send.lookup"
+	// CapabilityReadOnlyContextEnforcement attests that Adapter.Send enforces TurnRequest.ReadOnlyBoundary.
 	CapabilityReadOnlyContextEnforcement Capability = "send.read_only_context_enforcement"
 	CapabilitySessionReattach            Capability = "session.cross_process_reattachment"
 	CapabilityEventReplay                Capability = "event.replay"
@@ -386,10 +387,8 @@ func (r TurnRequest) Validate() error {
 		r.MaxTokens == 0 || r.Deadline.IsZero() {
 		return errors.New("Provider Turn request identity, prompt digest, or token budget is invalid")
 	}
-	if r.ReadOnlyBoundary != (ReadOnlyContextBoundary{}) {
-		if err := r.ReadOnlyBoundary.Validate(); err != nil {
-			return err
-		}
+	if err := r.ReadOnlyBoundary.Validate(); err != nil {
+		return err
 	}
 	return nil
 }
