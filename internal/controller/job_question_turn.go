@@ -337,7 +337,7 @@ func (c *JobQuestionTurnController) dispatch(
 	lookup := provider.LookupResult{
 		Found: true, OperationID: result.OperationID, Status: result.Status,
 		ReceiptID: result.ReceiptID, SessionID: result.SessionID, TurnID: result.TurnID,
-		EvidenceSHA256: result.EvidenceSHA256,
+		ResultSHA256: sha256String(result.Output), EvidenceSHA256: result.EvidenceSHA256,
 	}
 	if err := lookup.Validate(provider.LookupRequest{
 		OperationID: intent.OperationID, SessionID: intent.ProviderSessionID, TurnID: intent.ID,
