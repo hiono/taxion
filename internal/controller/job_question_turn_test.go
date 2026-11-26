@@ -105,6 +105,17 @@ func newJobQuestionTurnFixture(t *testing.T) jobQuestionTurnFixture {
 	if err != nil {
 		t.Fatalf("GetJob before question: %v", err)
 	}
+	var coderSessionID string
+	for _, observation := range job.ProviderStartObservations {
+		if observation.OperationID == coderStart.RoleExecution.ProviderStartOperationID &&
+			observation.Status == domain.ProviderStartAccepted {
+			coderSessionID = observation.ProviderSessionID
+			break
+		}
+	}
+	if coderSessionID == "" {
+		t.Fatal("accepted Coder Provider Session not found")
+	}
 	plannerID := ""
 	for _, execution := range job.RoleExecutions {
 		if execution.Role == string(domain.RolePlanner) {
@@ -191,7 +202,7 @@ func newJobQuestionTurnFixture(t *testing.T) jobQuestionTurnFixture {
 	return jobQuestionTurnFixture{
 		controller: controller, runtime: runtime, database: database, jobID: jobID,
 		authorizationID: authorization.ID, questionID: question.ID,
-		coderID: coderStart.RoleExecution.ID, coderSessionID: coderStart.ProviderSessionID,
+		coderID: coderStart.RoleExecution.ID, coderSessionID: coderSessionID,
 		plannerID: plannerID, sessionID: sessionID,
 	}
 }
