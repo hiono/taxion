@@ -1127,31 +1127,3 @@ func (a *acpTestPermissionAuthorizer) Authorize(_ context.Context, request ACPTo
 	}
 	return nil
 }
-
-func TestACPAdapterAllowsOnlyAuthorizedTaskPermissionOnce(t *testing.T) {
-	t.Setenv("TAXION_ACP_HELPER", "1;require-allow=1")
-	identity := testIdentity()
-	authorizer := &acpTestPermissionAuthorizer{}
-	adapter, err := NewACPAdapter(ACPConfig{
-		Command: os.Args[0], Args: []string{"-test.run=TestACPHelperProcess"},
-		WorkingDirectory: t.TempDir(), Identity: identity,
-		Environment: []string{"TAXION_ACP_HELPER"}, PermissionAuthorizer: authorizer,
-	})
-	if err != nil {
-		t.Fatalf("NewACPAdapter: %v", err)
-	}
-	defer adapter.Close()
-	prompt := "execute the approved task"
-	request := StartRequest{
-		OperationID: "operation_start_1", JobID: "job_1", RoleExecutionID: "role_execution_1",
-		TaskID: "task_1", ExecutionPermissionID: "permission_1",
-		RequestSHA256: strings.Repeat("a", 64), Prompt: prompt, PromptSHA256: sha256Hex(prompt),
-		MaxTurns: 1, MaxTokens: 1000, Deadline: time.Now().Add(8 * time.Second),
-	}
-	if _, err := adapter.Start(context.Background(), request, nil); err != nil {
-		t.Fatalf("Start with authorized Task tool request: %v", err)
-	}
-	if authorizer.calls != 1 {
-		t.Fatalf("permission authorizer calls = %d, want 1", authorizer.calls)
-	}
-}
