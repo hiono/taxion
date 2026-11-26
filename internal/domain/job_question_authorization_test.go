@@ -290,3 +290,99 @@ func TestJobQuestionAuthorizationRejectsScopeAndBudgetExpansion(t *testing.T) {
 		})
 	}
 }
+
+func TestJobQuestionAuthorizationReservesBudgetAcrossQuestions(t *testing.T) {
+	job, task, now := approvedJobWithTaskForExecutionPermission(t)
+	permissionRequest := executionPermissionTestRequest(job, now)
+	permissionSHA, err := ExecutionPermissionRequestSHA256(permissionRequest)
+	if err != nil {
+		t.Fatalf("ExecutionPermissionRequestSHA256: %v", err)
+	}
+	permission, err := NewExecutionPermission(
+		job, permissionRequest, permissionSHA,
+		executionPermissionTestAssessment(permissionRequest, permissionSHA, now), now,
+	)
+	if err != nil {
+		t.Fatalf("NewExecutionPermission: %v", err)
+	}
+	job.ExecutionPermissions = append(job.ExecutionPermissions, permission)
+	job.Revision++
+	job.UpdatedAt = now
+	start, err := NewTaskRoleExecutionStart(
+		job, task.ID, permission.ID, "cmd_81818181818181818181818181818181",
+		permission.RequestSHA256, now.Add(time.Minute),
+	)
+	if err != nil {
+		t.Fatalf("NewTaskRoleExecutionStart: %v", err)
+	}
+	job.RoleExecutions = append(job.RoleExecutions, start.RoleExecution)
+	job.ProviderStartIntents = append(job.ProviderStartIntents, start.ProviderStartIntent)
+	job.Revision++
+	job.UpdatedAt = start.RoleExecution.CreatedAt
+
+	planner := job.RoleExecutions[0]
+	grant := job.PlanningAuthorizations[0]
+	startObservation, found := latestProviderStartObservation(job, planner.ProviderStartOperationID)
+	if !found || startObservation.Status != ProviderStartAccepted {
+		t.Fatal("Planner has no accepted Provider Session")
+	}
+	contract := job.JobContractRevisions[len(job.JobContractRevisions)-1].Contract
+	newQuestion := func(commandID, body string, at time.Time) JobMessage {
+		message, err := NewJobMessage(job, commandID, JobMessageRequest{
+			Sender: ActorRef{Kind: ActorCoder, ID: start.RoleExecution.ID},
+			Recipient: ActorRef{Kind: ActorPlanner, ID: planner.ID},
+			Body: body,
+		}, at)
+		if err != nil {
+			t.Fatalf("NewJobMessage: %v", err)
+		}
+		job.JobMessages = append(job.JobMessages, message)
+		job.Revision++
+		job.UpdatedAt = message.CreatedAt
+		return message
+	}
+	firstQuestion := newQuestion(
+		"cmd_82828282828282828282828282828282",
+		"Clarify the first approved constraint.",
+		now.Add(2*time.Minute),
+	)
+	firstRequest := JobQuestionAuthorizationRequest{
+		JobID: job.ID, CommandID: "cmd_83838383838383838383838383838383",
+		QuestionMessageID: firstQuestion.ID, PlannerRoleExecutionID: planner.ID,
+		ProviderSessionID: startObservation.ProviderSessionID,
+		RepositoryID: contract.TargetRepositories[0], PlanningRepositoryID: grant.RepositoryID,
+		ProviderID: grant.ProviderID, AccountID: grant.AccountID,
+		ConfigurationSHA256: grant.ConfigurationSHA256,
+		ReadOnlyBoundary: PlanningReadOnlyBoundary{
+			Mode: PlanningReadOnlyBoundarySnapshot, Reference: "question_budget_snapshot_1",
+			SHA256: strings.Repeat("d", 64),
+		},
+		Budget: PlanningBudget{MaxTurns: 1, MaxTokens: 100},
+		Deadline: contract.Deadline.Add(-time.Minute),
+	}
+	first, err := NewJobQuestionAuthorization(job, firstRequest, now.Add(3*time.Minute))
+	if err != nil {
+		t.Fatalf("first JobQuestionAuthorization: %v", err)
+	}
+	job.JobQuestionAuthorizations = append(job.JobQuestionAuthorizations, first)
+	job.Revision++
+	job.UpdatedAt = first.CreatedAt
+
+	secondQuestion := newQuestion(
+		"cmd_84848484848484848484848484848484",
+		"Clarify the second approved constraint.",
+		now.Add(4*time.Minute),
+	)
+	secondRequest := firstRequest
+	secondRequest.CommandID = "cmd_85858585858585858585858585858585"
+	secondRequest.QuestionMessageID = secondQuestion.ID
+	secondRequest.ReadOnlyBoundary.Reference = "question_budget_snapshot_2"
+	secondRequest.ReadOnlyBoundary.SHA256 = strings.Repeat("e", 64)
+	// The remaining Job budget would permit this grant if the first question's
+	// reservation were ignored. Existing question grants must reserve budget.
+	secondRequest.Budget.MaxTokens = contract.Budget.MaxTokens - permissionRequest.ReservedTokens
+	if _, err := NewJobQuestionAuthorization(job, secondRequest, now.Add(5*time.Minute)); err == nil {
+		t.Fatal("second JobQuestionAuthorization reused budget already reserved by the first question")
+	}
+}
+

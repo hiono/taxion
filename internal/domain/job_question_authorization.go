@@ -89,6 +89,19 @@ func NewJobQuestionAuthorization(job Job, request JobQuestionAuthorizationReques
 	if err != nil {
 		return JobQuestionAuthorization{}, err
 	}
+	// Each question grant reserves its full bounded budget when issued. Count
+	// earlier grants for this contract revision before issuing another one.
+	for _, existing := range job.JobQuestionAuthorizations {
+		if existing.ContractRevision != latest.Revision {
+			continue
+		}
+		if ^uint64(0)-usedTurns < uint64(existing.Budget.MaxTurns) ||
+			^uint64(0)-usedTokens < existing.Budget.MaxTokens {
+			return JobQuestionAuthorization{}, fmt.Errorf("%w: JobQuestionAuthorization budget overflow", ErrInvalidJob)
+		}
+		usedTurns += uint64(existing.Budget.MaxTurns)
+		usedTokens += existing.Budget.MaxTokens
+	}
 	if usedTurns > uint64(latest.Contract.Budget.MaxTurns) ||
 		uint64(request.Budget.MaxTurns) > uint64(latest.Contract.Budget.MaxTurns)-usedTurns ||
 		usedTokens > latest.Contract.Budget.MaxTokens ||
