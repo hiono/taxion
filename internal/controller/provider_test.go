@@ -1363,6 +1363,10 @@ func TestProviderControllerReconcilesTaskCoderStartUnknownBySameOperationID(t *t
 	if err != nil {
 		t.Fatalf("StartTaskExecution: %v", err)
 	}
+	execution, intent = bindProviderTestWorktree(
+		t, database, executionController, jobID, "cmd_c4444444444444444444444444444444",
+		revision.Contract.TargetRepositories[0], execution,
+	)
 	runtime := &fakePlanningProviderRuntime{
 		identity: provider.Identity{
 			ProviderID: permission.ProviderID, AccountID: permission.AccountID,
