@@ -66,14 +66,11 @@ func (c *JobQuestionAuthorizationController) Authorize(
 	if ctx == nil || jobID == "" || questionMessageID == "" || commandID == "" {
 		return store.CommandReceipt{}, domain.JobQuestionAuthorization{}, errors.New("JobQuestionAuthorization requires Job, Question, and Command identities")
 	}
-	if receipt, authorization, found, err := c.store.GetJobQuestionAuthorizationCommand(ctx, jobID, commandID); err != nil {
+	if receipt, authorization, found, err := c.replayCommittedAuthorization(
+		ctx, jobID, questionMessageID, commandID, budget, deadline,
+	); err != nil {
 		return store.CommandReceipt{}, domain.JobQuestionAuthorization{}, err
 	} else if found {
-		if authorization.QuestionMessageID != questionMessageID ||
-			authorization.Budget != budget ||
-			!authorization.Deadline.Equal(deadline.UTC().Round(0)) {
-			return store.CommandReceipt{}, domain.JobQuestionAuthorization{}, store.ErrIdempotencyConflict
-		}
 		return receipt, authorization, nil
 	}
 	job, err := c.store.GetJob(ctx, jobID)
@@ -129,6 +126,13 @@ func (c *JobQuestionAuthorizationController) Authorize(
 	}
 	readOnlyContext, err := c.resolver.ResolveReadOnlyBoundary(ctx, job, question, planner)
 	if err != nil {
+		if receipt, authorization, found, replayErr := c.replayCommittedAuthorization(
+			ctx, jobID, questionMessageID, commandID, budget, deadline,
+		); replayErr != nil {
+			return store.CommandReceipt{}, domain.JobQuestionAuthorization{}, replayErr
+		} else if found {
+			return receipt, authorization, nil
+		}
 		return store.CommandReceipt{}, domain.JobQuestionAuthorization{}, fmt.Errorf("resolve immutable read-only question context: %w", err)
 	}
 	planningGrantFound := false
@@ -151,5 +155,34 @@ func (c *JobQuestionAuthorizationController) Authorize(
 		ReadOnlyBoundary:     readOnlyContext.Boundary,
 		Budget:               budget, Deadline: deadline.UTC().Round(0),
 	}
-	return c.store.AddJobQuestionAuthorization(ctx, job.ID, job.Revision, request)
+	receipt, authorization, err := c.store.AddJobQuestionAuthorization(ctx, job.ID, job.Revision, request)
+	if err != nil {
+		if replayReceipt, replayAuthorization, found, replayErr := c.replayCommittedAuthorization(
+			ctx, jobID, questionMessageID, commandID, budget, deadline,
+		); replayErr != nil {
+			return store.CommandReceipt{}, domain.JobQuestionAuthorization{}, replayErr
+		} else if found {
+			return replayReceipt, replayAuthorization, nil
+		}
+		return store.CommandReceipt{}, domain.JobQuestionAuthorization{}, err
+	}
+	return receipt, authorization, nil
+}
+
+func (c *JobQuestionAuthorizationController) replayCommittedAuthorization(
+	ctx context.Context,
+	jobID, questionMessageID, commandID string,
+	budget domain.PlanningBudget,
+	deadline time.Time,
+) (store.CommandReceipt, domain.JobQuestionAuthorization, bool, error) {
+	receipt, authorization, found, err := c.store.GetJobQuestionAuthorizationCommand(ctx, jobID, commandID)
+	if err != nil || !found {
+		return receipt, authorization, found, err
+	}
+	if authorization.QuestionMessageID != questionMessageID ||
+		authorization.Budget != budget ||
+		!authorization.Deadline.Equal(deadline.UTC().Round(0)) {
+		return store.CommandReceipt{}, domain.JobQuestionAuthorization{}, false, store.ErrIdempotencyConflict
+	}
+	return receipt, authorization, true, nil
 }
