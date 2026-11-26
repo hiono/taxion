@@ -260,8 +260,9 @@ func TestStartAndTurnRequestsValidateImmutablePromptAndContextDigests(t *testing
 
 	turn := TurnRequest{
 		OperationID: "provider_turn_123", TurnID: "planning_turn_123", SessionID: "session_123",
-		PromptSHA256: sha256Hex(prompt), Prompt: prompt, MaxTokens: 500,
-		Deadline: time.Now().UTC().Add(time.Hour),
+		PromptSHA256: sha256Hex(prompt), Prompt: prompt,
+		ReadOnlyBoundary: ReadOnlyContextBoundary{Mode: "snapshot", Reference: "snapshot_123", SHA256: sha256Hex("authorized snapshot")},
+		MaxTokens: 500, Deadline: time.Now().UTC().Add(time.Hour),
 	}
 	if err := turn.Validate(); err != nil {
 		t.Fatalf("valid Turn request: %v", err)
@@ -309,6 +310,11 @@ func TestTurnRequestValidatesReadOnlyContextBoundary(t *testing.T) {
 	}
 	if err := request.Validate(); err != nil {
 		t.Fatalf("valid read-only boundary: %v", err)
+	}
+	missingBoundary := request
+	missingBoundary.ReadOnlyBoundary = ReadOnlyContextBoundary{}
+	if err := missingBoundary.Validate(); err == nil {
+		t.Fatal("Turn request without a read-only context boundary was accepted")
 	}
 	request.ReadOnlyBoundary.Mode = "write"
 	if err := request.Validate(); err == nil {
