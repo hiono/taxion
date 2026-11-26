@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"encoding/json"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -35,8 +36,13 @@ func startContractPlanner(t *testing.T) (*PlanningController, *store.Store, auth
 
 func startContractPlannerWithResultContent(t *testing.T, resultContent string) (*PlanningController, *store.Store, auth.AuthenticatedPrincipal, string, string, domain.ProviderResultObservation, domain.JobContract) {
 	t.Helper()
+	return startContractPlannerWithResultContentAtPath(t, resultContent, filepath.Join(t.TempDir(), "provider-controller.sqlite"))
+}
+
+func startContractPlannerWithResultContentAtPath(t *testing.T, resultContent, databasePath string) (*PlanningController, *store.Store, auth.AuthenticatedPrincipal, string, string, domain.ProviderResultObservation, domain.JobContract) {
+	t.Helper()
 	runtime := &fakePlanningProviderRuntime{}
-	providerController, database, principal, jobID, grantID, documents := newProviderControllerFixture(t, runtime)
+	providerController, database, principal, jobID, grantID, documents := newProviderControllerFixtureAtPath(t, runtime, databasePath)
 	_, _, _, _, err := providerController.StartPlanning(
 		context.Background(), jobID, grantID,
 		"cmd_cccccccccccccccccccccccccccccccc", documents, principal,
