@@ -200,11 +200,11 @@ func acpStartPrompt(request StartRequest) string {
 	var prompt strings.Builder
 	prompt.WriteString(request.Prompt)
 	for _, document := range request.Context {
-		prompt.WriteString("\\n\\n--- Context document: ")
+		prompt.WriteString("\n\n--- Context document: ")
 		prompt.WriteString(document.ID)
 		prompt.WriteString(" (sha256:")
 		prompt.WriteString(document.SHA256)
-		prompt.WriteString(") ---\\n")
+		prompt.WriteString(") ---\n")
 		prompt.WriteString(document.Content)
 	}
 	return prompt.String()
