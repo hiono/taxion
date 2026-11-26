@@ -269,6 +269,48 @@ func TestJobQuestionAuthorizationRejectsScopeAndBudgetExpansion(t *testing.T) {
 			contractMismatchJob.Tasks[i].CanonicalHash = mismatchedHash
 		}
 	}
+	for i := range contractMismatchJob.ExecutionPermissions {
+		permission := &contractMismatchJob.ExecutionPermissions[i]
+		permission.CanonicalHash = mismatchedHash
+		permission.ConfigurationSHA256 = mismatchedContract.ConfigurationSHA256
+		permissionRequest := ExecutionPermissionRequest{
+			JobID: permission.JobID, TaskID: permission.TaskID, CommandID: permission.CommandID,
+			Role: permission.Role, Effect: permission.Effect, Resource: permission.Resource,
+			ProviderID: permission.ProviderID, AccountID: permission.AccountID,
+			ConfigurationSHA256: permission.ConfigurationSHA256,
+			ReservedTurns: permission.ReservedTurns, ReservedTokens: permission.ReservedTokens,
+			ExpiresAt: permission.ExpiresAt,
+		}
+		permission.RequestSHA256, err = ExecutionPermissionRequestSHA256(permissionRequest)
+		if err != nil {
+			t.Fatalf("ExecutionPermissionRequestSHA256 with amended configuration: %v", err)
+		}
+		permission.Assessment.ConfigurationSHA256 = permission.ConfigurationSHA256
+		permission.Assessment.RequestSHA256 = permission.RequestSHA256
+		permission.AssessmentSHA256, err = permission.Assessment.SHA256()
+		if err != nil {
+			t.Fatalf("ExecutionEffectAssessment SHA256 with amended configuration: %v", err)
+		}
+	}
+	for i := range contractMismatchJob.ProviderStartIntents {
+		intent := &contractMismatchJob.ProviderStartIntents[i]
+		for _, permission := range contractMismatchJob.ExecutionPermissions {
+			if intent.ExecutionPermissionID == permission.ID {
+				intent.ConfigurationSHA256 = permission.ConfigurationSHA256
+				intent.RequestSHA256 = permission.RequestSHA256
+				break
+			}
+		}
+	}
+	for i := range contractMismatchJob.ProviderStartObservations {
+		observation := &contractMismatchJob.ProviderStartObservations[i]
+		for _, intent := range contractMismatchJob.ProviderStartIntents {
+			if observation.OperationID == intent.ID {
+				observation.ConfigurationSHA256 = intent.ConfigurationSHA256
+				break
+			}
+		}
+	}
 	if err := contractMismatchJob.Validate(); err != nil {
 		t.Fatalf("Job.Validate with a separately approved configuration digest: %v", err)
 	}
