@@ -549,8 +549,8 @@ func TestOrchestratorContinuesAfterFailedQuestionAndCollectsErrors(t *testing.T)
 		t.Fatalf("failed question blocked independent inbox processing: outcomes=%#v sends=%d err=%v",
 			outcomes, fixture.runtime.sendCalls, err)
 	}
-	if outcomes[1].Reply.Message.ReplyToMessageID != secondQuestion.ID {
-		t.Fatalf("second question reply correlation = %q, want %q", outcomes[1].Reply.Message.ReplyToMessageID, secondQuestion.ID)
+	if outcomes[1].Reply.Message.ReplyToMessageID != secondQuestion.Message.ID {
+		t.Fatalf("second question reply correlation = %q, want %q", outcomes[1].Reply.Message.ReplyToMessageID, secondQuestion.Message.ID)
 	}
 	job, err := fixture.database.GetJob(context.Background(), fixture.jobID)
 	if err != nil {
