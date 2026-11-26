@@ -964,7 +964,8 @@ func (a *acpTestPermissionAuthorizer) Authorize(_ context.Context, request ACPTo
 	a.calls++
 	if request.OperationID != "operation_start_1" || request.JobID != "job_1" ||
 		request.RoleExecutionID != "role_execution_1" || request.TaskID != "task_1" ||
-		request.ExecutionPermissionID != "permission_1" || request.SessionID != "fake-session" ||
+		request.ExecutionPermissionID != "permission_1" || request.WorktreeAssignmentID != "worktree_1" ||
+		request.WorktreePath == "" || request.SessionID != "fake-session" ||
 		request.RequestSHA256 != strings.Repeat("a", 64) || request.ProviderIdentity.ProviderID != "provider.test" ||
 		!strings.Contains(string(request.ToolCall), "git status") {
 		return errors.New("ACP permission request did not preserve its exact Task authority")
@@ -989,6 +990,7 @@ func TestACPAdapterAllowsOnlyAuthorizedTaskPermissionOnce(t *testing.T) {
 	request := StartRequest{
 		OperationID: "operation_start_1", JobID: "job_1", RoleExecutionID: "role_execution_1",
 		TaskID: "task_1", ExecutionPermissionID: "permission_1",
+		WorktreeAssignmentID: "worktree_1", WorktreePath: t.TempDir(),
 		RequestSHA256: strings.Repeat("a", 64), Prompt: prompt, PromptSHA256: sha256Hex(prompt),
 		MaxTurns: 1, MaxTokens: 1000, Deadline: time.Now().Add(8 * time.Second),
 	}
