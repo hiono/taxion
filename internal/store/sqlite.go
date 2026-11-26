@@ -169,6 +169,35 @@ func (s *Store) initialize(ctx context.Context) error {
 			receipt_json TEXT NOT NULL,
 			created_at TEXT NOT NULL
 		)`,
+		`CREATE TRIGGER IF NOT EXISTS job_aggregates_preserve_append_only_facts
+		BEFORE UPDATE OF payload_json ON job_aggregates
+		WHEN
+		  EXISTS (
+		    SELECT 1 FROM json_each(COALESCE(json_extract(OLD.payload_json, '$.job_messages'), '[]')) AS old_fact
+		    WHERE NOT EXISTS (
+		      SELECT 1 FROM json_each(COALESCE(json_extract(NEW.payload_json, '$.job_messages'), '[]')) AS new_fact
+		      WHERE new_fact.key = old_fact.key AND new_fact.value = old_fact.value
+		    )
+		  ) OR
+		  EXISTS (
+		    SELECT 1 FROM json_each(COALESCE(json_extract(OLD.payload_json, '$.delivery_observations'), '[]')) AS old_fact
+		    WHERE NOT EXISTS (
+		      SELECT 1 FROM json_each(COALESCE(json_extract(NEW.payload_json, '$.delivery_observations'), '[]')) AS new_fact
+		      WHERE new_fact.key = old_fact.key AND new_fact.value = old_fact.value
+		    )
+		  ) OR
+		  EXISTS (
+		    SELECT 1 FROM json_each(COALESCE(json_extract(OLD.payload_json, '$.job_question_authorizations'), '[]')) AS old_fact
+		    WHERE NOT EXISTS (
+		      SELECT 1 FROM json_each(COALESCE(json_extract(NEW.payload_json, '$.job_question_authorizations'), '[]')) AS new_fact
+		      WHERE new_fact.key = old_fact.key AND new_fact.value = old_fact.value
+		    )
+		  )
+		BEGIN
+		  SELECT RAISE(ABORT, 'JobAggregate append-only facts cannot be removed or rewritten');
+		END`,
+		-- Existing processes can remain open across a schema upgrade. The trigger
+		-- protects append-only facts even when their binary cannot read user_version 2.
 	}
 	for _, statement := range statements {
 		if _, err := tx.ExecContext(ctx, statement); err != nil {
