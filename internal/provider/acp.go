@@ -567,7 +567,6 @@ func (a *ACPAdapter) Lookup(context.Context, LookupRequest, CredentialLease) (Lo
 	return LookupResult{}, ErrUnsupportedCapability
 }
 
-
 func (a *ACPAdapter) Result(ctx context.Context, request ResultRequest, _ CredentialLease) (Result, error) {
 	if ctx == nil || request.Validate() != nil {
 		return Result{}, ErrProviderInvalidRequest
@@ -921,7 +920,6 @@ func validACPJSONRPCID(raw json.RawMessage) bool {
 		return false
 	}
 }
-
 
 func (p *acpProcess) closePending() {
 	p.pending.Range(func(key, value any) bool {
