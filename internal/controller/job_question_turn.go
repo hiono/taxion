@@ -32,15 +32,27 @@ type JobQuestionTurnOutcome struct {
 }
 
 type JobQuestionTurnController struct {
-	store         JobQuestionTurnStore
-	runtime       PlanningProviderRuntime
-	communication *CommunicationController
-	now           func() time.Time
+	store           JobQuestionTurnStore
+	runtime         PlanningProviderRuntime
+	communication   *CommunicationController
+	minimumEvidence provider.EvidenceLevel
+	now             func() time.Time
 }
 
 func NewJobQuestionTurnController(
 	turnStore JobQuestionTurnStore,
 	runtime PlanningProviderRuntime,
+) (*JobQuestionTurnController, error) {
+	return newJobQuestionTurnController(turnStore, runtime, provider.EvidenceLive)
+}
+
+// newJobQuestionTurnController permits package tests to exercise deterministic E2
+// orchestration with synthetic capabilities. Production callers use the exported
+// constructor, which always requires live Provider evidence.
+func newJobQuestionTurnController(
+	turnStore JobQuestionTurnStore,
+	runtime PlanningProviderRuntime,
+	minimumEvidence provider.EvidenceLevel,
 ) (*JobQuestionTurnController, error) {
 	if turnStore == nil || runtime == nil {
 		return nil, errors.New("JobQuestionTurnStore and Provider runtime are required")
@@ -53,7 +65,8 @@ func NewJobQuestionTurnController(
 		return nil, err
 	}
 	return &JobQuestionTurnController{
-		store: turnStore, runtime: runtime, communication: communication, now: time.Now,
+		store: turnStore, runtime: runtime, communication: communication,
+		minimumEvidence: minimumEvidence, now: time.Now,
 	}, nil
 }
 
@@ -102,7 +115,7 @@ func (c *JobQuestionTurnController) Send(
 		if err != nil {
 			return outcome, err
 		}
-		if !capabilities.HasEvidenceAtLeast(provider.CapabilitySendIdempotency, provider.EvidenceLive) {
+		if !capabilities.HasEvidenceAtLeast(provider.CapabilitySendIdempotency, c.minimumEvidence) {
 			return outcome, provider.ErrUnsupportedCapability
 		}
 		receipt, created, err := c.store.AddJobQuestionTurnIntent(ctx, job.ID, job.Revision, domain.JobQuestionTurnIntentRequest{
@@ -146,7 +159,7 @@ func (c *JobQuestionTurnController) Send(
 	if err != nil {
 		return outcome, err
 	}
-	if !capabilities.HasEvidenceAtLeast(provider.CapabilitySendIdempotency, provider.EvidenceLive) {
+	if !capabilities.HasEvidenceAtLeast(provider.CapabilitySendIdempotency, c.minimumEvidence) {
 		return outcome, provider.ErrUnsupportedCapability
 	}
 	return c.dispatch(ctx, outcome, grant, question, intent, capabilities)
@@ -164,7 +177,7 @@ func (c *JobQuestionTurnController) reconcileUnknown(
 	if err != nil {
 		return outcome, err
 	}
-	if capabilities.SendLookup && capabilities.HasEvidenceAtLeast(provider.CapabilitySendLookup, provider.EvidenceLive) {
+	if capabilities.SendLookup && capabilities.HasEvidenceAtLeast(provider.CapabilitySendLookup, c.minimumEvidence) {
 		request := provider.LookupRequest{
 			OperationID: intent.OperationID, SessionID: intent.ProviderSessionID, TurnID: intent.ID,
 		}
@@ -179,8 +192,8 @@ func (c *JobQuestionTurnController) reconcileUnknown(
 			if lookup.Status != domain.JobQuestionTurnCompleted && lookup.Status != domain.JobQuestionTurnFailed {
 				return outcome, errors.New("Planner question Provider operation remains unresolved")
 			}
-			if !capabilities.HasEvidenceAtLeast(provider.CapabilityUsageIdentity, provider.EvidenceLive) ||
-				!capabilities.HasEvidenceAtLeast(provider.CapabilityUsageCompleteness, provider.EvidenceLive) {
+			if !capabilities.HasEvidenceAtLeast(provider.CapabilityUsageIdentity, c.minimumEvidence) ||
+				!capabilities.HasEvidenceAtLeast(provider.CapabilityUsageCompleteness, c.minimumEvidence) {
 				return outcome, provider.ErrUnsupportedCapability
 			}
 			usage, err := c.runtime.Usage(ctx, provider.UsageRequest{
@@ -207,7 +220,7 @@ func (c *JobQuestionTurnController) reconcileUnknown(
 				outcome.ObservationReceipt, outcome.Observation = receipt, observation
 				return outcome, errors.New("Planner question Provider operation failed")
 			}
-			if !capabilities.HasEvidenceAtLeast(provider.CapabilityFinalOutput, provider.EvidenceLive) {
+			if !capabilities.HasEvidenceAtLeast(provider.CapabilityFinalOutput, c.minimumEvidence) {
 				return outcome, provider.ErrUnsupportedCapability
 			}
 			if lookup.ResultSHA256 == "" {
@@ -269,7 +282,7 @@ func (c *JobQuestionTurnController) reconcileUnknown(
 	if err := currentGrant.ValidateFor(currentJob, currentQuestion.ID, currentGrant.PlannerRoleExecutionID, currentGrant.ProviderSessionID, now); err != nil {
 		return outcome, err
 	}
-	if !capabilities.HasEvidenceAtLeast(provider.CapabilitySendIdempotency, provider.EvidenceLive) {
+	if !capabilities.HasEvidenceAtLeast(provider.CapabilitySendIdempotency, c.minimumEvidence) {
 		return outcome, provider.ErrUnsupportedCapability
 	}
 	return c.dispatch(ctx, outcome, currentGrant, currentQuestion, intent, capabilities)
@@ -283,8 +296,8 @@ func (c *JobQuestionTurnController) dispatch(
 	intent domain.JobQuestionTurnIntent,
 	capabilities provider.Capabilities,
 ) (JobQuestionTurnOutcome, error) {
-	if !capabilities.HasEvidenceAtLeast(provider.CapabilitySendIdempotency, provider.EvidenceLive) ||
-		!capabilities.HasEvidenceAtLeast(provider.CapabilityReadOnlyContextEnforcement, provider.EvidenceLive) {
+	if !capabilities.HasEvidenceAtLeast(provider.CapabilitySendIdempotency, c.minimumEvidence) ||
+		!capabilities.HasEvidenceAtLeast(provider.CapabilityReadOnlyContextEnforcement, c.minimumEvidence) {
 		return outcome, provider.ErrUnsupportedCapability
 	}
 	prompt := jobQuestionTurnPrompt(question.Body)
@@ -474,7 +487,7 @@ func (c *JobQuestionTurnController) verifiedCapabilities(
 	if err := capabilities.Validate(identity); err != nil {
 		return provider.Capabilities{}, fmt.Errorf("validate question Provider capabilities: %w", err)
 	}
-	if !capabilities.HasEvidenceAtLeast(provider.CapabilityReadOnlyContextEnforcement, provider.EvidenceLive) {
+	if !capabilities.HasEvidenceAtLeast(provider.CapabilityReadOnlyContextEnforcement, c.minimumEvidence) {
 		return provider.Capabilities{}, provider.ErrUnsupportedCapability
 	}
 	return capabilities, nil
