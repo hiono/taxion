@@ -30,7 +30,7 @@ var (
 
 // schemaVersion covers SQLite tables, append-only guards, and the serialized JobAggregate contract.
 // Increment it when older binaries could discard newly added aggregate fields.
-const schemaVersion = 3
+const schemaVersion = 4
 
 const preserveJobAggregateFactsTrigger = `CREATE TRIGGER IF NOT EXISTS job_aggregates_preserve_job_messages
 BEFORE UPDATE OF payload_json ON job_aggregates
@@ -56,6 +56,79 @@ WHEN EXISTS (
 )
 BEGIN
 	SELECT RAISE(ABORT, 'append-only JobMessages');
+END`
+
+
+const preserveJobQuestionAuthorizationsTrigger = `CREATE TRIGGER IF NOT EXISTS job_aggregates_preserve_job_question_authorizations
+BEFORE UPDATE OF payload_json ON job_aggregates
+WHEN EXISTS (
+	WITH old_facts AS MATERIALIZED (
+		SELECT
+			COALESCE(json_array_length(OLD.payload_json, '$.job_question_authorizations'), 0) AS old_count,
+			COALESCE((
+				SELECT json_group_array(json(value) ORDER BY CAST(key AS INTEGER))
+				FROM json_each(OLD.payload_json, '$.job_question_authorizations')
+			), '[]') AS old_values
+	),
+	new_prefix AS MATERIALIZED (
+		SELECT COALESCE(json_group_array(json(value) ORDER BY CAST(key AS INTEGER)), '[]') AS new_values
+		FROM json_each(NEW.payload_json, '$.job_question_authorizations'), old_facts
+		WHERE CAST(key AS INTEGER) < old_facts.old_count
+	)
+	SELECT 1 FROM old_facts, new_prefix
+	WHERE (old_facts.old_count > 0 AND json_type(NEW.payload_json, '$.job_question_authorizations') != 'array')
+		OR new_prefix.new_values != old_facts.old_values
+)
+BEGIN
+	SELECT RAISE(ABORT, 'append-only JobQuestionAuthorizations');
+END`
+
+const preserveJobQuestionTurnIntentsTrigger = `CREATE TRIGGER IF NOT EXISTS job_aggregates_preserve_job_question_turn_intents
+BEFORE UPDATE OF payload_json ON job_aggregates
+WHEN EXISTS (
+	WITH old_facts AS MATERIALIZED (
+		SELECT
+			COALESCE(json_array_length(OLD.payload_json, '$.job_question_turn_intents'), 0) AS old_count,
+			COALESCE((
+				SELECT json_group_array(json(value) ORDER BY CAST(key AS INTEGER))
+				FROM json_each(OLD.payload_json, '$.job_question_turn_intents')
+			), '[]') AS old_values
+	),
+	new_prefix AS MATERIALIZED (
+		SELECT COALESCE(json_group_array(json(value) ORDER BY CAST(key AS INTEGER)), '[]') AS new_values
+		FROM json_each(NEW.payload_json, '$.job_question_turn_intents'), old_facts
+		WHERE CAST(key AS INTEGER) < old_facts.old_count
+	)
+	SELECT 1 FROM old_facts, new_prefix
+	WHERE (old_facts.old_count > 0 AND json_type(NEW.payload_json, '$.job_question_turn_intents') != 'array')
+		OR new_prefix.new_values != old_facts.old_values
+)
+BEGIN
+	SELECT RAISE(ABORT, 'append-only JobQuestionTurnIntents');
+END`
+
+const preserveJobQuestionTurnObservationsTrigger = `CREATE TRIGGER IF NOT EXISTS job_aggregates_preserve_job_question_turn_observations
+BEFORE UPDATE OF payload_json ON job_aggregates
+WHEN EXISTS (
+	WITH old_facts AS MATERIALIZED (
+		SELECT
+			COALESCE(json_array_length(OLD.payload_json, '$.job_question_turn_observations'), 0) AS old_count,
+			COALESCE((
+				SELECT json_group_array(json(value) ORDER BY CAST(key AS INTEGER))
+				FROM json_each(OLD.payload_json, '$.job_question_turn_observations')
+			), '[]') AS old_values
+	),
+	new_prefix AS MATERIALIZED (
+		SELECT COALESCE(json_group_array(json(value) ORDER BY CAST(key AS INTEGER)), '[]') AS new_values
+		FROM json_each(NEW.payload_json, '$.job_question_turn_observations'), old_facts
+		WHERE CAST(key AS INTEGER) < old_facts.old_count
+	)
+	SELECT 1 FROM old_facts, new_prefix
+	WHERE (old_facts.old_count > 0 AND json_type(NEW.payload_json, '$.job_question_turn_observations') != 'array')
+		OR new_prefix.new_values != old_facts.old_values
+)
+BEGIN
+	SELECT RAISE(ABORT, 'append-only JobQuestionTurnObservations');
 END`
 
 const createLocalDraftJobCommandType = "CreateJob"
@@ -198,6 +271,9 @@ func (s *Store) initialize(ctx context.Context) error {
 		`DROP TRIGGER IF EXISTS protect_job_v2_append_only_facts`,
 		`DROP TRIGGER IF EXISTS job_aggregates_preserve_job_messages`,
 		preserveJobAggregateFactsTrigger,
+		preserveJobQuestionAuthorizationsTrigger,
+		preserveJobQuestionTurnIntentsTrigger,
+		preserveJobQuestionTurnObservationsTrigger,
 		`CREATE TABLE IF NOT EXISTS job_commands (
 			command_id TEXT PRIMARY KEY,
 			job_id TEXT NOT NULL REFERENCES job_aggregates(job_id),
@@ -250,10 +326,15 @@ func readSQLiteSchemaState(ctx context.Context, conn *sql.Conn) (int, bool, erro
 		return 0, false, fmt.Errorf("read SQLite schema version: %w", err)
 	}
 	var triggerCount int
-	if err := conn.QueryRowContext(ctx, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'trigger' AND name = ?", "job_aggregates_preserve_job_messages").Scan(&triggerCount); err != nil {
+	if err := conn.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type = 'trigger' AND name IN (?, ?, ?, ?)`,
+		"job_aggregates_preserve_job_messages",
+		"job_aggregates_preserve_job_question_authorizations",
+		"job_aggregates_preserve_job_question_turn_intents",
+		"job_aggregates_preserve_job_question_turn_observations",
+	).Scan(&triggerCount); err != nil {
 		return 0, false, fmt.Errorf("read SQLite schema guard: %w", err)
 	}
-	return version, triggerCount == 1, nil
+	return version, triggerCount == 4, nil
 }
 
 func rollbackSQLiteConnection(conn *sql.Conn) error {
