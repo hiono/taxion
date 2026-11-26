@@ -77,7 +77,7 @@ func TestJobQuestionAuthorizationBindsOneApprovedQuestionAndPlannerSession(t *te
 	message, err := NewJobMessage(job, "cmd_72727272727272727272727272727272", JobMessageRequest{
 		Sender:    ActorRef{Kind: ActorCoder, ID: start.RoleExecution.ID},
 		Recipient: ActorRef{Kind: ActorPlanner, ID: planner.ID},
-		Body: "Please clarify the approved implementation constraint.",
+		Body:      "Please clarify the approved implementation constraint.",
 	}, now.Add(2*time.Minute))
 	if err != nil {
 		t.Fatalf("NewJobMessage: %v", err)
@@ -145,9 +145,9 @@ func TestJobQuestionAuthorizationBindsOneApprovedQuestionAndPlannerSession(t *te
 	turnCreatedAt := authorization.CreatedAt.Add(time.Second)
 	turn, err := NewJobQuestionTurnIntent(job, JobQuestionTurnIntentRequest{
 		JobQuestionAuthorizationID: authorization.ID,
-		CommandID: "cmd_74747474747474747474747474747474",
-		PromptSHA256: sha256HexDomain("Please provide the approved clarification."),
-		ReservedTokens: 50,
+		CommandID:                  "cmd_74747474747474747474747474747474",
+		PromptSHA256:               sha256HexDomain("Please provide the approved clarification."),
+		ReservedTokens:             50,
 	}, turnCreatedAt)
 	if err != nil {
 		t.Fatalf("NewJobQuestionTurnIntent: %v", err)
@@ -160,9 +160,9 @@ func TestJobQuestionAuthorizationBindsOneApprovedQuestionAndPlannerSession(t *te
 	}
 	if _, err := NewJobQuestionTurnIntent(job, JobQuestionTurnIntentRequest{
 		JobQuestionAuthorizationID: authorization.ID,
-		CommandID: "cmd_75757575757575757575757575757575",
-		PromptSHA256: sha256HexDomain("Duplicate turn"),
-		ReservedTokens: 10,
+		CommandID:                  "cmd_75757575757575757575757575757575",
+		PromptSHA256:               sha256HexDomain("Duplicate turn"),
+		ReservedTokens:             10,
 	}, turnCreatedAt.Add(time.Second)); err == nil {
 		t.Fatal("JobQuestionAuthorization allowed another turn while the first turn was unresolved")
 	}
@@ -182,9 +182,9 @@ func TestJobQuestionAuthorizationBindsOneApprovedQuestionAndPlannerSession(t *te
 	}
 	if _, err := NewJobQuestionTurnIntent(job, JobQuestionTurnIntentRequest{
 		JobQuestionAuthorizationID: authorization.ID,
-		CommandID: "cmd_77777777777777777777777777777777",
-		PromptSHA256: sha256HexDomain("Another duplicate turn"),
-		ReservedTokens: 10,
+		CommandID:                  "cmd_77777777777777777777777777777777",
+		PromptSHA256:               sha256HexDomain("Another duplicate turn"),
+		ReservedTokens:             10,
 	}, turnCreatedAt.Add(3*time.Second)); err == nil {
 		t.Fatal("JobQuestionAuthorization allowed another turn while UNKNOWN was unreconciled")
 	}
@@ -238,7 +238,7 @@ func TestJobQuestionAuthorizationRejectsScopeAndBudgetExpansion(t *testing.T) {
 	message, err := NewJobMessage(job, "cmd_75757575757575757575757575757575", JobMessageRequest{
 		Sender:    ActorRef{Kind: ActorCoder, ID: start.RoleExecution.ID},
 		Recipient: ActorRef{Kind: ActorPlanner, ID: planner.ID},
-		Body: "Please clarify the approved implementation constraint.",
+		Body:      "Please clarify the approved implementation constraint.",
 	}, now.Add(2*time.Minute))
 	if err != nil {
 		t.Fatalf("NewJobMessage: %v", err)
