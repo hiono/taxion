@@ -56,7 +56,7 @@ func TestOpenUpgradesOlderSchemaVersionAndPreservesJob(t *testing.T) {
 	if _, err := database.createJob(ctx, job, "cmd_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", createLocalDraftJobCommandType); err != nil {
 		t.Fatalf("create Job before schema upgrade: %v", err)
 	}
-	if _, err := database.db.ExecContext(ctx, "PRAGMA user_version = 1"); err != nil {
+	if _, err := database.db.ExecContext(ctx, "PRAGMA user_version = 2"); err != nil {
 		t.Fatalf("set prior schema version: %v", err)
 	}
 	if err := database.Close(); err != nil {
