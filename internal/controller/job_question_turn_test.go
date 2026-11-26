@@ -26,7 +26,7 @@ type jobQuestionTurnFixture struct {
 	controller                                                        *JobQuestionTurnController
 	runtime                                                           *fakePlanningProviderRuntime
 	database                                                          *store.Store
-	jobID, authorizationID, questionID, coderID, plannerID, sessionID string
+	jobID, authorizationID, questionID, coderID, coderSessionID, plannerID, sessionID string
 }
 
 func newJobQuestionTurnFixture(t *testing.T) jobQuestionTurnFixture {
@@ -191,7 +191,8 @@ func newJobQuestionTurnFixture(t *testing.T) jobQuestionTurnFixture {
 	return jobQuestionTurnFixture{
 		controller: controller, runtime: runtime, database: database, jobID: jobID,
 		authorizationID: authorization.ID, questionID: question.ID,
-		coderID: coderStart.RoleExecution.ID, plannerID: plannerID, sessionID: sessionID,
+		coderID: coderStart.RoleExecution.ID, coderSessionID: coderStart.ProviderSessionID,
+		plannerID: plannerID, sessionID: sessionID,
 	}
 }
 
@@ -460,3 +461,178 @@ func TestOrchestratorRoutesPlannerInboxAndReturnsAnswerToOriginalCoder(t *testin
 			len(job.JobQuestionTurnObservations), len(job.JobMessages))
 	}
 }
+func TestOrchestratorContinuesAfterFailedQuestionAndCollectsErrors(t *testing.T) {
+	fixture := newJobQuestionTurnFixture(t)
+	communication, err := NewCommunicationController(fixture.database)
+	if err != nil {
+		t.Fatalf("NewCommunicationController: %v", err)
+	}
+	secondQuestion, err := communication.SendFromRole(context.Background(), RoleMessageRequest{
+		JobID: fixture.jobID, RoleExecutionID: fixture.coderID,
+		ProviderSessionID: fixture.coderSessionID,
+		CommandID: "cmd_85858585858585858585858585858585",
+		Recipient: domain.ActorRef{Kind: domain.ActorPlanner, ID: fixture.plannerID},
+		Body: "Second independent question",
+	})
+	if err != nil {
+		t.Fatalf("SendFromRole second question: %v", err)
+	}
+	authorization, err := NewJobQuestionAuthorizationController(
+		fixture.database, fixedQuestionTurnContextResolver{
+			context: QuestionReadOnlyContext{
+				RepositoryID: "https://github.com/example/project",
+				Boundary: domain.PlanningReadOnlyBoundary{
+					Mode: domain.PlanningReadOnlyBoundarySnapshot, Reference: "question_snapshot_1",
+					SHA256: sha256String("immutable question snapshot"),
+				},
+			},
+		},
+	)
+	if err != nil {
+		t.Fatalf("NewJobQuestionAuthorizationController: %v", err)
+	}
+	orchestrator, err := NewOrchestratorController(
+		fixture.database, communication, authorization, fixture.controller,
+		domain.PlanningBudget{MaxTurns: 1, MaxTokens: 100},
+	)
+	if err != nil {
+		t.Fatalf("NewOrchestratorController: %v", err)
+	}
+	fixture.runtime.sendHook = func(ctx context.Context, request provider.TurnRequest) error {
+		job, err := fixture.database.GetJob(ctx, fixture.jobID)
+		if err != nil {
+			return err
+		}
+		failedQuestion := false
+		for _, intent := range job.JobQuestionTurnIntents {
+			if intent.ID == request.TurnID && intent.JobQuestionAuthorizationID == fixture.authorizationID {
+				failedQuestion = true
+				break
+			}
+		}
+		status := domain.JobQuestionTurnCompleted
+		output := "answer to second question"
+		tokens := uint64(8)
+		receiptID := "receipt_second_question"
+		evidence := strings.Repeat("d", 64)
+		if failedQuestion {
+			status = domain.JobQuestionTurnFailed
+			output = ""
+			tokens = 5
+			receiptID = "receipt_first_question_failed"
+			evidence = strings.Repeat("c", 64)
+		}
+		fixture.runtime.sendResult = provider.TurnResult{
+			OperationID: request.OperationID, SessionID: request.SessionID, TurnID: request.TurnID,
+			Status: status, Output: output, TokensUsed: tokens, ReceiptID: receiptID,
+			EvidenceSHA256: evidence,
+		}
+		return nil
+	}
+	outcomes, err := orchestrator.ProcessPlannerInbox(context.Background(), fixture.jobID, fixture.plannerID)
+	if err == nil || !strings.Contains(err.Error(), fixture.questionID) {
+		t.Fatalf("ProcessPlannerInbox error = %v, want first question failure", err)
+	}
+	if len(outcomes) != 2 || outcomes[0].Observation.Status != domain.JobQuestionTurnFailed ||
+		outcomes[1].Observation.Status != domain.JobQuestionTurnCompleted || fixture.runtime.sendCalls != 2 {
+		t.Fatalf("failed question blocked independent inbox processing: outcomes=%#v sends=%d err=%v",
+			outcomes, fixture.runtime.sendCalls, err)
+	}
+	if outcomes[1].Reply.Message.ReplyToMessageID != secondQuestion.ID {
+		t.Fatalf("second question reply correlation = %q, want %q", outcomes[1].Reply.Message.ReplyToMessageID, secondQuestion.ID)
+	}
+	job, err := fixture.database.GetJob(context.Background(), fixture.jobID)
+	if err != nil {
+		t.Fatalf("GetJob after inbox processing: %v", err)
+	}
+	if len(job.JobQuestionTurnIntents) != 2 || len(job.JobQuestionTurnObservations) != 2 || len(job.JobMessages) != 3 {
+		t.Fatalf("independent inbox processing persisted unexpected state: intents=%d observations=%d messages=%d",
+			len(job.JobQuestionTurnIntents), len(job.JobQuestionTurnObservations), len(job.JobMessages))
+	}
+	for _, message := range job.JobMessages {
+		if message.ReplyToMessageID == fixture.questionID {
+			t.Fatalf("FAILED question unexpectedly received a reply: %#v", message)
+		}
+	}
+	// Replay must retain the completed turn and its correlated reply without another Provider Send.
+	replayed, replayErr := orchestrator.ProcessPlannerInbox(context.Background(), fixture.jobID, fixture.plannerID)
+	if replayErr == nil || len(replayed) != 2 || fixture.runtime.sendCalls != 2 {
+		t.Fatalf("inbox replay changed terminal outcomes or resent Provider Turns: outcomes=%#v sends=%d err=%v",
+			replayed, fixture.runtime.sendCalls, replayErr)
+	}
+	job, err = fixture.database.GetJob(context.Background(), fixture.jobID)
+	if err != nil {
+		t.Fatalf("GetJob after replay: %v", err)
+	}
+	if len(job.JobMessages) != 3 {
+		t.Fatalf("completed question reply was duplicated during replay: messages=%d", len(job.JobMessages))
+	}
+}
+
+type failOnceQuestionReplyStore struct {
+	*store.Store
+	failed bool
+}
+
+func (s *failOnceQuestionReplyStore) AddJobMessage(ctx context.Context, jobID string, message domain.JobMessage) error {
+	if message.ReplyToMessageID != "" && !s.failed {
+		s.failed = true
+		return errors.New("injected reply persistence failure")
+	}
+	return s.Store.AddJobMessage(ctx, jobID, message)
+}
+
+func TestOrchestratorReplaysCompletedTurnAfterReplyPersistenceFailure(t *testing.T) {
+	fixture := newJobQuestionTurnFixture(t)
+	communication, err := NewCommunicationController(fixture.database)
+	if err != nil {
+		t.Fatalf("NewCommunicationController: %v", err)
+	}
+	authorization, err := NewJobQuestionAuthorizationController(
+		fixture.database, fixedQuestionTurnContextResolver{
+			context: QuestionReadOnlyContext{
+				RepositoryID: "https://github.com/example/project",
+				Boundary: domain.PlanningReadOnlyBoundary{
+					Mode: domain.PlanningReadOnlyBoundarySnapshot, Reference: "question_snapshot_1",
+					SHA256: sha256String("immutable question snapshot"),
+				},
+			},
+		},
+	)
+	if err != nil {
+		t.Fatalf("NewJobQuestionAuthorizationController: %v", err)
+	}
+	replyStore := &failOnceQuestionReplyStore{Store: fixture.database}
+	turnController, err := NewJobQuestionTurnController(replyStore, fixture.runtime)
+	if err != nil {
+		t.Fatalf("NewJobQuestionTurnController: %v", err)
+	}
+	orchestrator, err := NewOrchestratorController(
+		fixture.database, communication, authorization, turnController,
+		domain.PlanningBudget{MaxTurns: 1, MaxTokens: 100},
+	)
+	if err != nil {
+		t.Fatalf("NewOrchestratorController: %v", err)
+	}
+	first, err := orchestrator.ProcessPlannerInbox(context.Background(), fixture.jobID, fixture.plannerID)
+	if err == nil || len(first) != 1 || first[0].Observation.Status != domain.JobQuestionTurnCompleted ||
+		fixture.runtime.sendCalls != 1 {
+		t.Fatalf("reply persistence failure did not retain completed turn: outcomes=%#v sends=%d err=%v",
+			first, fixture.runtime.sendCalls, err)
+	}
+	job, err := fixture.database.GetJob(context.Background(), fixture.jobID)
+	if err != nil {
+		t.Fatalf("GetJob after reply persistence failure: %v", err)
+	}
+	if len(job.JobQuestionTurnObservations) != 1 || len(job.JobMessages) != 1 {
+		t.Fatalf("failed reply persistence changed terminal turn or stored a partial reply: observations=%d messages=%d",
+			len(job.JobQuestionTurnObservations), len(job.JobMessages))
+	}
+	second, err := orchestrator.ProcessPlannerInbox(context.Background(), fixture.jobID, fixture.plannerID)
+	if err != nil || len(second) != 1 || second[0].Observation.Status != domain.JobQuestionTurnCompleted ||
+		second[0].Reply.Message.ReplyToMessageID != fixture.questionID || fixture.runtime.sendCalls != 1 {
+		t.Fatalf("completed-turn replay did not persist the missing reply: outcomes=%#v sends=%d err=%v",
+			second, fixture.runtime.sendCalls, err)
+	}
+}
+
