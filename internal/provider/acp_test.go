@@ -418,21 +418,21 @@ func TestACPProcessRejectsMalformedJSONRPCAndTreatsEOFAsTerminal(t *testing.T) {
 	})
 }
 
-func TestACPProcessFailsWhenIdleNotificationQueueOverflows(t *testing.T) {
+func TestACPProcessRetiresOnAgentOutputWithoutActiveTurnConsumer(t *testing.T) {
 	process := newACPProcess(nil, &acpTestWriter{})
 	process.closing.Store(true)
-	notification := `{"jsonrpc":"2.0","method":"session/update"}` + "\n"
+	notification := `{"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"agent_message_chunk"}}}` + "\n"
 	go process.read(strings.NewReader(strings.Repeat(notification, 300)))
 	select {
 	case <-process.readerDone:
 	case <-time.After(time.Second):
-		t.Fatal("ACP reader did not terminate after idle notification overflow")
+		t.Fatal("ACP reader did not retire after idle agent output")
 	}
 	if process.failure() == nil {
-		t.Fatal("idle notification overflow did not fail the transport")
+		t.Fatal("idle agent output did not fail the transport")
 	}
-	if len(process.updates) != cap(process.updates) {
-		t.Fatalf("queued notifications = %d, want bounded capacity %d", len(process.updates), cap(process.updates))
+	if len(process.updates) != 0 {
+		t.Fatalf("idle agent output was queued without a consumer: %d", len(process.updates))
 	}
 }
 
@@ -856,4 +856,28 @@ func TestACPAdapterAllowsOnlyAuthorizedTaskPermissionOnce(t *testing.T) {
 		t.Fatalf("Start with authorized Task tool request: %v", err)
 	}
 	if authorizer.calls != 1 { t.Fatalf("permission authorizer calls = %d, want 1", authorizer.calls) }
+}
+
+func TestACPProcessWakesReaderWhenTurnConsumerExitsWithFullQueue(t *testing.T) {
+	process := newACPProcess(nil, &acpTestWriter{})
+	process.closing.Store(true)
+	process.beginUpdateConsumer()
+	notification := `{"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"agent_message_chunk"}}}` + "
+"
+	go process.read(strings.NewReader(strings.Repeat(notification, cap(process.updates)+1)))
+	deadline := time.Now().Add(time.Second)
+	for len(process.updates) < cap(process.updates) && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if len(process.updates) != cap(process.updates) {
+		t.Fatalf("reader queued %d updates, want %d", len(process.updates), cap(process.updates))
+	}
+	if err := process.endUpdateConsumer(); err == nil {
+		t.Fatal("consumer exit with unprocessed agent output was not rejected")
+	}
+	select {
+	case <-process.readerDone:
+	case <-time.After(time.Second):
+		t.Fatal("reader remained blocked after its active consumer exited")
+	}
 }

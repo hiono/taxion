@@ -78,7 +78,9 @@ type acpProcess struct {
 	failOnce          sync.Once
 	stopOnce          sync.Once
 	closing           atomic.Bool
-	updateConsumers   atomic.Int32
+	updateMu          sync.Mutex
+	updateConsumers   int
+	updateWake        chan struct{}
 	permissionMu      sync.RWMutex
 	permissionHandler func(context.Context, json.RawMessage) bool
 	writeGate         chan struct{}
@@ -673,7 +675,8 @@ func newACPProcess(command *exec.Cmd, stdin io.WriteCloser) *acpProcess {
 	return &acpProcess{
 		cmd: command, stdin: stdin, updates: make(chan json.RawMessage, 256),
 		done: make(chan struct{}), readerDone: make(chan struct{}),
-		stop: make(chan struct{}), failed: make(chan struct{}), writeGate: writeGate,
+		stop: make(chan struct{}), failed: make(chan struct{}),
+		updateWake: make(chan struct{}, 1), writeGate: writeGate,
 	}
 }
 
@@ -712,7 +715,7 @@ func (p *acpProcess) read(stdout io.Reader) {
 					var permissionParams struct {
 						Options []struct {
 							OptionID string `json:"optionId"`
-							Kind string `json:"kind"`
+							Kind     string `json:"kind"`
 						} `json:"options"`
 					}
 					allowed := false
@@ -744,21 +747,45 @@ func (p *acpProcess) read(stdout io.Reader) {
 				}
 				continue
 			}
-			if p.updateConsumers.Load() > 0 {
-				select {
-				case p.updates <- line:
-				case <-p.stop:
-					return
-				case <-p.failed:
+			if message.Method == "session/update" {
+				var notification struct {
+					Params struct {
+						Update struct {
+							SessionUpdate string `json:"sessionUpdate"`
+						} `json:"update"`
+					} `json:"params"`
+				}
+				if json.Unmarshal(message.Params, &notification) != nil || notification.Params.Update.SessionUpdate == "" {
+					p.fail(errors.New("invalid ACP session update"))
 					return
 				}
-			} else {
-				select {
-				case p.updates <- line:
-				default:
-					p.fail(errors.New("ACP notification queue overflow without an active consumer"))
-					return
+				if notification.Params.Update.SessionUpdate != "agent_message_chunk" {
+					continue
 				}
+				for {
+					p.updateMu.Lock()
+					if p.updateConsumers == 0 {
+						p.updateMu.Unlock()
+						p.fail(errors.New("ACP agent output arrived without an active Turn consumer"))
+						return
+					}
+					select {
+					case p.updates <- line:
+						p.updateMu.Unlock()
+						goto updateQueued
+					default:
+						p.updateMu.Unlock()
+					}
+					select {
+					case <-p.updateWake:
+						continue
+					case <-p.stop:
+						return
+					case <-p.failed:
+						return
+					}
+				}
+			updateQueued:
 			}
 			continue
 		}
@@ -780,46 +807,6 @@ func (p *acpProcess) read(stdout io.Reader) {
 	}
 }
 
-func validateACPMessage(message acpMessage) error {
-	if message.JSONRPC != "2.0" {
-		return errors.New("ACP JSON-RPC version is invalid")
-	}
-	hasID := len(bytes.TrimSpace(message.ID)) > 0
-	hasMethod := message.Method != ""
-	hasResult := len(bytes.TrimSpace(message.Result)) > 0
-	errorValue := bytes.TrimSpace(message.Error)
-	hasError := len(errorValue) > 0 && !bytes.Equal(errorValue, []byte("null"))
-	if hasMethod {
-		if hasResult || hasError {
-			return errors.New("ACP JSON-RPC request contains response fields")
-		}
-		if hasID && !validACPJSONRPCID(message.ID) {
-			return errors.New("ACP JSON-RPC request ID is invalid")
-		}
-		return nil
-	}
-	if !hasID || !validACPJSONRPCID(message.ID) || hasResult == hasError {
-		return errors.New("ACP JSON-RPC response envelope is invalid")
-	}
-	return nil
-}
-
-func validACPJSONRPCID(raw json.RawMessage) bool {
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.UseNumber()
-	var value any
-	if decoder.Decode(&value) != nil {
-		return false
-	}
-	switch typed := value.(type) {
-	case string:
-		return typed != ""
-	case json.Number:
-		return typed != ""
-	default:
-		return false
-	}
-}
 
 func (p *acpProcess) closePending() {
 	p.pending.Range(func(key, value any) bool {
@@ -864,10 +851,41 @@ func (p *acpProcess) terminate() {
 	})
 }
 
+func (p *acpProcess) signalUpdateWake() {
+	select {
+	case p.updateWake <- struct{}{}:
+	default:
+	}
+}
+
+func (p *acpProcess) beginUpdateConsumer() {
+	p.updateMu.Lock()
+	p.updateConsumers++
+	p.updateMu.Unlock()
+}
+
+func (p *acpProcess) endUpdateConsumer() error {
+	p.updateMu.Lock()
+	if p.updateConsumers > 0 {
+		p.updateConsumers--
+	}
+	idle := p.updateConsumers == 0
+	pending := len(p.updates)
+	p.updateMu.Unlock()
+	p.signalUpdateWake()
+	if idle && pending > 0 {
+		err := errors.New("ACP agent output remained after the Turn completed")
+		p.fail(err)
+		return err
+	}
+	return nil
+}
+
 func (p *acpProcess) drainUpdates(onUpdate func(json.RawMessage) error) error {
 	for {
 		select {
 		case update := <-p.updates:
+			p.signalUpdateWake()
 			if onUpdate != nil {
 				if err := onUpdate(update); err != nil {
 					p.fail(errors.New("ACP update processing failed"))
@@ -879,6 +897,7 @@ func (p *acpProcess) drainUpdates(onUpdate func(json.RawMessage) error) error {
 		}
 	}
 }
+
 
 func (p *acpProcess) handleResponse(response acpMessage, ok bool, ctx context.Context, onUpdate func(json.RawMessage) error) (json.RawMessage, error) {
 	if err := p.drainUpdates(onUpdate); err != nil {
@@ -913,7 +932,7 @@ func (p *acpProcess) call(ctx context.Context, method string, params any, onUpda
 	return p.callForSession(ctx, nil, method, params, onUpdate)
 }
 
-func (p *acpProcess) callForSession(ctx context.Context, session *acpSession, method string, params any, onUpdate func(json.RawMessage) error) (json.RawMessage, error) {
+func (p *acpProcess) callForSession(ctx context.Context, session *acpSession, method string, params any, onUpdate func(json.RawMessage) error) (result json.RawMessage, callErr error) {
 	if ctx == nil {
 		return nil, ErrProviderInvalidRequest
 	}
@@ -921,8 +940,13 @@ func (p *acpProcess) callForSession(ctx context.Context, session *acpSession, me
 		return nil, errors.New("ACP transport failed")
 	}
 	if onUpdate != nil {
-		p.updateConsumers.Add(1)
-		defer p.updateConsumers.Add(-1)
+		p.beginUpdateConsumer()
+		defer func() {
+			if err := p.endUpdateConsumer(); err != nil && callErr == nil {
+				result = nil
+				callErr = err
+			}
+		}()
 	}
 	id := strconv.FormatUint(p.nextID.Add(1), 10)
 	waiter := make(chan acpMessage, 1)
@@ -941,6 +965,7 @@ func (p *acpProcess) callForSession(ctx context.Context, session *acpSession, me
 		case response, ok := <-waiter:
 			return p.handleResponse(response, ok, ctx, onUpdate)
 		case update := <-p.updates:
+			p.signalUpdateWake()
 			if onUpdate != nil {
 				if err := onUpdate(update); err != nil {
 					p.pending.Delete(id)
