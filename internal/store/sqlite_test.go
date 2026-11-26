@@ -3,11 +3,11 @@ package store
 import (
 	"bytes"
 	"context"
-	"database/sql"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/tls"
 	"crypto/x509"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -149,8 +149,8 @@ func TestPreUpgradeProcessCannotOverwriteV2AggregateFacts(t *testing.T) {
 		t.Fatalf("decode v1 aggregate payload: %v", err)
 	}
 	for field, fact := range map[string]string{
-		"job_messages":               `{"id":"message_1"}`,
-		"delivery_observations":      `{"id":"delivery_1"}`,
+		"job_messages":                `{"id":"message_1"}`,
+		"delivery_observations":       `{"id":"delivery_1"}`,
 		"job_question_authorizations": `{"id":"authorization_1"}`,
 	} {
 		aggregate[field] = json.RawMessage("[" + fact + "]")
@@ -194,8 +194,8 @@ func TestPreUpgradeProcessCannotOverwriteV2AggregateFacts(t *testing.T) {
 	}
 
 	for field, fact := range map[string]string{
-		"job_messages":               `{"id":"message_2"}`,
-		"delivery_observations":      `{"id":"delivery_2"}`,
+		"job_messages":                `{"id":"message_2"}`,
+		"delivery_observations":       `{"id":"delivery_2"}`,
 		"job_question_authorizations": `{"id":"authorization_2"}`,
 	} {
 		var existing []json.RawMessage
