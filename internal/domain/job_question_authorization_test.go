@@ -77,7 +77,7 @@ func TestJobQuestionAuthorizationBindsOneApprovedQuestionAndPlannerSession(t *te
 	message, err := NewJobMessage(job, "cmd_72727272727272727272727272727272", JobMessageRequest{
 		Sender:    ActorRef{Kind: ActorCoder, ID: start.RoleExecution.ID},
 		Recipient: ActorRef{Kind: ActorPlanner, ID: planner.ID},
-		Kind:      MessageKindQuestion, Body: "Please clarify the approved implementation constraint.",
+Body: "Please clarify the approved implementation constraint.",
 	}, now.Add(2*time.Minute))
 	if err != nil {
 		t.Fatalf("NewJobMessage: %v", err)
@@ -192,7 +192,7 @@ func TestJobQuestionAuthorizationRejectsScopeAndBudgetExpansion(t *testing.T) {
 	message, err := NewJobMessage(job, "cmd_75757575757575757575757575757575", JobMessageRequest{
 		Sender:    ActorRef{Kind: ActorCoder, ID: start.RoleExecution.ID},
 		Recipient: ActorRef{Kind: ActorPlanner, ID: planner.ID},
-		Kind:      MessageKindQuestion, Body: "Please clarify the approved implementation constraint.",
+Body: "Please clarify the approved implementation constraint.",
 	}, now.Add(2*time.Minute))
 	if err != nil {
 		t.Fatalf("NewJobMessage: %v", err)

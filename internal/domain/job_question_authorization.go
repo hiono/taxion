@@ -97,7 +97,7 @@ func NewJobQuestionAuthorization(job Job, request JobQuestionAuthorizationReques
 	}
 
 	question, found := jobMessageByID(job, request.QuestionMessageID)
-	if !found || question.Kind != MessageKindQuestion ||
+	if !found || question.ReplyToMessageID != "" ||
 		question.Recipient != (ActorRef{Kind: ActorPlanner, ID: request.PlannerRoleExecutionID}) ||
 		(question.Sender.Kind != ActorCoder && question.Sender.Kind != ActorReviewer) {
 		return JobQuestionAuthorization{}, errors.New("JobQuestionAuthorization must bind a persisted Role QUESTION addressed to the specified Planner")
@@ -193,7 +193,7 @@ func (a JobQuestionAuthorization) Validate(job Job) error {
 		return errors.New("JobQuestionAuthorization does not bind its exact JobApproval")
 	}
 	question, found := jobMessageByID(job, a.QuestionMessageID)
-	if !found || question.Kind != MessageKindQuestion ||
+	if !found || question.ReplyToMessageID != "" ||
 		question.Recipient != (ActorRef{Kind: ActorPlanner, ID: a.PlannerRoleExecutionID}) ||
 		(question.Sender.Kind != ActorCoder && question.Sender.Kind != ActorReviewer) ||
 		question.CreatedRevision >= a.CreatedRevision || question.CreatedAt.After(a.IssuedAt) {

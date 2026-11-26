@@ -88,7 +88,7 @@ func (c *JobQuestionAuthorizationController) Authorize(
 			break
 		}
 	}
-	if !questionFound || question.Kind != domain.MessageKindQuestion ||
+	if !questionFound || question.ReplyToMessageID != "" ||
 		question.Recipient.Kind != domain.ActorPlanner {
 		return store.CommandReceipt{}, domain.JobQuestionAuthorization{}, errors.New("JobQuestionAuthorization requires a persisted QUESTION addressed to a PLANNER")
 	}

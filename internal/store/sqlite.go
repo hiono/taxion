@@ -29,7 +29,7 @@ var (
 
 // schemaVersion covers both SQLite tables and the serialized JobAggregate contract.
 // Increment it when older binaries could discard newly added aggregate fields.
-const schemaVersion = 4
+const schemaVersion = 5
 
 const preserveJobAggregateFactsTrigger = `CREATE TRIGGER IF NOT EXISTS job_aggregates_preserve_v2_facts
 BEFORE UPDATE OF payload_json ON job_aggregates
@@ -41,14 +41,6 @@ WHEN
 	), '[]') != COALESCE((
 		SELECT json_group_array(json(value) ORDER BY CAST(key AS INTEGER))
 		FROM json_each(OLD.payload_json, '$.job_messages')
-	), '[]')
-	OR COALESCE((
-		SELECT json_group_array(json(value) ORDER BY CAST(key AS INTEGER))
-		FROM json_each(NEW.payload_json, '$.delivery_observations')
-		WHERE CAST(key AS INTEGER) < json_array_length(OLD.payload_json, '$.delivery_observations')
-	), '[]') != COALESCE((
-		SELECT json_group_array(json(value) ORDER BY CAST(key AS INTEGER))
-		FROM json_each(OLD.payload_json, '$.delivery_observations')
 	), '[]')
 	OR COALESCE((
 		SELECT json_group_array(json(value) ORDER BY CAST(key AS INTEGER))
@@ -193,6 +185,9 @@ func (s *Store) initialize(ctx context.Context) error {
 		if _, err := conn.ExecContext(ctx, preserveJobAggregateFactsTrigger); err != nil {
 			return fmt.Errorf("install JobAggregate fact-preservation trigger: %w", err)
 		}
+		if err := removeDeliveryObservationsFromAggregates(ctx, conn); err != nil {
+			return fmt.Errorf("remove obsolete message delivery facts: %w", err)
+		}
 		if _, err := conn.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d", schemaVersion)); err != nil {
 			return fmt.Errorf("upgrade schema version: %w", err)
 		}
@@ -201,6 +196,54 @@ func (s *Store) initialize(ctx context.Context) error {
 		return fmt.Errorf("commit schema transaction: %w", err)
 	}
 	committed = true
+	return nil
+}
+
+func removeDeliveryObservationsFromAggregates(ctx context.Context, conn *sql.Conn) error {
+	rows, err := conn.QueryContext(ctx, "SELECT job_id, payload_json FROM job_aggregates")
+	if err != nil {
+		return fmt.Errorf("read Job aggregates for schema migration: %w", err)
+	}
+	type aggregateRow struct {
+		jobID   string
+		payload string
+	}
+	var aggregates []aggregateRow
+	for rows.Next() {
+		var row aggregateRow
+		if err := rows.Scan(&row.jobID, &row.payload); err != nil {
+			_ = rows.Close()
+			return fmt.Errorf("scan Job aggregate for schema migration: %w", err)
+		}
+		aggregates = append(aggregates, row)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return fmt.Errorf("iterate Job aggregates for schema migration: %w", err)
+	}
+	if err := rows.Close(); err != nil {
+		return fmt.Errorf("close Job aggregate migration rows: %w", err)
+	}
+	for _, row := range aggregates {
+		var payload map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(row.payload), &payload); err != nil {
+			return fmt.Errorf("decode Job aggregate %s during schema migration: %w", row.jobID, err)
+		}
+		if _, exists := payload["delivery_observations"]; !exists {
+			continue
+		}
+		delete(payload, "delivery_observations")
+		encoded, err := json.Marshal(payload)
+		if err != nil {
+			return fmt.Errorf("encode Job aggregate %s during schema migration: %w", row.jobID, err)
+		}
+		if _, err := conn.ExecContext(ctx,
+			"UPDATE job_aggregates SET payload_json = ?, integrity_sha256 = ? WHERE job_id = ?",
+			string(encoded), digest(encoded), row.jobID,
+		); err != nil {
+			return fmt.Errorf("update Job aggregate %s during schema migration: %w", row.jobID, err)
+		}
+	}
 	return nil
 }
 

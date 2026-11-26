@@ -57,7 +57,26 @@ func TestOpenUpgradesOlderSchemaVersionAndPreservesJob(t *testing.T) {
 	if _, err := database.createJob(ctx, job, "cmd_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", createLocalDraftJobCommandType); err != nil {
 		t.Fatalf("create Job before schema upgrade: %v", err)
 	}
-	if _, err := database.db.ExecContext(ctx, "PRAGMA user_version = 3"); err != nil {
+	var payload map[string]json.RawMessage
+	var original string
+	if err := database.db.QueryRowContext(ctx, "SELECT payload_json FROM job_aggregates WHERE job_id = ?", job.ID).Scan(&original); err != nil {
+		t.Fatalf("read aggregate payload: %v", err)
+	}
+	if err := json.Unmarshal([]byte(original), &payload); err != nil {
+		t.Fatalf("decode aggregate payload: %v", err)
+	}
+	payload["delivery_observations"] = json.RawMessage(`[{"id":"obsolete_delivery"}]`)
+	obsoletePayload, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("encode aggregate with obsolete delivery state: %v", err)
+	}
+	if _, err := database.db.ExecContext(ctx,
+		"UPDATE job_aggregates SET payload_json = ?, integrity_sha256 = ? WHERE job_id = ?",
+		string(obsoletePayload), digest(obsoletePayload), job.ID,
+	); err != nil {
+		t.Fatalf("seed obsolete delivery state: %v", err)
+	}
+	if _, err := database.db.ExecContext(ctx, "PRAGMA user_version = 4"); err != nil {
 		t.Fatalf("set prior schema version: %v", err)
 	}
 	if err := database.Close(); err != nil {
@@ -79,6 +98,19 @@ func TestOpenUpgradesOlderSchemaVersionAndPreservesJob(t *testing.T) {
 	got, err := reopened.GetJob(ctx, job.ID)
 	if err != nil || !reflect.DeepEqual(got, job) {
 		t.Fatalf("GetJob after schema upgrade = %#v, %v; want %#v", got, err, job)
+	}
+	var migratedPayload, migratedHash string
+	if err := reopened.db.QueryRowContext(ctx,
+		"SELECT payload_json, integrity_sha256 FROM job_aggregates WHERE job_id = ?", job.ID,
+	).Scan(&migratedPayload, &migratedHash); err != nil {
+		t.Fatalf("read migrated aggregate: %v", err)
+	}
+	var migratedFields map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(migratedPayload), &migratedFields); err != nil {
+		t.Fatalf("decode migrated aggregate: %v", err)
+	}
+	if _, exists := migratedFields["delivery_observations"]; exists || migratedHash != digest([]byte(migratedPayload)) {
+		t.Fatalf("obsolete delivery data or stale integrity hash remains after migration: %s", migratedPayload)
 	}
 }
 
@@ -195,7 +227,6 @@ func TestPreUpgradeProcessCannotOverwriteV2AggregateFacts(t *testing.T) {
 	}
 	for field, fact := range map[string]string{
 		"job_messages":                `{"id":"message_1"}`,
-		"delivery_observations":       `{"id":"delivery_1"}`,
 		"job_question_authorizations": `{"id":"authorization_1"}`,
 	} {
 		aggregate[field] = json.RawMessage("[" + fact + "]")
@@ -268,7 +299,6 @@ func TestPreUpgradeProcessCannotOverwriteV2AggregateFacts(t *testing.T) {
 
 	for field, fact := range map[string]string{
 		"job_messages":                `{"id":"message_2"}`,
-		"delivery_observations":       `{"id":"delivery_2"}`,
 		"job_question_authorizations": `{"id":"authorization_2"}`,
 	} {
 		var existing []json.RawMessage
@@ -327,7 +357,6 @@ func TestAggregateUpdateCannotRemoveAppendOnlyFacts(t *testing.T) {
 		SET payload_json = json_remove(
 			payload_json,
 			'$.job_messages',
-			'$.delivery_observations',
 			'$.job_question_authorizations'
 		)
 		WHERE job_id = ?`)
@@ -345,7 +374,6 @@ func TestAggregateUpdateCannotRemoveAppendOnlyFacts(t *testing.T) {
 		SET payload_json = json_set(
 			payload_json,
 			'$.job_messages', json('[{"id":"message-1"}]'),
-			'$.delivery_observations', json('[{"id":"delivery-1"}]'),
 			'$.job_question_authorizations', json('[{"id":"grant-1"}]')
 		)
 		WHERE job_id = ?`, job.ID); err != nil {
@@ -355,7 +383,6 @@ func TestAggregateUpdateCannotRemoveAppendOnlyFacts(t *testing.T) {
 		SET payload_json = json_set(
 			payload_json,
 			'$.job_messages', json('[{"id":"message-1"},{"id":"message-2"}]'),
-			'$.delivery_observations', json('[{"id":"delivery-1"},{"id":"delivery-2"}]'),
 			'$.job_question_authorizations', json('[{"id":"grant-1"},{"id":"grant-2"}]')
 		)
 		WHERE job_id = ?`, job.ID); err != nil {
@@ -369,7 +396,6 @@ func TestAggregateUpdateCannotRemoveAppendOnlyFacts(t *testing.T) {
 		SET payload_json = json_remove(
 			payload_json,
 			'$.job_messages',
-			'$.delivery_observations',
 			'$.job_question_authorizations'
 		)
 		WHERE job_id = ?`, job.ID); err == nil ||
@@ -380,7 +406,7 @@ func TestAggregateUpdateCannotRemoveAppendOnlyFacts(t *testing.T) {
 	if err := upgraded.db.QueryRowContext(ctx, "SELECT payload_json FROM job_aggregates WHERE job_id = ?", job.ID).Scan(&payload); err != nil {
 		t.Fatalf("read aggregate payload after rejected downgrade: %v", err)
 	}
-	for _, factID := range []string{"message-1", "message-2", "delivery-1", "delivery-2", "grant-1", "grant-2"} {
+	for _, factID := range []string{"message-1", "message-2", "grant-1", "grant-2"} {
 		if !strings.Contains(payload, factID) {
 			t.Fatalf("aggregate payload lost append-only fact %q: %s", factID, payload)
 		}

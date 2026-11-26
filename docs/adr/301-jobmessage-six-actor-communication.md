@@ -17,9 +17,9 @@ Taxion内部の協調は同じJobの文脈で追跡する必要があります�
 ### Message content and identity
 
 - Bodyは自然言語のまま保存・受け渡し、固定JSONやWorkflow DSLへ変換しません。
-- 永続化に必要な最小情報はMessageID、JobID、認証済みSender、Recipient、作成時刻、provenanceとします。
+- 永続化に必要な情報はMessageID、JobID、認証済みSender、Recipient、本文、作成時刻、Command provenanceに限定します。
 - SenderはHUMANの認証済みPrincipal、CONTROLLER / ORCHESTRATORの管理identity、またはPLANNER / CODER / REVIEWERのRoleExecution identityに結び付けます。本文の自己申告でSenderやRecipientを確定しません。
-- Thread、Reply、Task、RoleExecution等の参照は、元Contextへの復帰や対象特定に実際に必要な場合だけ保持します。任意metadataやMessageKind分類を通信の必須条件にしません。
+- ReplyToMessageIDは元の会話へ戻る必要がある場合だけ保持します。ThreadID、BatchID、MessageKind等の重複・分類metadataを必須化しません。
 - Jobや宛先を信頼できるContextから一意に特定できない場合だけ確認します。
 
 ### Information exchange and execution
@@ -29,10 +29,10 @@ Taxion内部の協調は同じJobの文脈で追跡する必要があります�
 - 回答のために新たなProvider実行やbounded read-only context acquisitionが必要な場合だけ、ADR-506等の該当する認可を別途検証します。
 - 実行責任やWorktree所有権の移転は通常メッセージに含めず、停止・結果・成果・所有権の条件を検証する独立したHandoff操作とします。
 
-### Persistence and delivery
+### Persistence and provider operations
 
 - JobAggregateをJobMessageの永続化境界とし、メッセージ本文と送受信Actorの関係を保持します。
-- 通常の情報交換にRecipient別状態機械、BatchID、MessageKind別終端状態を必須化しません。
+- メッセージの保存は送信先Providerへの実配信を意味しません。実配信は既存のOrchestrator / Provider operation経路で行います。
 - ProviderへのSend / Turnやその結果照合が必要な場合は、JobMessageとは別のProvider operationとして扱い、ADR-409および該当する認可判断に従います。Provider operationのUNKNOWNや再試行をメッセージ配送状態へ重複実装しません。
 
 ## Consequences
