@@ -34,33 +34,30 @@ const schemaVersion = 4
 const preserveJobAggregateFactsTrigger = `CREATE TRIGGER IF NOT EXISTS job_aggregates_preserve_v2_facts
 BEFORE UPDATE OF payload_json ON job_aggregates
 WHEN
-	EXISTS (
-		SELECT 1
-		FROM json_each(OLD.payload_json, '$.job_messages') AS old_fact
-		WHERE NOT EXISTS (
-			SELECT 1
-			FROM json_each(NEW.payload_json, '$.job_messages') AS new_fact
-			WHERE new_fact.key = old_fact.key AND json(new_fact.value) = json(old_fact.value)
-		)
-	)
-	OR EXISTS (
-		SELECT 1
-		FROM json_each(OLD.payload_json, '$.delivery_observations') AS old_fact
-		WHERE NOT EXISTS (
-			SELECT 1
-			FROM json_each(NEW.payload_json, '$.delivery_observations') AS new_fact
-			WHERE new_fact.key = old_fact.key AND json(new_fact.value) = json(old_fact.value)
-		)
-	)
-	OR EXISTS (
-		SELECT 1
-		FROM json_each(OLD.payload_json, '$.job_question_authorizations') AS old_fact
-		WHERE NOT EXISTS (
-			SELECT 1
-			FROM json_each(NEW.payload_json, '$.job_question_authorizations') AS new_fact
-			WHERE new_fact.key = old_fact.key AND json(new_fact.value) = json(old_fact.value)
-		)
-	)
+	COALESCE((
+		SELECT json_group_array(json(value) ORDER BY CAST(key AS INTEGER))
+		FROM json_each(NEW.payload_json, '$.job_messages')
+		WHERE CAST(key AS INTEGER) < json_array_length(OLD.payload_json, '$.job_messages')
+	), '[]') != COALESCE((
+		SELECT json_group_array(json(value) ORDER BY CAST(key AS INTEGER))
+		FROM json_each(OLD.payload_json, '$.job_messages')
+	), '[]')
+	OR COALESCE((
+		SELECT json_group_array(json(value) ORDER BY CAST(key AS INTEGER))
+		FROM json_each(NEW.payload_json, '$.delivery_observations')
+		WHERE CAST(key AS INTEGER) < json_array_length(OLD.payload_json, '$.delivery_observations')
+	), '[]') != COALESCE((
+		SELECT json_group_array(json(value) ORDER BY CAST(key AS INTEGER))
+		FROM json_each(OLD.payload_json, '$.delivery_observations')
+	), '[]')
+	OR COALESCE((
+		SELECT json_group_array(json(value) ORDER BY CAST(key AS INTEGER))
+		FROM json_each(NEW.payload_json, '$.job_question_authorizations')
+		WHERE CAST(key AS INTEGER) < json_array_length(OLD.payload_json, '$.job_question_authorizations')
+	), '[]') != COALESCE((
+		SELECT json_group_array(json(value) ORDER BY CAST(key AS INTEGER))
+		FROM json_each(OLD.payload_json, '$.job_question_authorizations')
+	), '[]')
 BEGIN
 	SELECT RAISE(ABORT, 'append-only v2 facts');
 END`
