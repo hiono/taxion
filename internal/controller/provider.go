@@ -69,8 +69,8 @@ func (a *ACPExecutionPermissionAuthorizer) Authorize(ctx context.Context, reques
 	if a == nil || a.store == nil || a.evaluator == nil || ctx == nil ||
 		request.OperationID == "" || request.JobID == "" || request.RoleExecutionID == "" ||
 		request.TaskID == "" || request.ExecutionPermissionID == "" ||
-			request.WorktreeAssignmentID == "" || !filepath.IsAbs(request.WorktreePath) ||
-			filepath.Clean(request.WorktreePath) != request.WorktreePath || request.SessionID == "" ||
+		request.WorktreeAssignmentID == "" || !filepath.IsAbs(request.WorktreePath) ||
+		filepath.Clean(request.WorktreePath) != request.WorktreePath || request.SessionID == "" ||
 		request.RequestSHA256 == "" || len(request.ToolCall) == 0 || request.ProviderIdentity.Validate() != nil {
 		return errors.New("ACP tool permission request is incomplete")
 	}
