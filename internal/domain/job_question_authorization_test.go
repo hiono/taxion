@@ -141,6 +141,69 @@ func TestJobQuestionAuthorizationBindsOneApprovedQuestionAndPlannerSession(t *te
 	if err := job.Validate(); err != nil {
 		t.Fatalf("Job.Validate with JobQuestionAuthorization: %v", err)
 	}
+
+	turnCreatedAt := authorization.CreatedAt.Add(time.Second)
+	turn, err := NewJobQuestionTurnIntent(job, JobQuestionTurnIntentRequest{
+		JobQuestionAuthorizationID: authorization.ID,
+		CommandID: "cmd_74747474747474747474747474747474",
+		PromptSHA256: sha256HexDomain("Please provide the approved clarification."),
+		ReservedTokens: 50,
+	}, turnCreatedAt)
+	if err != nil {
+		t.Fatalf("NewJobQuestionTurnIntent: %v", err)
+	}
+	job.JobQuestionTurnIntents = append(job.JobQuestionTurnIntents, turn)
+	job.Revision++
+	job.UpdatedAt = turn.CreatedAt
+	if err := job.Validate(); err != nil {
+		t.Fatalf("Job.Validate with pending JobQuestionTurnIntent: %v", err)
+	}
+	if _, err := NewJobQuestionTurnIntent(job, JobQuestionTurnIntentRequest{
+		JobQuestionAuthorizationID: authorization.ID,
+		CommandID: "cmd_75757575757575757575757575757575",
+		PromptSHA256: sha256HexDomain("Duplicate turn"),
+		ReservedTokens: 10,
+	}, turnCreatedAt.Add(time.Second)); err == nil {
+		t.Fatal("JobQuestionAuthorization allowed another turn while the first turn was unresolved")
+	}
+
+	unknown, err := NewJobQuestionTurnObservation(job, JobQuestionTurnObservationRequest{
+		IntentID: turn.ID, CommandID: "cmd_76767676767676767676767676767676",
+		Status: JobQuestionTurnUnknown,
+	}, turnCreatedAt.Add(2*time.Second))
+	if err != nil {
+		t.Fatalf("NewJobQuestionTurnObservation UNKNOWN: %v", err)
+	}
+	job.JobQuestionTurnObservations = append(job.JobQuestionTurnObservations, unknown)
+	job.Revision++
+	job.UpdatedAt = unknown.CreatedAt
+	if err := job.Validate(); err != nil {
+		t.Fatalf("Job.Validate with UNKNOWN JobQuestionTurnObservation: %v", err)
+	}
+	if _, err := NewJobQuestionTurnIntent(job, JobQuestionTurnIntentRequest{
+		JobQuestionAuthorizationID: authorization.ID,
+		CommandID: "cmd_77777777777777777777777777777777",
+		PromptSHA256: sha256HexDomain("Another duplicate turn"),
+		ReservedTokens: 10,
+	}, turnCreatedAt.Add(3*time.Second)); err == nil {
+		t.Fatal("JobQuestionAuthorization allowed another turn while UNKNOWN was unreconciled")
+	}
+
+	reconciled, err := NewJobQuestionTurnObservation(job, JobQuestionTurnObservationRequest{
+		IntentID: turn.ID, CommandID: "cmd_78787878787878787878787878787878",
+		Status: JobQuestionTurnCompleted, TokensUsed: 20,
+		Content: "Planner response", ReceiptID: "receipt_planner_response",
+		EvidenceSHA256: strings.Repeat("e", 64), ReconcilesUnknown: true,
+	}, turnCreatedAt.Add(4*time.Second))
+	if err != nil {
+		t.Fatalf("NewJobQuestionTurnObservation reconciliation: %v", err)
+	}
+	job.JobQuestionTurnObservations = append(job.JobQuestionTurnObservations, reconciled)
+	job.Revision++
+	job.UpdatedAt = reconciled.CreatedAt
+	if err := job.Validate(); err != nil {
+		t.Fatalf("Job.Validate after UNKNOWN reconciliation: %v", err)
+	}
 }
 
 func TestJobQuestionAuthorizationRejectsScopeAndBudgetExpansion(t *testing.T) {

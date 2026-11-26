@@ -381,9 +381,26 @@ func validateJobQuestionTurnFacts(job Job) error {
 		}
 	}
 	for _, grant := range job.JobQuestionAuthorizations {
-		turnNumber, tokensUsed, err := jobQuestionTurnBudgetUsed(job, grant.ID)
-		if err != nil {
-			return err
+		var turnNumber uint32
+		var tokensUsed uint64
+		unresolvedTurn := false
+		for _, intent := range job.JobQuestionTurnIntents {
+			if intent.JobQuestionAuthorizationID != grant.ID {
+				continue
+			}
+			if unresolvedTurn {
+				return fmt.Errorf("JobQuestionAuthorization %s has a turn after an unresolved turn", grant.ID)
+			}
+			turnNumber++
+			observation, found := latestJobQuestionTurnObservation(job, intent.ID)
+			if !found || observation.Status == JobQuestionTurnUnknown {
+				unresolvedTurn = true
+				continue
+			}
+			if ^uint64(0)-tokensUsed < observation.TokensUsed {
+				return errors.New("JobQuestionAuthorization token usage overflow")
+			}
+			tokensUsed += observation.TokensUsed
 		}
 		if turnNumber > grant.Budget.MaxTurns || tokensUsed > grant.Budget.MaxTokens {
 			return fmt.Errorf("JobQuestionAuthorization %s turn or token budget is exceeded", grant.ID)
