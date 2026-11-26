@@ -206,10 +206,10 @@ func TestJobQuestionAuthorizationRejectsScopeAndBudgetExpansion(t *testing.T) {
 	base := JobQuestionAuthorizationRequest{
 		JobID: job.ID, CommandID: "cmd_76767676767676767676767676767676",
 		QuestionMessageID: message.ID, PlannerRoleExecutionID: planner.ID,
-		ProviderSessionID:  startObservation.ProviderSessionID,
+		ProviderSessionID: startObservation.ProviderSessionID,
 		RepositoryID:      contract.TargetRepositories[0], PlanningRepositoryID: grant.RepositoryID, ProviderID: grant.ProviderID,
 		AccountID: grant.AccountID, ConfigurationSHA256: grant.ConfigurationSHA256,
-		ReadOnlyBoundary:   PlanningReadOnlyBoundary{
+		ReadOnlyBoundary: PlanningReadOnlyBoundary{
 			Mode: PlanningReadOnlyBoundarySnapshot, Reference: "question_snapshot_2", SHA256: strings.Repeat("d", 64),
 		},
 		Budget: PlanningBudget{MaxTurns: 1, MaxTokens: 100}, Deadline: contract.Deadline.Add(-time.Minute),
