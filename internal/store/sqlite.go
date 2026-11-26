@@ -240,7 +240,6 @@ func (s *Store) initialize(ctx context.Context) error {
 	return nil
 }
 
-
 func readSQLiteSchemaState(ctx context.Context, conn *sql.Conn) (int, bool, error) {
 	var objectCount int
 	if err := conn.QueryRowContext(ctx, "SELECT COUNT(*) FROM sqlite_master").Scan(&objectCount); err != nil {

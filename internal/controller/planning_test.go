@@ -66,7 +66,6 @@ func (f *fakePlanningLifecycleStore) AddPlanningBoundaryDecision(_ context.Conte
 	return store.CommandReceipt{}, decision, nil
 }
 
-
 type planningRevisionSequence struct {
 	revisions []uint64
 	reads     int

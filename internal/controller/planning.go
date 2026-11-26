@@ -104,7 +104,6 @@ func (c *PlanningController) RecordResumeObservation(ctx context.Context, jobID,
 	})
 }
 
-
 type planningJobReader interface {
 	GetJob(context.Context, string) (domain.Job, error)
 }

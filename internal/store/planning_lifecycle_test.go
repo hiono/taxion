@@ -9,7 +9,6 @@ import (
 	"github.com/hiono/taxion/internal/domain"
 )
 
-
 func TestRollbackSQLiteConnectionRestoresAutocommit(t *testing.T) {
 	database, _ := newTestStore(t)
 	ctx := context.Background()

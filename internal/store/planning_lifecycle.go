@@ -299,7 +299,6 @@ func persistPlanningFact[T any](ctx context.Context, s *Store, jobID string, exp
 	return receipt, fact, nil
 }
 
-
 func readPlanningFactReceipt[T any](
 	ctx context.Context,
 	tx planningFactTransaction,

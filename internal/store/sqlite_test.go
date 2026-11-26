@@ -118,7 +118,6 @@ func TestPlanningFactTransactionAcquiresWriterLockBeforeReading(t *testing.T) {
 	}
 }
 
-
 func TestOpenCurrentSchemaDoesNotRequireSQLiteWriterLock(t *testing.T) {
 	first, path := newTestStore(t)
 	ctx := context.Background()
