@@ -329,7 +329,7 @@ func TestJobQuestionAuthorizationReservesBudgetAcrossQuestions(t *testing.T) {
 	contract := job.JobContractRevisions[len(job.JobContractRevisions)-1].Contract
 	newQuestion := func(commandID, body string, at time.Time) JobMessage {
 		message, err := NewJobMessage(job, commandID, JobMessageRequest{
-			Sender: ActorRef{Kind: ActorCoder, ID: start.RoleExecution.ID},
+			Sender:    ActorRef{Kind: ActorCoder, ID: start.RoleExecution.ID},
 			Recipient: ActorRef{Kind: ActorPlanner, ID: planner.ID},
 			Body:      body,
 		}, at)
