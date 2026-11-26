@@ -172,7 +172,7 @@ func (a *ACPAdapter) Start(ctx context.Context, request StartRequest, _ Credenti
 		OperationID:    request.OperationID,
 		SessionID:      session.sessionID,
 		ReceiptID:      "acp-session-" + request.RoleExecutionID,
-		EvidenceSHA256: sha256Hex(request.OperationID + "\n" + session.sessionID),
+		EvidenceSHA256: sha256Hex(string(created)),
 	}
 	a.byRole[request.RoleExecutionID] = session
 	a.byID[session.sessionID] = session
@@ -269,7 +269,7 @@ collected:
 		OperationID: request.OperationID, TurnID: request.TurnID,
 		SessionID: request.SessionID, ReceiptID: "acp-turn-" + request.TurnID,
 		Status: "COMPLETED", Output: output.String(),
-		EvidenceSHA256: sha256Hex(request.OperationID + "\n" + output.String()),
+		EvidenceSHA256: sha256Hex(string(response) + "\n" + output.String()),
 	}
 	session.turns[request.OperationID] = result
 	return result, nil
