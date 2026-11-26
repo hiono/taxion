@@ -21,10 +21,10 @@ import (
 // Tool permission requests are denied by default; this adapter does not infer
 // Job authority from ACP prompts or tool metadata.
 type ACPConfig struct {
-	Command           string
-	Args              []string
-	WorkingDirectory  string
-	Identity          Identity
+	Command          string
+	Args             []string
+	WorkingDirectory string
+	Identity         Identity
 }
 
 type ACPAdapter struct {
@@ -130,15 +130,15 @@ func (a *ACPAdapter) Start(ctx context.Context, request StartRequest, _ Credenti
 		return StartResult{}, err
 	}
 	if _, err = process.call(ctx, "initialize", map[string]any{
-		"protocolVersion": 1,
-		"clientInfo": map[string]string{"name": "taxion", "version": "0.1"},
+		"protocolVersion":    1,
+		"clientInfo":         map[string]string{"name": "taxion", "version": "0.1"},
 		"clientCapabilities": map[string]any{},
 	}); err != nil {
 		process.close()
 		return StartResult{}, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown}
 	}
 	created, err := process.call(ctx, "session/new", map[string]any{
-		"cwd": a.config.WorkingDirectory,
+		"cwd":        a.config.WorkingDirectory,
 		"mcpServers": []any{},
 	})
 	if err != nil {
@@ -154,28 +154,28 @@ func (a *ACPAdapter) Start(ctx context.Context, request StartRequest, _ Credenti
 	}
 	session := &acpSession{
 		roleExecutionID: request.RoleExecutionID,
-		processID: process.cmd.Process.Pid,
-		sessionID: sessionReply.SessionID,
-		process: process,
-		turns: make(map[string]TurnResult),
+		processID:       process.cmd.Process.Pid,
+		sessionID:       sessionReply.SessionID,
+		process:         process,
+		turns:           make(map[string]TurnResult),
 	}
 	result := StartResult{
-		OperationID: request.OperationID,
-		SessionID: session.sessionID,
-		ReceiptID: "acp-session-" + request.RoleExecutionID,
+		OperationID:    request.OperationID,
+		SessionID:      session.sessionID,
+		ReceiptID:      "acp-session-" + request.RoleExecutionID,
 		EvidenceSHA256: sha256Hex(request.OperationID + "\n" + session.sessionID),
 	}
 	a.byRole[request.RoleExecutionID] = session
 	a.byID[session.sessionID] = session
 	a.mu.Unlock()
 	initialTurn := TurnRequest{
-		OperationID: request.OperationID,
-		TurnID: "start_" + request.RoleExecutionID,
-		SessionID: session.sessionID,
+		OperationID:  request.OperationID,
+		TurnID:       "start_" + request.RoleExecutionID,
+		SessionID:    session.sessionID,
 		PromptSHA256: request.PromptSHA256,
-		Prompt: request.Prompt,
-		MaxTokens: request.MaxTokens,
-		Deadline: request.Deadline,
+		Prompt:       request.Prompt,
+		MaxTokens:    request.MaxTokens,
+		Deadline:     request.Deadline,
 	}
 	if _, err := a.Send(ctx, initialTurn, nil); err != nil {
 		return StartResult{}, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown}
@@ -214,7 +214,7 @@ func (a *ACPAdapter) Send(ctx context.Context, request TurnRequest, _ Credential
 drained:
 	response, err := session.process.call(ctx, "session/prompt", map[string]any{
 		"sessionId": request.SessionID,
-		"prompt": []map[string]string{{"type": "text", "text": request.Prompt}},
+		"prompt":    []map[string]string{{"type": "text", "text": request.Prompt}},
 	})
 	if err != nil {
 		_ = session.process.notify("session/cancel", map[string]string{"sessionId": request.SessionID})
