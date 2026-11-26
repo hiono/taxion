@@ -3,6 +3,7 @@ package store
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/tls"
@@ -78,6 +79,147 @@ func TestOpenUpgradesOlderSchemaVersionAndPreservesJob(t *testing.T) {
 	got, err := reopened.GetJob(ctx, job.ID)
 	if err != nil || !reflect.DeepEqual(got, job) {
 		t.Fatalf("GetJob after schema upgrade = %#v, %v; want %#v", got, err, job)
+	}
+}
+
+func TestPreUpgradeProcessCannotOverwriteV2AggregateFacts(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "legacy-writer.sqlite")
+	legacyDB, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("open legacy process database: %v", err)
+	}
+	legacyDB.SetMaxOpenConns(1)
+	defer legacyDB.Close()
+	legacyConn, err := legacyDB.Conn(ctx)
+	if err != nil {
+		t.Fatalf("pin legacy process connection: %v", err)
+	}
+	defer legacyConn.Close()
+
+	for _, statement := range []string{
+		`PRAGMA journal_mode = WAL`,
+		`CREATE TABLE job_aggregates (
+			job_id TEXT PRIMARY KEY,
+			revision INTEGER NOT NULL CHECK (revision > 0),
+			payload_json TEXT NOT NULL,
+			integrity_sha256 TEXT NOT NULL,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		)`,
+		`PRAGMA user_version = 1`,
+	} {
+		if _, err := legacyConn.ExecContext(ctx, statement); err != nil {
+			t.Fatalf("initialize v1 database: %v", err)
+		}
+	}
+
+	job := newTestJob(t, "job_legacy_writer", "Preserve v2 aggregate facts across a live schema upgrade.")
+	legacyPayload, err := json.Marshal(job)
+	if err != nil {
+		t.Fatalf("marshal v1 Job: %v", err)
+	}
+	createdAt := job.CreatedAt.UTC().Format(time.RFC3339Nano)
+	if _, err := legacyConn.ExecContext(ctx,
+		`INSERT INTO job_aggregates
+			(job_id, revision, payload_json, integrity_sha256, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?)`,
+		job.ID, job.Revision, string(legacyPayload), digest(legacyPayload), createdAt,
+		job.UpdatedAt.UTC().Format(time.RFC3339Nano),
+	); err != nil {
+		t.Fatalf("insert v1 Job aggregate: %v", err)
+	}
+
+	upgraded, err := Open(ctx, path)
+	if err != nil {
+		t.Fatalf("upgrade database while legacy connection remains open: %v", err)
+	}
+	defer upgraded.Close()
+
+	var version int
+	if err := legacyConn.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil {
+		t.Fatalf("read schema version from legacy connection: %v", err)
+	}
+	if version != schemaVersion {
+		t.Fatalf("legacy connection schema version = %d, want %d", version, schemaVersion)
+	}
+
+	var aggregate map[string]json.RawMessage
+	if err := json.Unmarshal(legacyPayload, &aggregate); err != nil {
+		t.Fatalf("decode v1 aggregate payload: %v", err)
+	}
+	for field, fact := range map[string]string{
+		"job_messages":               `{"id":"message_1"}`,
+		"delivery_observations":      `{"id":"delivery_1"}`,
+		"job_question_authorizations": `{"id":"authorization_1"}`,
+	} {
+		aggregate[field] = json.RawMessage("[" + fact + "]")
+	}
+	v2Payload, err := json.Marshal(aggregate)
+	if err != nil {
+		t.Fatalf("marshal v2 aggregate payload: %v", err)
+	}
+	v2UpdatedAt := job.UpdatedAt.Add(time.Minute).UTC()
+	if _, err := upgraded.db.ExecContext(ctx,
+		`UPDATE job_aggregates
+			SET revision = ?, payload_json = ?, integrity_sha256 = ?, updated_at = ?
+			WHERE job_id = ? AND revision = ?`,
+		2, string(v2Payload), digest(v2Payload), v2UpdatedAt.Format(time.RFC3339Nano), job.ID, 1,
+	); err != nil {
+		t.Fatalf("v2 writer appending the first facts: %v", err)
+	}
+
+	legacyUpdatedAt := v2UpdatedAt.Add(time.Minute)
+	_, err = legacyConn.ExecContext(ctx,
+		`UPDATE job_aggregates
+			SET revision = ?, payload_json = ?, integrity_sha256 = ?, updated_at = ?
+			WHERE job_id = ? AND revision = ?`,
+		3, string(legacyPayload), digest(legacyPayload), legacyUpdatedAt.Format(time.RFC3339Nano), job.ID, 2,
+	)
+	if err == nil || !strings.Contains(err.Error(), "append-only v2 facts") {
+		t.Fatalf("legacy v1 writer update error = %v, want append-only v2 fact guard rejection", err)
+	}
+
+	var storedRevision int64
+	var storedPayload, storedHash string
+	if err := upgraded.db.QueryRowContext(ctx,
+		"SELECT revision, payload_json, integrity_sha256 FROM job_aggregates WHERE job_id = ?",
+		job.ID,
+	).Scan(&storedRevision, &storedPayload, &storedHash); err != nil {
+		t.Fatalf("read aggregate after rejected legacy update: %v", err)
+	}
+	if storedRevision != 2 || storedPayload != string(v2Payload) || storedHash != digest(v2Payload) {
+		t.Fatalf("legacy update changed v2 aggregate: revision=%d payload=%s hash=%s",
+			storedRevision, storedPayload, storedHash)
+	}
+
+	for field, fact := range map[string]string{
+		"job_messages":               `{"id":"message_2"}`,
+		"delivery_observations":      `{"id":"delivery_2"}`,
+		"job_question_authorizations": `{"id":"authorization_2"}`,
+	} {
+		var existing []json.RawMessage
+		if err := json.Unmarshal(aggregate[field], &existing); err != nil {
+			t.Fatalf("decode existing %s: %v", field, err)
+		}
+		existing = append(existing, json.RawMessage(fact))
+		aggregate[field], err = json.Marshal(existing)
+		if err != nil {
+			t.Fatalf("append %s: %v", field, err)
+		}
+	}
+	appendedPayload, err := json.Marshal(aggregate)
+	if err != nil {
+		t.Fatalf("marshal appended v2 aggregate: %v", err)
+	}
+	if _, err := upgraded.db.ExecContext(ctx,
+		`UPDATE job_aggregates
+			SET revision = ?, payload_json = ?, integrity_sha256 = ?, updated_at = ?
+			WHERE job_id = ? AND revision = ?`,
+		3, string(appendedPayload), digest(appendedPayload),
+		v2UpdatedAt.Add(2*time.Minute).Format(time.RFC3339Nano), job.ID, 2,
+	); err != nil {
+		t.Fatalf("v2 writer appending facts: %v", err)
 	}
 }
 
