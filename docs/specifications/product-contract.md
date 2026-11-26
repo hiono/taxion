@@ -90,7 +90,7 @@ Provider Adapterの実装要求は[Provider Adapter 実行境界 要求仕様書
 
 ### 4.3.1 JobQuestionAuthorization
 
-承認済みJob内でRoleからTaskless PLANNERへ質問し、回答のために追加のbounded read-only Provider executionが必要な場合は、元のQuestionと実行範囲に束縛したJobQuestionAuthorizationを発行できます。自然言語の質問・回答、JobMessageの保存・参照・転送、既存Session / Contextを使った応答にはgrantを要求しません。質問本文や宛先だけからgrantを発行しません。grantはJobApproval、Planner RoleExecution、元Question、Provider / account / configuration、read-only context、budget、deadlineへ束縛し、JobApprovalやExecutionPermissionを拡張しません。
+承認済みJob内でRoleからTaskless PLANNERへ質問し、回答のために追加のbounded read-only Provider executionが必要な場合は、元のQuestionと実行範囲に束縛したJobQuestionAuthorizationを発行できます。自然言語の質問・回答、JobMessageの保存・参照・転送、既に利用可能なContextだけを参照し新たなProvider Send / Turnを伴わない応答にはgrantを要求しません。新たなProvider Send / Turnを伴う応答には、該当するJobQuestionAuthorizationまたはExecution Permissionを要求します。質問本文や宛先だけからgrantを発行しません。grantはJobApproval、Planner RoleExecution、元Question、Provider / account / configuration、read-only context、budget、deadlineへ束縛し、JobApprovalやExecutionPermissionを拡張しません。
 
 ### 4.4 Execution and collaboration
 

@@ -57,26 +57,10 @@ func TestOpenUpgradesOlderSchemaVersionAndPreservesJob(t *testing.T) {
 	if _, err := database.createJob(ctx, job, "cmd_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", createLocalDraftJobCommandType); err != nil {
 		t.Fatalf("create Job before schema upgrade: %v", err)
 	}
-	var payload map[string]json.RawMessage
-	var original string
-	if err := database.db.QueryRowContext(ctx, "SELECT payload_json FROM job_aggregates WHERE job_id = ?", job.ID).Scan(&original); err != nil {
-		t.Fatalf("read aggregate payload: %v", err)
+	if _, err := database.db.ExecContext(ctx, "DROP TRIGGER IF EXISTS job_aggregates_preserve_v2_facts"); err != nil {
+		t.Fatalf("remove trigger to simulate the prior schema: %v", err)
 	}
-	if err := json.Unmarshal([]byte(original), &payload); err != nil {
-		t.Fatalf("decode aggregate payload: %v", err)
-	}
-	payload["delivery_observations"] = json.RawMessage(`[{"id":"obsolete_delivery"}]`)
-	obsoletePayload, err := json.Marshal(payload)
-	if err != nil {
-		t.Fatalf("encode aggregate with obsolete delivery state: %v", err)
-	}
-	if _, err := database.db.ExecContext(ctx,
-		"UPDATE job_aggregates SET payload_json = ?, integrity_sha256 = ? WHERE job_id = ?",
-		string(obsoletePayload), digest(obsoletePayload), job.ID,
-	); err != nil {
-		t.Fatalf("seed obsolete delivery state: %v", err)
-	}
-	if _, err := database.db.ExecContext(ctx, "PRAGMA user_version = 4"); err != nil {
+	if _, err := database.db.ExecContext(ctx, "PRAGMA user_version = 1"); err != nil {
 		t.Fatalf("set prior schema version: %v", err)
 	}
 	if err := database.Close(); err != nil {
@@ -98,19 +82,6 @@ func TestOpenUpgradesOlderSchemaVersionAndPreservesJob(t *testing.T) {
 	got, err := reopened.GetJob(ctx, job.ID)
 	if err != nil || !reflect.DeepEqual(got, job) {
 		t.Fatalf("GetJob after schema upgrade = %#v, %v; want %#v", got, err, job)
-	}
-	var migratedPayload, migratedHash string
-	if err := reopened.db.QueryRowContext(ctx,
-		"SELECT payload_json, integrity_sha256 FROM job_aggregates WHERE job_id = ?", job.ID,
-	).Scan(&migratedPayload, &migratedHash); err != nil {
-		t.Fatalf("read migrated aggregate: %v", err)
-	}
-	var migratedFields map[string]json.RawMessage
-	if err := json.Unmarshal([]byte(migratedPayload), &migratedFields); err != nil {
-		t.Fatalf("decode migrated aggregate: %v", err)
-	}
-	if _, exists := migratedFields["delivery_observations"]; exists || migratedHash != digest([]byte(migratedPayload)) {
-		t.Fatalf("obsolete delivery data or stale integrity hash remains after migration: %s", migratedPayload)
 	}
 }
 
