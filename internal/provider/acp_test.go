@@ -263,7 +263,6 @@ func TestACPFakePeerThroughProviderRuntime(t *testing.T) {
 	}
 }
 
-
 type acpTestWriter struct {
 	strings.Builder
 }
@@ -274,7 +273,7 @@ func TestACPProcessRespondsToUnknownServerRequest(t *testing.T) {
 	writer := &acpTestWriter{}
 	process := &acpProcess{
 		stdin: writer, updates: make(chan json.RawMessage, 1),
-		done: make(chan struct{}), failed: make(chan struct{}),
+		done:    make(chan struct{}), failed: make(chan struct{}),
 	}
 	request := `{"jsonrpc":"2.0","id":1,"method":"unknown/request"}` + "\n"
 	process.read(strings.NewReader(request))
@@ -295,7 +294,7 @@ func TestACPProcessFailsClosedOnMalformedJSONAndQueueOverflow(t *testing.T) {
 	t.Run("malformed JSON", func(t *testing.T) {
 		process := &acpProcess{
 			updates: make(chan json.RawMessage, 1),
-			done: make(chan struct{}), failed: make(chan struct{}),
+			done:    make(chan struct{}), failed: make(chan struct{}),
 		}
 		process.read(strings.NewReader("{invalid}\n"))
 		if process.failure() == nil {
@@ -305,7 +304,7 @@ func TestACPProcessFailsClosedOnMalformedJSONAndQueueOverflow(t *testing.T) {
 	t.Run("notification queue overflow", func(t *testing.T) {
 		process := &acpProcess{
 			updates: make(chan json.RawMessage, 1),
-			done: make(chan struct{}), failed: make(chan struct{}),
+			done:    make(chan struct{}), failed: make(chan struct{}),
 		}
 		notification := `{"jsonrpc":"2.0","method":"session/update"}` + "\n"
 		process.read(strings.NewReader(notification + notification))
@@ -336,7 +335,7 @@ func TestACPProcessCloseHonorsContextDeadline(t *testing.T) {
 	}
 	process := &acpProcess{
 		cmd: command, stdin: stdin, updates: make(chan json.RawMessage, 1),
-		done: make(chan struct{}), failed: make(chan struct{}),
+		done:    make(chan struct{}), failed: make(chan struct{}),
 	}
 	go func() {
 		_ = command.Wait()
