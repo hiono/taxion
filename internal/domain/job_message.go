@@ -23,6 +23,8 @@ const (
 	ControllerActorID      = "taxion.controller"
 	OrchestratorActorID    = "taxion.orchestrator"
 	maxJobMessageBodyBytes = 64 * 1024
+	// MaxJobMessageBodyBytes is the maximum UTF-8 body size accepted by JobMessage.
+	MaxJobMessageBodyBytes = maxJobMessageBodyBytes
 )
 
 type ActorRef struct {
