@@ -58,10 +58,11 @@ func (v minimumCapabilityVerifier) Verify(_ context.Context, identity Identity, 
 func TestCapabilitiesRequireIdentityBoundEvidence(t *testing.T) {
 	identity := testIdentity()
 	capabilities := Capabilities{
-		Identity: identity, StartIdempotency: true, SendLookup: true,
+		Identity: identity, StartIdempotency: true, SendLookup: true, ReadOnlyContextEnforcement: true,
 		Evidence: []CapabilityEvidence{
 			evidence(identity, CapabilityStartIdempotency, EvidenceSynthetic),
 			evidence(identity, CapabilitySendLookup, EvidenceSynthetic),
+			evidence(identity, CapabilityReadOnlyContextEnforcement, EvidenceSynthetic),
 		},
 	}
 	if err := capabilities.Validate(identity); err != nil {
@@ -74,10 +75,10 @@ func TestCapabilitiesRequireIdentityBoundEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Verified: %v", err)
 	}
-	if !verified.Has(CapabilityStartIdempotency) || !verified.Has(CapabilitySendLookup) {
+	if !verified.Has(CapabilityStartIdempotency) || !verified.Has(CapabilitySendLookup) || !verified.Has(CapabilityReadOnlyContextEnforcement) {
 		t.Fatal("trusted E2 test verifier did not preserve declared synthetic capabilities")
 	}
-	if verified.HasEvidenceAtLeast(CapabilityStartIdempotency, EvidenceLive) {
+	if verified.HasEvidenceAtLeast(CapabilityStartIdempotency, EvidenceLive) || verified.HasEvidenceAtLeast(CapabilityReadOnlyContextEnforcement, EvidenceLive) {
 		t.Fatal("synthetic evidence was promoted to live capability")
 	}
 }
