@@ -76,7 +76,7 @@ func (c *CommunicationController) SendFromRole(ctx context.Context, request Role
 	return c.persistMessage(ctx, request.JobID, request.CommandID, domain.JobMessageRequest{
 		Sender:    domain.ActorRef{Kind: actorKind, ID: execution.ID},
 		Recipient: request.Recipient, ReplyToMessageID: request.ReplyToMessageID,
-		Body:      request.Body,
+		Body: request.Body,
 	})
 }
 
@@ -102,7 +102,7 @@ func (c *CommunicationController) SendFromHuman(
 	return c.persistMessage(ctx, request.JobID, request.CommandID, domain.JobMessageRequest{
 		Sender:    domain.ActorRef{Kind: domain.ActorHuman, ID: principal.PrincipalID()},
 		Recipient: request.Recipient, ReplyToMessageID: request.ReplyToMessageID,
-		Body:      request.Body,
+		Body: request.Body,
 	})
 }
 
