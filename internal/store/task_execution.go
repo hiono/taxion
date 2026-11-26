@@ -51,3 +51,48 @@ func (s *Store) StartTaskExecution(
 		},
 	)
 }
+
+func (s *Store) BindRoleExecutionWorktree(
+	ctx context.Context,
+	expectedRevision uint64,
+	jobID, roleExecutionID, commandID string,
+	assignment domain.WorktreeAssignment,
+) (CommandReceipt, domain.WorktreeAssignment, error) {
+	request := struct {
+		JobID           string                  `json:"job_id"`
+		RoleExecutionID string                  `json:"role_execution_id"`
+		Assignment      domain.WorktreeAssignment `json:"assignment"`
+	}{
+		JobID: jobID, RoleExecutionID: roleExecutionID, Assignment: assignment,
+	}
+	return persistPlanningFact(
+		ctx, s, jobID, expectedRevision, commandID, "ROLE_EXECUTION_WORKTREE_BIND", request,
+		func(job domain.Job, now time.Time) (domain.WorktreeAssignment, error) {
+			return domain.NewWorktreeAssignmentBinding(job, roleExecutionID, assignment, now)
+		},
+		func(job *domain.Job, bound domain.WorktreeAssignment) {
+			for i := range job.RoleExecutions {
+				if job.RoleExecutions[i].ID == roleExecutionID {
+					job.RoleExecutions[i].WorktreeAssignmentID = bound.ID
+					job.RoleExecutions[i].WorktreePath = bound.WorktreePath
+				}
+			}
+			for i := range job.ProviderStartIntents {
+				if job.ProviderStartIntents[i].RoleExecutionID == roleExecutionID {
+					job.ProviderStartIntents[i].WorktreeAssignmentID = bound.ID
+					job.ProviderStartIntents[i].WorktreePath = bound.WorktreePath
+				}
+			}
+			job.WorktreeAssignments = append(job.WorktreeAssignments, bound)
+		},
+		func(job domain.Job) (domain.WorktreeAssignment, bool) {
+			for _, existing := range job.WorktreeAssignments {
+				if existing.OwnerRoleExecutionID == roleExecutionID {
+					return existing, true
+				}
+			}
+			return domain.WorktreeAssignment{}, false
+		},
+	)
+}
+

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"path/filepath"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -42,6 +43,7 @@ type Job struct {
 	JobApprovals                          []JobApproval               `json:"job_approvals,omitempty"`
 	Tasks                                 []Task                      `json:"tasks,omitempty"`
 	ExecutionPermissions                  []ExecutionPermission       `json:"execution_permissions,omitempty"`
+	WorktreeAssignments                   []WorktreeAssignment        `json:"worktree_assignments,omitempty"`
 	RoleExecutions                        []RoleExecution             `json:"role_executions,omitempty"`
 	ProviderStartIntents                  []ProviderStartIntent       `json:"provider_start_intents,omitempty"`
 	ProviderStartObservations             []ProviderStartObservation  `json:"provider_start_observations,omitempty"`
@@ -209,6 +211,136 @@ const (
 	RoleReviewer = "REVIEWER"
 )
 
+type WorktreeAssignment struct {
+	ID                   string    `json:"id"`
+	JobID                string    `json:"job_id"`
+	TaskID               string    `json:"task_id"`
+	RepositoryID         string    `json:"repository_id"`
+	RepositoryPath       string    `json:"repository_path"`
+	WorktreePath         string    `json:"worktree_path"`
+	BaselineCommit       string    `json:"baseline_commit"`
+	OwnerRoleExecutionID string    `json:"owner_role_execution_id"`
+	CreatedAt            time.Time `json:"created_at"`
+	CreatedRevision      uint64    `json:"created_revision"`
+}
+
+func WorktreeAssignmentID(jobID, taskID, repositoryID string) string {
+	sum := sha256.Sum256([]byte("taxion:worktree-assignment:" + jobID + ":" + taskID + ":" + repositoryID))
+	return "worktree_" + hex.EncodeToString(sum[:])
+}
+
+func (w WorktreeAssignment) Validate(job Job) error {
+	if !validPlanningIdentity(w.ID) || !validPlanningIdentity(w.JobID) ||
+		!validPlanningIdentity(w.TaskID) || strings.TrimSpace(w.RepositoryID) == "" ||
+		!validPlanningIdentity(w.OwnerRoleExecutionID) {
+		return errors.New("WorktreeAssignment identity is invalid")
+	}
+	if w.ID != WorktreeAssignmentID(w.JobID, w.TaskID, w.RepositoryID) ||
+		w.JobID != job.ID || w.CreatedAt.IsZero() || w.CreatedRevision < 2 ||
+		w.CreatedRevision > job.Revision {
+		return errors.New("WorktreeAssignment aggregate identity or creation metadata mismatch")
+	}
+	if !filepath.IsAbs(w.RepositoryPath) || filepath.Clean(w.RepositoryPath) != w.RepositoryPath ||
+		!filepath.IsAbs(w.WorktreePath) || filepath.Clean(w.WorktreePath) != w.WorktreePath ||
+		w.RepositoryPath == w.WorktreePath {
+		return errors.New("WorktreeAssignment paths must be distinct absolute canonical paths")
+	}
+	commit, err := hex.DecodeString(w.BaselineCommit)
+	if err != nil || len(commit) != 20 {
+		return errors.New("WorktreeAssignment baseline commit must be a full Git SHA-1")
+	}
+	task, found := taskByID(job, w.TaskID)
+	if !found {
+		return errors.New("WorktreeAssignment Task was not found")
+	}
+	repositoryFound := false
+	for _, repositoryID := range task.TargetRepositories {
+		if repositoryID == w.RepositoryID {
+			repositoryFound = true
+			break
+		}
+	}
+	if !repositoryFound {
+		return errors.New("WorktreeAssignment repository is outside the Task target repositories")
+	}
+	var execution RoleExecution
+	executionFound := false
+	for _, candidate := range job.RoleExecutions {
+		if candidate.ID == w.OwnerRoleExecutionID {
+			execution, executionFound = candidate, true
+			break
+		}
+	}
+	if !executionFound || execution.TaskID != w.TaskID ||
+		execution.WorktreeAssignmentID != w.ID || execution.WorktreePath != w.WorktreePath {
+		return errors.New("WorktreeAssignment does not match its owning RoleExecution")
+	}
+	var intent ProviderStartIntent
+	intentFound := false
+	for _, candidate := range job.ProviderStartIntents {
+		if candidate.RoleExecutionID == execution.ID {
+			intent, intentFound = candidate, true
+			break
+		}
+	}
+	if !intentFound || intent.WorktreeAssignmentID != w.ID || intent.WorktreePath != w.WorktreePath {
+		return errors.New("WorktreeAssignment does not match its ProviderStartIntent")
+	}
+	return nil
+}
+
+func NewWorktreeAssignmentBinding(
+	job Job,
+	roleExecutionID string,
+	assignment WorktreeAssignment,
+	now time.Time,
+) (WorktreeAssignment, error) {
+	if err := job.Validate(); err != nil {
+		return WorktreeAssignment{}, fmt.Errorf("validate Job before Worktree binding: %w", err)
+	}
+	if now.IsZero() {
+		return WorktreeAssignment{}, errors.New("Worktree binding timestamp is required")
+	}
+	var execution RoleExecution
+	executionFound := false
+	for _, candidate := range job.RoleExecutions {
+		if candidate.ID == roleExecutionID {
+			execution, executionFound = candidate, true
+			break
+		}
+	}
+	if !executionFound || execution.Role != RoleCoder || execution.TaskID == "" ||
+		execution.WorktreeAssignmentID != "" || execution.WorktreePath != "" {
+		return WorktreeAssignment{}, errors.New("Worktree binding requires an unbound Coder RoleExecution")
+	}
+	permission, found := executionPermissionByID(job, execution.ExecutionPermissionID)
+	if !found || assignment.RepositoryID != permission.Resource {
+		return WorktreeAssignment{}, errors.New("Worktree repository must equal the exact approved ExecutionPermission resource")
+	}
+	if assignment.ID != WorktreeAssignmentID(job.ID, execution.TaskID, assignment.RepositoryID) ||
+		assignment.JobID != job.ID || assignment.TaskID != execution.TaskID ||
+		assignment.OwnerRoleExecutionID != execution.ID {
+		return WorktreeAssignment{}, errors.New("WorktreeAssignment is outside the exact Job, Task, or RoleExecution")
+	}
+	if _, err := hex.DecodeString(assignment.BaselineCommit); err != nil || len(assignment.BaselineCommit) != 40 {
+		return WorktreeAssignment{}, errors.New("WorktreeAssignment baseline commit must be a full Git SHA-1")
+	}
+	if !filepath.IsAbs(assignment.RepositoryPath) || filepath.Clean(assignment.RepositoryPath) != assignment.RepositoryPath ||
+		!filepath.IsAbs(assignment.WorktreePath) || filepath.Clean(assignment.WorktreePath) != assignment.WorktreePath ||
+		assignment.RepositoryPath == assignment.WorktreePath {
+		return WorktreeAssignment{}, errors.New("WorktreeAssignment paths must be distinct absolute canonical paths")
+	}
+	for _, existing := range job.WorktreeAssignments {
+		if existing.TaskID == assignment.TaskID || existing.ID == assignment.ID ||
+			existing.WorktreePath == assignment.WorktreePath {
+			return WorktreeAssignment{}, errors.New("Task already has a Worktree assignment")
+		}
+	}
+	assignment.CreatedAt = now.UTC().Round(0)
+	assignment.CreatedRevision = job.Revision + 1
+	return assignment, nil
+}
+
 type RoleExecution struct {
 	ID                       string    `json:"id"`
 	CommandID                string    `json:"command_id"`
@@ -217,6 +349,8 @@ type RoleExecution struct {
 	TaskID                   string    `json:"task_id,omitempty"`
 	PlanningAuthorizationID  string    `json:"planning_authorization_id"`
 	ExecutionPermissionID    string    `json:"execution_permission_id,omitempty"`
+	WorktreeAssignmentID      string    `json:"worktree_assignment_id,omitempty"`
+	WorktreePath              string    `json:"worktree_path,omitempty"`
 	ProviderStartOperationID string    `json:"provider_start_operation_id"`
 	CreatedAt                time.Time `json:"created_at"`
 	CreatedRevision          uint64    `json:"created_revision"`
@@ -230,6 +364,8 @@ type ProviderStartIntent struct {
 	PlanningAuthorizationID string                   `json:"planning_authorization_id"`
 	TaskID                  string                   `json:"task_id,omitempty"`
 	ExecutionPermissionID   string                   `json:"execution_permission_id,omitempty"`
+	WorktreeAssignmentID     string                   `json:"worktree_assignment_id,omitempty"`
+	WorktreePath             string                   `json:"worktree_path,omitempty"`
 	ProviderID              string                   `json:"provider_id"`
 	AccountID               string                   `json:"account_id"`
 	ConfigurationSHA256     string                   `json:"configuration_sha256"`
@@ -331,6 +467,9 @@ func (e RoleExecution) Validate(job Job) error {
 		!validPlanningIdentity(e.JobID) || !validPlanningIdentity(e.ProviderStartOperationID) {
 		return errors.New("RoleExecution identity is invalid")
 	}
+	if (e.WorktreeAssignmentID == "") != (e.WorktreePath == "") {
+		return errors.New("RoleExecution Worktree assignment ID and path must be set together")
+	}
 	if e.ID != RoleExecutionID(e.CommandID) || e.JobID != job.ID ||
 		e.CreatedAt.IsZero() || e.CreatedRevision < 2 {
 		return errors.New("RoleExecution command identity or creation metadata mismatch")
@@ -385,6 +524,10 @@ func (p ProviderStartIntent) Validate(job Job, execution RoleExecution) error {
 		!validPlanningIdentity(p.ProviderID) || !validPlanningIdentity(p.AccountID) ||
 		!validSHA256(p.ConfigurationSHA256) || !validSHA256(p.RequestSHA256) {
 		return errors.New("Provider Start intent identity or digest is invalid")
+	}
+	if (p.WorktreeAssignmentID == "") != (p.WorktreePath == "") ||
+		p.WorktreeAssignmentID != execution.WorktreeAssignmentID || p.WorktreePath != execution.WorktreePath {
+		return errors.New("Provider Start intent Worktree binding differs from RoleExecution")
 	}
 	if p.CommandID != execution.CommandID || p.JobID != job.ID ||
 		p.RoleExecutionID != execution.ID || p.TaskID != execution.TaskID ||
@@ -633,7 +776,7 @@ func (j Job) Validate() error {
 			return fmt.Errorf("%w: invalid IntakeProvenance: %v", ErrInvalidJob, err)
 		}
 	}
-	appendOnlyFacts := uint64(len(j.JobContractRevisions) + len(j.JobApprovals) + len(j.Tasks) + len(j.ExecutionPermissions) + len(j.PlanningAuthorizations) + len(j.RoleExecutions) + len(j.ProviderStartObservations) + len(j.ProviderEventObservations) + len(j.ProviderStopIntents) + len(j.ProviderStopObservations) + len(j.ProviderResultObservations) + len(j.ProviderUsageObservations) + len(j.PlanningTurnIntents) + len(j.PlanningTurnObservations) + len(j.PlanningEffectDecisions) + len(j.PlanningResumeIntents) + len(j.PlanningResumeObservations) + len(j.PlanningBoundaryDecisions) + len(j.JobMessages))
+	appendOnlyFacts := uint64(len(j.JobContractRevisions) + len(j.JobApprovals) + len(j.Tasks) + len(j.ExecutionPermissions) + len(j.WorktreeAssignments) + len(j.PlanningAuthorizations) + len(j.RoleExecutions) + len(j.ProviderStartObservations) + len(j.ProviderEventObservations) + len(j.ProviderStopIntents) + len(j.ProviderStopObservations) + len(j.ProviderResultObservations) + len(j.ProviderUsageObservations) + len(j.PlanningTurnIntents) + len(j.PlanningTurnObservations) + len(j.PlanningEffectDecisions) + len(j.PlanningResumeIntents) + len(j.PlanningResumeObservations) + len(j.PlanningBoundaryDecisions) + len(j.JobMessages))
 	if appendOnlyFacts > j.Revision-1 || len(j.RoleExecutions) != len(j.ProviderStartIntents) {
 		return fmt.Errorf("%w: append-only fact counts exceed aggregate revisions", ErrInvalidJob)
 	}
@@ -704,6 +847,21 @@ func (j Job) Validate() error {
 			return fmt.Errorf("%w: duplicate Provider Start operation ID", ErrInvalidJob)
 		}
 		seenOperations[intent.ID] = struct{}{}
+	}
+	seenWorktrees := make(map[string]struct{}, len(j.WorktreeAssignments))
+	seenWorktreePaths := make(map[string]struct{}, len(j.WorktreeAssignments))
+	for _, assignment := range j.WorktreeAssignments {
+		if err := assignment.Validate(j); err != nil {
+			return fmt.Errorf("%w: invalid WorktreeAssignment: %v", ErrInvalidJob, err)
+		}
+		if _, exists := seenWorktrees[assignment.ID]; exists {
+			return fmt.Errorf("%w: duplicate WorktreeAssignment ID", ErrInvalidJob)
+		}
+		if _, exists := seenWorktreePaths[assignment.WorktreePath]; exists {
+			return fmt.Errorf("%w: duplicate WorktreeAssignment path", ErrInvalidJob)
+		}
+		seenWorktrees[assignment.ID] = struct{}{}
+		seenWorktreePaths[assignment.WorktreePath] = struct{}{}
 	}
 	startIntentsByID := make(map[string]ProviderStartIntent, len(j.ProviderStartIntents))
 	for _, intent := range j.ProviderStartIntents {
