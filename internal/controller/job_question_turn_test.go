@@ -105,7 +105,16 @@ func newJobQuestionTurnFixture(t *testing.T) jobQuestionTurnFixture {
 	if err != nil {
 		t.Fatalf("GetJob before question: %v", err)
 	}
-	plannerID := "cmd_cccccccccccccccccccccccccccccccc"
+	plannerID := ""
+	for _, execution := range job.RoleExecutions {
+		if execution.Role == string(domain.RolePlanner) {
+			plannerID = execution.ID
+			break
+		}
+	}
+	if plannerID == "" {
+		t.Fatal("Taskless Planner RoleExecution not found")
+	}
 	_, question, err := database.AddJobMessage(ctx, jobID, job.Revision,
 		"cmd_96969696969696969696969696969696", domain.JobMessageRequest{
 			Sender:    domain.ActorRef{Kind: domain.ActorCoder, ID: coderStart.RoleExecution.ID},
