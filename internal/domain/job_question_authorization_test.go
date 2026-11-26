@@ -111,7 +111,7 @@ func TestJobQuestionAuthorizationBindsOneApprovedQuestionAndPlannerSession(t *te
 		ReadOnlyBoundary: PlanningReadOnlyBoundary{
 			Mode: PlanningReadOnlyBoundarySnapshot, Reference: "question_snapshot_1", SHA256: strings.Repeat("d", 64),
 		},
-		Budget:   PlanningBudget{MaxTurns: 1, MaxTokens: 100},
+		Budget:   PlanningBudget{MaxTurns: 2, MaxTokens: 100},
 		Deadline: contract.Deadline.Add(-time.Minute),
 	}
 	authorization, err := NewJobQuestionAuthorization(job, request, authorizationTime)
@@ -203,6 +203,14 @@ func TestJobQuestionAuthorizationBindsOneApprovedQuestionAndPlannerSession(t *te
 	job.UpdatedAt = reconciled.CreatedAt
 	if err := job.Validate(); err != nil {
 		t.Fatalf("Job.Validate after UNKNOWN reconciliation: %v", err)
+	}
+	if _, err := NewJobQuestionTurnIntent(job, JobQuestionTurnIntentRequest{
+		JobQuestionAuthorizationID: authorization.ID,
+		CommandID:                  "cmd_79797979797979797979797979797979",
+		PromptSHA256:               sha256HexDomain("A subsequent turn after reconciliation"),
+		ReservedTokens:             10,
+	}, turnCreatedAt.Add(5*time.Second)); err != nil {
+		t.Fatalf("JobQuestionAuthorization rejected a second turn after terminal reconciliation: %v", err)
 	}
 }
 
