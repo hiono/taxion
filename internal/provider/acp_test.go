@@ -5,15 +5,25 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
-	"os/exec"
 	"strings"
 	"testing"
 	"time"
 )
 
+func acpHelperSetting(name string) string {
+	for _, part := range strings.Split(os.Getenv("TAXION_ACP_HELPER"), ";") {
+		key, value, found := strings.Cut(part, "=")
+		if found && key == name {
+			return value
+		}
+	}
+	return ""
+}
+
 func TestACPHelperProcess(t *testing.T) {
-	if os.Getenv("TAXION_ACP_HELPER") != "1" {
+	if os.Getenv("TAXION_ACP_HELPER") == "" {
 		return
 	}
 	if os.Getenv("COPILOT_GITHUB_TOKEN") != "" || os.Getenv("GH_TOKEN") != "" || os.Getenv("GITHUB_TOKEN") != "" {
@@ -30,16 +40,31 @@ func TestACPHelperProcess(t *testing.T) {
 		var request struct {
 			ID     json.RawMessage `json:"id"`
 			Method string          `json:"method"`
+			Params json.RawMessage `json:"params"`
 		}
 		if json.Unmarshal(scanner.Bytes(), &request) != nil {
 			continue
 		}
 		switch request.Method {
 		case "initialize":
-			write(map[string]any{"jsonrpc": "2.0", "id": request.ID, "result": map[string]any{}})
+			version := 1
+			if configured := acpHelperSetting("protocol"); configured != "" {
+				version, _ = strconv.Atoi(configured)
+			}
+			write(map[string]any{"jsonrpc": "2.0", "id": request.ID, "result": map[string]any{"protocolVersion": version}})
 		case "session/new":
 			write(map[string]any{"jsonrpc": "2.0", "id": request.ID, "result": map[string]string{"sessionId": "fake-session"}})
 		case "session/prompt":
+			var promptRequest struct {
+				Prompt []struct {
+					Text string `json:"text"`
+				} `json:"prompt"`
+			}
+			_ = json.Unmarshal(request.Params, &promptRequest)
+			promptText := ""
+			if len(promptRequest.Prompt) > 0 {
+				promptText = promptRequest.Prompt[0].Text
+			}
 			write(map[string]any{
 				"jsonrpc": "2.0", "id": 77, "method": "session/request_permission",
 				"params": map[string]any{"sessionId": "fake-session", "toolCall": map[string]any{"title": "run"}},
@@ -59,14 +84,50 @@ func TestACPHelperProcess(t *testing.T) {
 				_ = writer.Flush()
 				return
 			}
-			write(map[string]any{
-				"jsonrpc": "2.0", "method": "session/update",
-				"params": map[string]any{"sessionId": "fake-session", "update": map[string]any{
-					"sessionUpdate": "agent_message_chunk",
-					"content":       map[string]string{"type": "text", "text": "fixed ACP response"},
-				}},
-			})
-			write(map[string]any{"jsonrpc": "2.0", "id": request.ID, "result": map[string]string{"stopReason": "end_turn"}})
+			if promptText == acpHelperSetting("block") {
+				write(map[string]any{
+					"jsonrpc": "2.0", "method": "session/update",
+					"params": map[string]any{"sessionId": "fake-session", "update": map[string]any{
+						"sessionUpdate": "agent_message_chunk",
+						"content":       map[string]string{"type": "text", "text": "partial"},
+					}},
+				})
+				if !scanner.Scan() {
+					return
+				}
+				var cancellation struct {
+					Method string `json:"method"`
+				}
+				_ = json.Unmarshal(scanner.Bytes(), &cancellation)
+				if cancellation.Method == "session/cancel" {
+					write(map[string]any{"jsonrpc": "2.0", "id": request.ID, "result": map[string]string{"stopReason": "cancelled"}})
+				}
+				continue
+			}
+			updates := 1
+			if configured := acpHelperSetting("updates"); configured != "" {
+				updates, _ = strconv.Atoi(configured)
+			}
+			for index := 0; index < updates; index++ {
+				write(map[string]any{
+					"jsonrpc": "2.0", "method": "session/update",
+					"params": map[string]any{"sessionId": "fake-session", "update": map[string]any{
+						"sessionUpdate": "agent_message_chunk",
+						"content":       map[string]string{"type": "text", "text": "fixed ACP response"},
+					}},
+				})
+			}
+			stopReason := "end_turn"
+			if configured := acpHelperSetting("stop"); configured != "" {
+				parts := strings.SplitN(configured, ":", 2)
+				if len(parts) == 2 && promptText == parts[0] {
+					stopReason = parts[1]
+				}
+			}
+			write(map[string]any{"jsonrpc": "2.0", "id": request.ID, "result": map[string]string{"stopReason": stopReason}})
+			if promptText == acpHelperSetting("exit") {
+				return
+			}
 		case "session/cancel":
 			// Cancellation is a notification and has no response.
 		}
