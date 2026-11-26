@@ -240,8 +240,12 @@ func (a *ACPAdapter) Start(ctx context.Context, request StartRequest, _ Credenti
 		closeOnFailure()
 		return StartResult{}, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown}
 	}
+	workingDirectory := a.config.WorkingDirectory
+	if request.TaskID != "" {
+		workingDirectory = request.WorktreePath
+	}
 	created, err := process.call(operationCtx, "session/new", map[string]any{
-		"cwd":        a.config.WorkingDirectory,
+		"cwd":        workingDirectory,
 		"mcpServers": []any{},
 	}, nil)
 	if err != nil {
@@ -280,6 +284,8 @@ func (a *ACPAdapter) Start(ctx context.Context, request StartRequest, _ Credenti
 				OperationID: request.OperationID, JobID: request.JobID,
 				RoleExecutionID: request.RoleExecutionID, TaskID: request.TaskID,
 				ExecutionPermissionID: request.ExecutionPermissionID,
+				WorktreeAssignmentID:  request.WorktreeAssignmentID,
+				WorktreePath:          request.WorktreePath,
 				SessionID:             session.sessionID, RequestSHA256: request.RequestSHA256,
 				ProviderIdentity: a.config.Identity,
 				ToolCall:         append([]byte(nil), permissionRequest.ToolCall...),

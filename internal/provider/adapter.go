@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 	"unicode"
@@ -315,6 +316,8 @@ type StartRequest struct {
 	RoleExecutionID       string
 	TaskID                string
 	ExecutionPermissionID string
+	WorktreeAssignmentID  string
+	WorktreePath          string
 	RequestSHA256         string
 	PromptSHA256          string
 	Prompt                string
@@ -330,6 +333,8 @@ type ACPToolPermissionRequest struct {
 	RoleExecutionID       string
 	TaskID                string
 	ExecutionPermissionID string
+	WorktreeAssignmentID  string
+	WorktreePath          string
 	SessionID             string
 	RequestSHA256         string
 	ProviderIdentity      Identity
@@ -346,7 +351,9 @@ type ACPToolPermissionAuthorizer interface {
 func (r StartRequest) Validate() error {
 	if !validIdentifier(r.OperationID) || !validIdentifier(r.JobID) || !validIdentifier(r.RoleExecutionID) ||
 		(r.TaskID == "") != (r.ExecutionPermissionID == "") ||
-		(r.TaskID != "" && (!validIdentifier(r.TaskID) || !validIdentifier(r.ExecutionPermissionID))) ||
+		(r.TaskID != "" && (!validIdentifier(r.TaskID) || !validIdentifier(r.ExecutionPermissionID) ||
+			!validIdentifier(r.WorktreeAssignmentID) || !filepath.IsAbs(r.WorktreePath) || filepath.Clean(r.WorktreePath) != r.WorktreePath)) ||
+		(r.TaskID == "" && (r.WorktreeAssignmentID != "" || r.WorktreePath != "")) ||
 		!validSHA256(r.RequestSHA256) || !validSHA256(r.PromptSHA256) ||
 		r.Prompt == "" || sha256Hex(r.Prompt) != r.PromptSHA256 ||
 		r.MaxTurns == 0 || r.MaxTokens == 0 || r.Deadline.IsZero() {

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"sort"
 	"time"
 
@@ -67,7 +68,9 @@ func NewACPExecutionPermissionAuthorizer(executionStore ProviderExecutionStore, 
 func (a *ACPExecutionPermissionAuthorizer) Authorize(ctx context.Context, request provider.ACPToolPermissionRequest) error {
 	if a == nil || a.store == nil || a.evaluator == nil || ctx == nil ||
 		request.OperationID == "" || request.JobID == "" || request.RoleExecutionID == "" ||
-		request.TaskID == "" || request.ExecutionPermissionID == "" || request.SessionID == "" ||
+		request.TaskID == "" || request.ExecutionPermissionID == "" ||
+			request.WorktreeAssignmentID == "" || !filepath.IsAbs(request.WorktreePath) ||
+			filepath.Clean(request.WorktreePath) != request.WorktreePath || request.SessionID == "" ||
 		request.RequestSHA256 == "" || len(request.ToolCall) == 0 || request.ProviderIdentity.Validate() != nil {
 		return errors.New("ACP tool permission request is incomplete")
 	}
@@ -85,6 +88,7 @@ func (a *ACPExecutionPermissionAuthorizer) Authorize(ctx context.Context, reques
 	}
 	if !executionFound || execution.JobID != request.JobID || execution.TaskID != request.TaskID ||
 		execution.Role != domain.RoleCoder || execution.ExecutionPermissionID != request.ExecutionPermissionID ||
+		execution.WorktreeAssignmentID != request.WorktreeAssignmentID || execution.WorktreePath != request.WorktreePath ||
 		execution.ProviderStartOperationID != request.OperationID {
 		return errors.New("ACP tool permission is outside the active Coder RoleExecution")
 	}
@@ -98,11 +102,25 @@ func (a *ACPExecutionPermissionAuthorizer) Authorize(ctx context.Context, reques
 	}
 	if !intentFound || startIntent.JobID != request.JobID || startIntent.RoleExecutionID != request.RoleExecutionID ||
 		startIntent.TaskID != request.TaskID || startIntent.ExecutionPermissionID != request.ExecutionPermissionID ||
+		startIntent.WorktreeAssignmentID != request.WorktreeAssignmentID || startIntent.WorktreePath != request.WorktreePath ||
 		startIntent.RequestSHA256 != request.RequestSHA256 ||
 		startIntent.ProviderID != request.ProviderIdentity.ProviderID ||
 		startIntent.AccountID != request.ProviderIdentity.AccountID ||
 		startIntent.ConfigurationSHA256 != request.ProviderIdentity.ConfigurationSHA256 {
 		return errors.New("ACP tool permission is outside the current Provider Start operation")
+	}
+	var assignment domain.WorktreeAssignment
+	assignmentFound := false
+	for _, candidate := range job.WorktreeAssignments {
+		if candidate.ID == request.WorktreeAssignmentID {
+			assignment, assignmentFound = candidate, true
+			break
+		}
+	}
+	if !assignmentFound || assignment.OwnerRoleExecutionID != request.RoleExecutionID ||
+		assignment.TaskID != request.TaskID || assignment.WorktreePath != request.WorktreePath ||
+		assignment.RepositoryID == "" || assignment.Validate(job) != nil {
+		return errors.New("ACP tool permission is not bound to the persisted Job Worktree assignment")
 	}
 	var permission domain.ExecutionPermission
 	permissionFound := false
@@ -331,7 +349,8 @@ func (c *ProviderController) DispatchTaskExecution(
 	if execution.Role != domain.RoleCoder {
 		return domain.ProviderStartObservation{}, provider.StartResult{}, errors.New("Reviewer Provider dispatch requires an immutable Worktree snapshot and enforced read-only boundary")
 	}
-	if execution.ExecutionPermissionID != permissionID || execution.TaskID == "" {
+	if execution.ExecutionPermissionID != permissionID || execution.TaskID == "" ||
+		execution.WorktreeAssignmentID == "" || execution.WorktreePath == "" {
 		return domain.ProviderStartObservation{}, provider.StartResult{}, errors.New("Task Provider dispatch permission or Task binding mismatch")
 	}
 	var intent domain.ProviderStartIntent
@@ -342,8 +361,22 @@ func (c *ProviderController) DispatchTaskExecution(
 			break
 		}
 	}
-	if !intentFound || intent.ExecutionPermissionID != permissionID {
+	if !intentFound || intent.ExecutionPermissionID != permissionID ||
+		intent.WorktreeAssignmentID != execution.WorktreeAssignmentID || intent.WorktreePath != execution.WorktreePath {
 		return domain.ProviderStartObservation{}, provider.StartResult{}, errors.New("Task Provider dispatch requires the persisted matching ProviderStartIntent")
+	}
+	var worktreeAssignment domain.WorktreeAssignment
+	worktreeAssignmentFound := false
+	for _, candidate := range job.WorktreeAssignments {
+		if candidate.ID == execution.WorktreeAssignmentID {
+			worktreeAssignment, worktreeAssignmentFound = candidate, true
+			break
+		}
+	}
+	if !worktreeAssignmentFound || worktreeAssignment.OwnerRoleExecutionID != execution.ID ||
+		worktreeAssignment.TaskID != execution.TaskID || worktreeAssignment.WorktreePath != execution.WorktreePath ||
+		worktreeAssignment.Validate(job) != nil {
+		return domain.ProviderStartObservation{}, provider.StartResult{}, errors.New("Task Provider dispatch requires a valid persisted Job Worktree assignment")
 	}
 	if err := intent.Validate(job, execution); err != nil {
 		return domain.ProviderStartObservation{}, provider.StartResult{}, fmt.Errorf("validate Task Provider Start intent: %w", err)
@@ -398,6 +431,7 @@ func (c *ProviderController) DispatchTaskExecution(
 	request := provider.StartRequest{
 		OperationID: intent.ID, JobID: job.ID, RoleExecutionID: execution.ID,
 		TaskID: execution.TaskID, ExecutionPermissionID: permission.ID,
+		WorktreeAssignmentID: worktreeAssignment.ID, WorktreePath: worktreeAssignment.WorktreePath,
 		RequestSHA256: permission.RequestSHA256, Prompt: prompt, PromptSHA256: sha256String(prompt),
 		MaxTurns: permission.ReservedTurns, MaxTokens: permission.ReservedTokens, Deadline: intent.Deadline,
 	}
