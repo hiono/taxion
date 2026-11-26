@@ -14,11 +14,11 @@ type OrchestratorStore interface {
 }
 
 type OrchestratorController struct {
-	store                  OrchestratorStore
-	communication          *CommunicationController
-	questionAuthorization  *JobQuestionAuthorizationController
-	questionTurn           *JobQuestionTurnController
-	questionBudget         domain.PlanningBudget
+	store                 OrchestratorStore
+	communication         *CommunicationController
+	questionAuthorization *JobQuestionAuthorizationController
+	questionTurn          *JobQuestionTurnController
+	questionBudget        domain.PlanningBudget
 }
 
 func NewOrchestratorController(
