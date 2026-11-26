@@ -81,7 +81,8 @@ func (a *ACPExecutionPermissionAuthorizer) Authorize(ctx context.Context, reques
 		if candidate.ID == request.RoleExecutionID { execution, executionFound = candidate, true; break }
 	}
 	if !executionFound || execution.JobID != request.JobID || execution.TaskID != request.TaskID ||
-		execution.Role != domain.RoleCoder || execution.ExecutionPermissionID != request.ExecutionPermissionID {
+		execution.Role != domain.RoleCoder || execution.ExecutionPermissionID != request.ExecutionPermissionID ||
+		execution.ProviderStartOperationID != request.OperationID {
 		return errors.New("ACP tool permission is outside the active Coder RoleExecution")
 	}
 	var startIntent domain.ProviderStartIntent
@@ -91,7 +92,10 @@ func (a *ACPExecutionPermissionAuthorizer) Authorize(ctx context.Context, reques
 	}
 	if !intentFound || startIntent.JobID != request.JobID || startIntent.RoleExecutionID != request.RoleExecutionID ||
 		startIntent.TaskID != request.TaskID || startIntent.ExecutionPermissionID != request.ExecutionPermissionID ||
-		startIntent.RequestSHA256 != request.RequestSHA256 {
+		startIntent.RequestSHA256 != request.RequestSHA256 ||
+		startIntent.ProviderID != request.ProviderIdentity.ProviderID ||
+		startIntent.AccountID != request.ProviderIdentity.AccountID ||
+		startIntent.ConfigurationSHA256 != request.ProviderIdentity.ConfigurationSHA256 {
 		return errors.New("ACP tool permission is outside the current Provider Start operation")
 	}
 	var permission domain.ExecutionPermission
@@ -104,7 +108,11 @@ func (a *ACPExecutionPermissionAuthorizer) Authorize(ctx context.Context, reques
 		permission.ConfigurationSHA256 != request.ProviderIdentity.ConfigurationSHA256 {
 		return errors.New("ACP tool permission differs from the approved ExecutionPermission identity")
 	}
-	if err := permission.ValidateFor(job, request.OperationID, request.RequestSHA256, a.now()); err != nil {
+	now := a.now()
+	if !now.Before(startIntent.Deadline) {
+		return errors.New("ACP tool permission is outside the Provider Start deadline")
+	}
+	if err := permission.ValidateFor(job, request.OperationID, request.RequestSHA256, now); err != nil {
 		return errors.New("ACP tool permission is stale, expired, or no longer approved")
 	}
 	effect, resource, err := a.evaluator.Evaluate(ctx, request)

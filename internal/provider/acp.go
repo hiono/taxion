@@ -267,14 +267,15 @@ func (a *ACPAdapter) Start(ctx context.Context, request StartRequest, _ Credenti
 				bytes.Equal(bytes.TrimSpace(permissionRequest.ToolCall), []byte("null")) {
 				return false
 			}
-			return a.config.PermissionAuthorizer.Authorize(permissionCtx, ACPToolPermissionRequest{
+			err := a.config.PermissionAuthorizer.Authorize(permissionCtx, ACPToolPermissionRequest{
 				OperationID: request.OperationID, JobID: request.JobID,
 				RoleExecutionID: request.RoleExecutionID, TaskID: request.TaskID,
 				ExecutionPermissionID: request.ExecutionPermissionID,
 				SessionID: session.sessionID, RequestSHA256: request.RequestSHA256,
 				ProviderIdentity: a.config.Identity,
 				ToolCall: append([]byte(nil), permissionRequest.ToolCall...),
-			}) == nil
+			})
+			return err == nil && !session.stopping.Load()
 		})
 	}
 	result := StartResult{
