@@ -128,7 +128,10 @@ func (a *ACPAdapter) Capabilities(ctx context.Context) (Capabilities, error) {
 	return Capabilities{Identity: a.config.Identity}, nil
 }
 
-func (a *ACPAdapter) Start(ctx context.Context, request StartRequest, lease CredentialLease) (StartResult, error) {
+// Start deliberately does not expose CredentialLease to Copilot CLI. ACP tools may
+// inherit the CLI process environment, so passing a token there would cross the
+// Tool credential boundary. The production capability gate remains fail-closed.
+func (a *ACPAdapter) Start(ctx context.Context, request StartRequest, _ CredentialLease) (StartResult, error) {
 	if a == nil || ctx == nil || request.Validate() != nil {
 		return StartResult{}, ErrProviderInvalidRequest
 	}
@@ -146,7 +149,7 @@ func (a *ACPAdapter) Start(ctx context.Context, request StartRequest, lease Cred
 		return StartResult{}, err
 	}
 
-	process, err := a.startProcess(lease)
+	process, err := a.startProcess()
 	if err != nil {
 		a.mu.Unlock()
 		return StartResult{}, err
@@ -213,7 +216,7 @@ func (a *ACPAdapter) Start(ctx context.Context, request StartRequest, lease Cred
 		MaxTokens:    request.MaxTokens,
 		Deadline:     request.Deadline,
 	}
-	if _, err := a.Send(ctx, initialTurn, lease); err != nil {
+	if _, err := a.Send(ctx, initialTurn, nil); err != nil {
 		a.mu.Lock()
 		delete(a.byRole, request.RoleExecutionID)
 		delete(a.byID, session.sessionID)
@@ -401,10 +404,7 @@ func (a *ACPAdapter) Close() error {
 	return joined
 }
 
-func (a *ACPAdapter) startProcess(lease CredentialLease) (*acpProcess, error) {
-	if lease == nil {
-		return nil, ErrCredentialUnavailable
-	}
+func (a *ACPAdapter) startProcess() (*acpProcess, error) {
 	homeDir, err := os.MkdirTemp("", "taxion-acp-home-")
 	if err != nil {
 		return nil, errors.New("prepare isolated ACP home failed")
@@ -430,46 +430,34 @@ func (a *ACPAdapter) startProcess(lease CredentialLease) (*acpProcess, error) {
 		cleanupHome()
 		return nil, errors.New("start ACP stdout pipe failed")
 	}
-	err = lease.WithSecret(func(secret []byte) error {
-		if len(secret) == 0 {
-			return ErrCredentialUnavailable
+	env := []string{
+		"PATH=" + os.Getenv("PATH"),
+		"HOME=" + homeDir,
+		"TMPDIR=" + os.TempDir(),
+		"XDG_CONFIG_HOME=" + filepath.Join(homeDir, ".config"),
+		"XDG_CACHE_HOME=" + filepath.Join(homeDir, ".cache"),
+		"XDG_DATA_HOME=" + filepath.Join(homeDir, ".local", "share"),
+	}
+	for _, name := range a.config.Environment {
+		if value, ok := os.LookupEnv(name); ok {
+			env = append(env, name+"="+value)
 		}
-		for _, value := range secret {
-			if value == 0 {
-				return ErrCredentialUnavailable
-			}
-		}
-		env := []string{
-			"PATH=" + os.Getenv("PATH"),
-			"HOME=" + homeDir,
-			"TMPDIR=" + os.TempDir(),
-			"XDG_CONFIG_HOME=" + filepath.Join(homeDir, ".config"),
-			"XDG_CACHE_HOME=" + filepath.Join(homeDir, ".cache"),
-			"XDG_DATA_HOME=" + filepath.Join(homeDir, ".local", "share"),
-			"COPILOT_GITHUB_TOKEN=" + string(secret),
-		}
-		for _, name := range a.config.Environment {
-			if value, ok := os.LookupEnv(name); ok {
-				env = append(env, name+"="+value)
-			}
-		}
-		command.Env = env
-		startErr := command.Start()
+	}
+	command.Env = env
+	if err := command.Start(); err != nil {
 		for index := range env {
 			env[index] = ""
 		}
 		command.Env = nil
-		if startErr != nil {
-			return errors.New("start Copilot CLI ACP process failed")
-		}
-		return nil
-	})
-	if err != nil {
 		_ = stdin.Close()
 		_ = stdout.Close()
 		cleanupHome()
 		return nil, errors.New("start Copilot CLI ACP process failed")
 	}
+	for index := range env {
+		env[index] = ""
+	}
+	command.Env = nil
 	process := &acpProcess{
 		cmd: command, stdin: stdin, updates: make(chan json.RawMessage, 256),
 		done: make(chan struct{}), failed: make(chan struct{}),
@@ -482,7 +470,6 @@ func (a *ACPAdapter) startProcess(lease CredentialLease) (*acpProcess, error) {
 	}()
 	return process, nil
 }
-
 func (p *acpProcess) read(stdout io.Reader) {
 	scanner := bufio.NewScanner(stdout)
 	scanner.Buffer(make([]byte, 64*1024), 4*1024*1024)

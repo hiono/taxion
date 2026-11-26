@@ -14,8 +14,8 @@ func TestACPHelperProcess(t *testing.T) {
 	if os.Getenv("TAXION_ACP_HELPER") != "1" {
 		return
 	}
-	if os.Getenv("COPILOT_GITHUB_TOKEN") == "" || os.Getenv("GH_TOKEN") != "" || os.Getenv("GITHUB_TOKEN") != "" {
-		return
+	if os.Getenv("COPILOT_GITHUB_TOKEN") != "" || os.Getenv("GH_TOKEN") != "" || os.Getenv("GITHUB_TOKEN") != "" {
+		os.Exit(17)
 	}
 	scanner := bufio.NewScanner(os.Stdin)
 	writer := bufio.NewWriter(os.Stdout)
@@ -106,12 +106,7 @@ func TestACPAdapterUsesOneProcessPerRoleAndDeniesToolRequests(t *testing.T) {
 		MaxTokens:       1000,
 		Deadline:        time.Now().Add(8 * time.Second),
 	}
-	lease, err := NewCredentialLease([]byte("test-token"))
-	if err != nil {
-		t.Fatalf("NewCredentialLease: %v", err)
-	}
-	defer lease.Close()
-	result, err := adapter.Start(ctx, start, lease)
+	result, err := adapter.Start(ctx, start, nil)
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
