@@ -34,7 +34,6 @@ const (
 	CapabilityStartLookup                Capability = "start.lookup"
 	CapabilitySendIdempotency            Capability = "send.idempotency"
 	CapabilitySendLookup                 Capability = "send.lookup"
-	// CapabilityReadOnlyContextEnforcement attests that Adapter.Send enforces TurnRequest.ReadOnlyBoundary.
 	CapabilityReadOnlyContextEnforcement Capability = "send.read_only_context_enforcement"
 	CapabilitySessionReattach            Capability = "session.cross_process_reattachment"
 	CapabilityEventReplay                Capability = "event.replay"
