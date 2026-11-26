@@ -386,8 +386,10 @@ func (r TurnRequest) Validate() error {
 		r.MaxTokens == 0 || r.Deadline.IsZero() {
 		return errors.New("Provider Turn request identity, prompt digest, or token budget is invalid")
 	}
-	if err := r.ReadOnlyBoundary.Validate(); err != nil {
-		return err
+	if r.ReadOnlyBoundary != (ReadOnlyContextBoundary{}) {
+		if err := r.ReadOnlyBoundary.Validate(); err != nil {
+			return err
+		}
 	}
 	return nil
 }
