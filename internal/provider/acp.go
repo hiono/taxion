@@ -48,6 +48,7 @@ type ACPAdapter struct {
 	byOp         map[string]StartResult
 	startingRole map[string]*acpStartReservation
 	startingOp   map[string]*acpStartReservation
+	processes    map[*acpProcess]struct{}
 }
 
 type acpStartReservation struct {
@@ -138,6 +139,7 @@ func NewACPAdapter(config ACPConfig) (*ACPAdapter, error) {
 		byOp:         make(map[string]StartResult),
 		startingRole: make(map[string]*acpStartReservation),
 		startingOp:   make(map[string]*acpStartReservation),
+		processes:    make(map[*acpProcess]struct{}),
 	}, nil
 }
 
@@ -212,6 +214,9 @@ func (a *ACPAdapter) Start(ctx context.Context, request StartRequest, _ Credenti
 	}()
 	process, err := a.startProcess()
 	if err != nil {
+		return StartResult{}, err
+	}
+	if err := a.trackProcess(process); err != nil {
 		return StartResult{}, err
 	}
 	closeOnFailure := func() { _ = process.close(operationCtx) }
@@ -331,6 +336,30 @@ func (a *ACPAdapter) Start(ctx context.Context, request StartRequest, _ Credenti
 	}
 	a.mu.Unlock()
 	return result, nil
+}
+
+func (a *ACPAdapter) trackProcess(process *acpProcess) error {
+	if a == nil || process == nil {
+		return errors.New("ACP process tracking requires an adapter and process")
+	}
+	a.mu.Lock()
+	if a.closed {
+		a.mu.Unlock()
+		closeErr := process.close(context.Background())
+		return errors.Join(errors.New("ACP adapter is closed"), closeErr)
+	}
+	if a.processes == nil {
+		a.processes = make(map[*acpProcess]struct{})
+	}
+	a.processes[process] = struct{}{}
+	a.mu.Unlock()
+	go func() {
+		<-process.done
+		a.mu.Lock()
+		delete(a.processes, process)
+		a.mu.Unlock()
+	}()
+	return nil
 }
 
 func (a *ACPAdapter) releaseStartReservation(roleExecutionID, operationID string, reservation *acpStartReservation) {
@@ -529,14 +558,17 @@ func (a *ACPAdapter) Close() error {
 		return nil
 	}
 	a.mu.Lock()
-	if a.closed {
+	if a.closed && len(a.processes) == 0 && len(a.startingRole) == 0 && len(a.startingOp) == 0 {
 		a.mu.Unlock()
 		return nil
 	}
 	a.closed = true
-	sessions := make([]*acpSession, 0, len(a.byID))
 	for _, session := range a.byID {
-		sessions = append(sessions, session)
+		session.stopping.Store(true)
+	}
+	processes := make([]*acpProcess, 0, len(a.processes))
+	for process := range a.processes {
+		processes = append(processes, process)
 	}
 	reservations := make(map[*acpStartReservation]struct{}, len(a.startingRole)+len(a.startingOp))
 	for _, reservation := range a.startingRole {
@@ -556,15 +588,15 @@ func (a *ACPAdapter) Close() error {
 	a.mu.Unlock()
 
 	var wait sync.WaitGroup
-	errorsCh := make(chan error, len(sessions))
-	for _, session := range sessions {
+	errorsCh := make(chan error, len(processes))
+	for _, process := range processes {
 		wait.Add(1)
-		go func(session *acpSession) {
+		go func(process *acpProcess) {
 			defer wait.Done()
-			if err := session.process.close(context.Background()); err != nil {
+			if err := process.close(context.Background()); err != nil {
 				errorsCh <- err
 			}
-		}(session)
+		}(process)
 	}
 	wait.Wait()
 	close(errorsCh)

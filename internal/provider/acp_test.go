@@ -1075,3 +1075,34 @@ func TestACPProcessNotificationDrainHonorsDeadline(t *testing.T) {
 		t.Fatalf("drainUpdates error = %v, want deadline exceeded", err)
 	}
 }
+
+func TestACPAdapterCloseTracksDetachedProcesses(t *testing.T) {
+	t.Setenv("TAXION_ACP_HELPER", "1")
+	adapter := newACPTestAdapter(t)
+	started, err := adapter.Start(context.Background(), newACPTestStartRequest("detach", "role_execution_detached"), nil)
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	adapter.mu.Lock()
+	session := adapter.byID[started.SessionID]
+	adapter.mu.Unlock()
+	if session == nil {
+		t.Fatal("Session was not registered")
+	}
+	process := session.process
+	adapter.detachSession(session)
+	adapter.mu.Lock()
+	_, tracked := adapter.processes[process]
+	adapter.mu.Unlock()
+	if !tracked {
+		t.Fatal("detached ACP process was removed from the adapter process registry")
+	}
+	if err := adapter.Close(); err != nil {
+		t.Fatalf("Close detached process: %v", err)
+	}
+	select {
+	case <-process.done:
+	case <-time.After(time.Second):
+		t.Fatal("Close returned before the detached CLI process exited")
+	}
+}
