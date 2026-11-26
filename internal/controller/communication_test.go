@@ -160,3 +160,47 @@ func TestCommunicationControllerRejectsUnboundRoleSession(t *testing.T) {
 		t.Fatal("CommunicationController accepted an unbound Provider Session")
 	}
 }
+
+func TestCommunicationControllerSupportsControllerAndOrchestratorActors(t *testing.T) {
+	runtime := &fakePlanningProviderRuntime{}
+	providerController, database, principal, jobID, grantID, documents := newProviderControllerFixture(t, runtime)
+	_, planner, _, _, err := providerController.StartPlanning(
+		context.Background(), jobID, grantID, "cmd_88888888888888888888888888888888", documents, principal,
+	)
+	if err != nil {
+		t.Fatalf("StartPlanning: %v", err)
+	}
+	communication, err := NewCommunicationController(database)
+	if err != nil {
+		t.Fatalf("NewCommunicationController: %v", err)
+	}
+	controllerMessage, err := communication.SendFromController(context.Background(), SystemMessageRequest{
+		JobID: jobID, CommandID: "cmd_89898989898989898989898989898989",
+		Recipient: domain.ActorRef{Kind: domain.ActorPlanner, ID: planner.ID},
+		Body: "Plannerの実行結果を確認してください。",
+	})
+	if err != nil {
+		t.Fatalf("SendFromController: %v", err)
+	}
+	orchestratorMessage, err := communication.SendFromOrchestrator(context.Background(), SystemMessageRequest{
+		JobID: jobID, CommandID: "cmd_90909090909090909090909090909090",
+		Recipient: domain.ActorRef{Kind: domain.ActorHuman, ID: principal.PrincipalID()},
+		Body: "Plannerの確認が完了しました。",
+	})
+	if err != nil {
+		t.Fatalf("SendFromOrchestrator: %v", err)
+	}
+	if controllerMessage.Message.Sender != (domain.ActorRef{Kind: domain.ActorController, ID: domain.ControllerActorID}) {
+		t.Fatalf("Controller identity was not fixed by Taxion: %#v", controllerMessage.Message.Sender)
+	}
+	if orchestratorMessage.Message.Sender != (domain.ActorRef{Kind: domain.ActorOrchestrator, ID: domain.OrchestratorActorID}) {
+		t.Fatalf("Orchestrator identity was not fixed by Taxion: %#v", orchestratorMessage.Message.Sender)
+	}
+	persisted, err := database.GetJob(context.Background(), jobID)
+	if err != nil {
+		t.Fatalf("GetJob after system messages: %v", err)
+	}
+	if len(persisted.JobMessages) != 2 {
+		t.Fatalf("persisted system messages=%d, want 2", len(persisted.JobMessages))
+	}
+}

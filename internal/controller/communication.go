@@ -33,6 +33,14 @@ type HumanMessageRequest struct {
 	Body             string
 }
 
+type SystemMessageRequest struct {
+	JobID            string
+	CommandID        string
+	Recipient        domain.ActorRef
+	ReplyToMessageID string
+	Body             string
+}
+
 type CommunicationOutcome struct {
 	MessageReceipt store.CommandReceipt
 	Message        domain.JobMessage
@@ -103,6 +111,32 @@ func (c *CommunicationController) SendFromHuman(
 		Sender:    domain.ActorRef{Kind: domain.ActorHuman, ID: principal.PrincipalID()},
 		Recipient: request.Recipient, ReplyToMessageID: request.ReplyToMessageID,
 		Body: request.Body,
+	})
+}
+
+func (c *CommunicationController) SendFromController(ctx context.Context, request SystemMessageRequest) (CommunicationOutcome, error) {
+	return c.sendFromSystem(ctx, request, domain.ActorController, domain.ControllerActorID)
+}
+
+func (c *CommunicationController) SendFromOrchestrator(ctx context.Context, request SystemMessageRequest) (CommunicationOutcome, error) {
+	return c.sendFromSystem(ctx, request, domain.ActorOrchestrator, domain.OrchestratorActorID)
+}
+
+func (c *CommunicationController) sendFromSystem(
+	ctx context.Context,
+	request SystemMessageRequest,
+	actorKind domain.ActorKind,
+	actorID string,
+) (CommunicationOutcome, error) {
+	var outcome CommunicationOutcome
+	if ctx == nil || request.JobID == "" || request.CommandID == "" {
+		return outcome, errors.New("system message requires Job and Command identities")
+	}
+	return c.persistMessage(ctx, request.JobID, request.CommandID, domain.JobMessageRequest{
+		Sender:           domain.ActorRef{Kind: actorKind, ID: actorID},
+		Recipient:        request.Recipient,
+		ReplyToMessageID: request.ReplyToMessageID,
+		Body:             request.Body,
 	})
 }
 
