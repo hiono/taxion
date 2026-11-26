@@ -4,11 +4,10 @@ import (
 	"context"
 	"errors"
 	"strings"
-
-	"github.com/hiono/taxion/internal/auth"
 	"testing"
 	"time"
 
+	"github.com/hiono/taxion/internal/auth"
 	"github.com/hiono/taxion/internal/domain"
 	"github.com/hiono/taxion/internal/store"
 )
