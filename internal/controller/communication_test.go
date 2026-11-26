@@ -177,7 +177,7 @@ func TestCommunicationControllerSupportsControllerAndOrchestratorActors(t *testi
 	controllerMessage, err := communication.SendFromController(context.Background(), SystemMessageRequest{
 		JobID: jobID, CommandID: "cmd_89898989898989898989898989898989",
 		Recipient: domain.ActorRef{Kind: domain.ActorPlanner, ID: planner.ID},
-		Body: "Plannerの実行結果を確認してください。",
+		Body:      "Plannerの実行結果を確認してください。",
 	})
 	if err != nil {
 		t.Fatalf("SendFromController: %v", err)
@@ -185,7 +185,7 @@ func TestCommunicationControllerSupportsControllerAndOrchestratorActors(t *testi
 	orchestratorMessage, err := communication.SendFromOrchestrator(context.Background(), SystemMessageRequest{
 		JobID: jobID, CommandID: "cmd_90909090909090909090909090909090",
 		Recipient: domain.ActorRef{Kind: domain.ActorHuman, ID: principal.PrincipalID()},
-		Body: "Plannerの確認が完了しました。",
+		Body:      "Plannerの確認が完了しました。",
 	})
 	if err != nil {
 		t.Fatalf("SendFromOrchestrator: %v", err)
