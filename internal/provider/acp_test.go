@@ -151,3 +151,14 @@ func TestACPAdapterRejectsMissingConfiguration(t *testing.T) {
 		t.Fatal("invalid Provider identity was accepted")
 	}
 }
+
+func TestACPStartPromptIncludesValidatedContextDocuments(t *testing.T) {
+	content := "source context"
+	document := ContextDocument{ID: "docs/README.md", SHA256: sha256Hex(content), Content: content}
+	prompt := acpStartPrompt(StartRequest{Prompt: "complete the task", Context: []ContextDocument{document}})
+	for _, expected := range []string{"complete the task", "docs/README.md", document.SHA256, content} {
+		if !strings.Contains(prompt, expected) {
+			t.Fatalf("ACP start prompt omitted context component %q", expected)
+		}
+	}
+}
