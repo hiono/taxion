@@ -112,7 +112,7 @@ func TestJobQuestionAuthorizationStorePersistsAndReplays(t *testing.T) {
 	messageReceipt, message, err := database.AddJobMessage(ctx, job.ID, job.Revision, "cmd_86868686868686868686868686868686", domain.JobMessageRequest{
 		Sender:    domain.ActorRef{Kind: domain.ActorCoder, ID: job.RoleExecutions[len(job.RoleExecutions)-1].ID},
 		Recipient: domain.ActorRef{Kind: domain.ActorPlanner, ID: planner.ID},
-		Body: "Please clarify the approved implementation constraint.",
+		Body:      "Please clarify the approved implementation constraint.",
 	})
 	if err != nil {
 		t.Fatalf("AddJobMessage: %v", err)
