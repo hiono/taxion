@@ -58,7 +58,7 @@ func TestACPHelperProcess(t *testing.T) {
 				"jsonrpc": "2.0", "method": "session/update",
 				"params": map[string]any{"sessionId": "fake-session", "update": map[string]any{
 					"sessionUpdate": "agent_message_chunk",
-					"content": map[string]string{"type": "text", "text": "fixed ACP response"},
+					"content":       map[string]string{"type": "text", "text": "fixed ACP response"},
 				}},
 			})
 			write(map[string]any{"jsonrpc": "2.0", "id": request.ID, "result": map[string]string{"stopReason": "end_turn"}})
@@ -151,4 +151,3 @@ func TestACPAdapterRejectsMissingConfiguration(t *testing.T) {
 		t.Fatal("invalid Provider identity was accepted")
 	}
 }
-
