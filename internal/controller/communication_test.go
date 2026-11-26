@@ -129,13 +129,13 @@ func TestCommunicationControllerPersistsCoderPlannerQuestionAndAnswer(t *testing
 	}
 
 	plannerInbox, err := communication.InboxForRole(
-		context.Background(), jobID, plannerExecution.ID, plannerSession,
+		context.Background(), jobID, plannerExecution.ID,
 	)
 	if err != nil || len(plannerInbox) != 1 || plannerInbox[0].ID != question.Message.ID {
 		t.Fatalf("Planner inbox = %#v, %v; want the Coder question", plannerInbox, err)
 	}
 	coderInbox, err := communication.InboxForRole(
-		context.Background(), jobID, coderExecution.ID, coderStart.ProviderSessionID,
+		context.Background(), jobID, coderExecution.ID,
 	)
 	if err != nil || len(coderInbox) != 1 || coderInbox[0].ID != answer.Message.ID {
 		t.Fatalf("Coder inbox = %#v, %v; want the Planner answer", coderInbox, err)
