@@ -258,7 +258,7 @@ func TestJobQuestionAuthorizationRejectsScopeAndBudgetExpansion(t *testing.T) {
 		ReadOnlyBoundary: PlanningReadOnlyBoundary{
 			Mode: PlanningReadOnlyBoundarySnapshot, Reference: "question_snapshot_2", SHA256: strings.Repeat("d", 64),
 		},
-		Budget:   PlanningBudget{MaxTurns: 1, MaxTokens: 100}, Deadline: contract.Deadline.Add(-time.Minute),
+		Budget: PlanningBudget{MaxTurns: 1, MaxTokens: 100}, Deadline: contract.Deadline.Add(-time.Minute),
 	}
 	if _, err := NewJobQuestionAuthorization(job, base, now.Add(3*time.Minute)); err != nil {
 		t.Fatalf("unmodified JobQuestionAuthorization request is invalid: %v", err)
@@ -357,7 +357,7 @@ func TestJobQuestionAuthorizationReservesBudgetAcrossQuestions(t *testing.T) {
 			Mode: PlanningReadOnlyBoundarySnapshot, Reference: "question_budget_snapshot_1",
 			SHA256: strings.Repeat("d", 64),
 		},
-		Budget: PlanningBudget{MaxTurns: 1, MaxTokens: 100},
+		Budget:   PlanningBudget{MaxTurns: 1, MaxTokens: 100},
 		Deadline: contract.Deadline.Add(-time.Minute),
 	}
 	first, err := NewJobQuestionAuthorization(job, firstRequest, now.Add(3*time.Minute))
