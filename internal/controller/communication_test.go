@@ -289,9 +289,9 @@ func TestCommunicationControllerPersistsCoderPlannerQuestionAndAnswer(t *testing
 
 	coderOutput, err := orchestrator.SendRoleMessage(context.Background(), RoleMessageRequest{
 		JobID: jobID, RoleExecutionID: coderExecution.ID, ProviderSessionID: coderStart.ProviderSessionID,
-		CommandID:        "cmd_68686868686868686868686868686868",
-		Recipient:        domain.ActorRef{Kind: domain.ActorReviewer, ID: reviewerExecution.ID},
-		Body:             "実装結果を確認してください。固定された成果を提示します。",
+		CommandID: "cmd_68686868686868686868686868686868",
+		Recipient: domain.ActorRef{Kind: domain.ActorReviewer, ID: reviewerExecution.ID},
+		Body:      "実装結果を確認してください。固定された成果を提示します。",
 	})
 	if err != nil {
 		t.Fatalf("SendRoleMessage Coder output: %v", err)
