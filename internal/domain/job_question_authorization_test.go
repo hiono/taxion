@@ -158,6 +158,45 @@ func TestJobQuestionAuthorizationBindsOneApprovedQuestionAndPlannerSession(t *te
 	if err := job.Validate(); err != nil {
 		t.Fatalf("Job.Validate with JobQuestionAuthorization: %v", err)
 	}
+
+	amendedJob := job
+	amendedJob.JobContractRevisions = append([]JobContractRevision(nil), job.JobContractRevisions...)
+	newerRevision := amendedJob.JobContractRevisions[len(amendedJob.JobContractRevisions)-1]
+	newerRevision.Revision++
+	newerRevision.CreatedRevision = authorization.CreatedRevision - 1
+	amendedJob.JobContractRevisions = append(amendedJob.JobContractRevisions, newerRevision)
+	if err := authorization.Validate(amendedJob); err == nil {
+		t.Fatal("JobQuestionAuthorization accepted a contract revision superseded before issuance")
+	}
+
+	lateStartJob := job
+	lateStartJob.ProviderStartObservations = append([]ProviderStartObservation(nil), job.ProviderStartObservations...)
+	for i := range lateStartJob.ProviderStartObservations {
+		if lateStartJob.ProviderStartObservations[i].OperationID == startObservation.OperationID {
+			lateStartJob.ProviderStartObservations[i].CreatedAt = authorization.IssuedAt.Add(time.Second)
+		}
+	}
+	if err := authorization.Validate(lateStartJob); err == nil {
+		t.Fatal("JobQuestionAuthorization accepted an issuance time before the accepted Planner Session")
+	}
+
+	localizedAuthorization := authorization
+	zone := time.FixedZone("UTC+02", 2*60*60)
+	localizedAuthorization.IssuedAt = authorization.IssuedAt.In(zone)
+	localizedAuthorization.Deadline = authorization.Deadline.In(zone)
+	localizedAuthorization.CreatedAt = authorization.CreatedAt.In(zone)
+	if err := localizedAuthorization.ValidateFor(
+		job, message.ID, planner.ID, startObservation.ProviderSessionID, authorizationTime.Add(time.Second),
+	); err != nil {
+		t.Fatalf("ValidateFor rejected equivalent timestamp instants: %v", err)
+	}
+	changedDeadline := localizedAuthorization
+	changedDeadline.Deadline = changedDeadline.Deadline.Add(time.Second)
+	if err := changedDeadline.ValidateFor(
+		job, message.ID, planner.ID, startObservation.ProviderSessionID, authorizationTime.Add(time.Second),
+	); err == nil {
+		t.Fatal("ValidateFor accepted a different persisted deadline instant")
+	}
 }
 
 func TestJobQuestionAuthorizationRejectsScopeAndBudgetExpansion(t *testing.T) {
