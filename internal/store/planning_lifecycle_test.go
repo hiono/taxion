@@ -9,6 +9,65 @@ import (
 	"github.com/hiono/taxion/internal/domain"
 )
 
+func TestRollbackSQLiteConnectionRestoresAutocommit(t *testing.T) {
+	database, _ := newTestStore(t)
+	ctx := context.Background()
+	connection, err := database.db.Conn(ctx)
+	if err != nil {
+		t.Fatalf("acquire SQLite connection: %v", err)
+	}
+	if _, err := connection.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
+		_ = connection.Close()
+		t.Fatalf("begin transaction: %v", err)
+	}
+	if err := rollbackSQLiteConnection(connection); err != nil {
+		_ = connection.Close()
+		t.Fatalf("rollback active transaction: %v", err)
+	}
+	if _, err := connection.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
+		_ = connection.Close()
+		t.Fatalf("connection retained a transaction after rollback: %v", err)
+	}
+	if err := rollbackSQLiteConnection(connection); err != nil {
+		_ = connection.Close()
+		t.Fatalf("rollback second transaction: %v", err)
+	}
+	if err := connection.Close(); err != nil {
+		t.Fatalf("close SQLite connection: %v", err)
+	}
+}
+
+func TestImmediateSQLiteTransactionDoesNotCommitCanceledContext(t *testing.T) {
+	database, _ := newTestStore(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	tx, err := beginImmediateSQLiteTransaction(ctx, database.db)
+	if err != nil {
+		cancel()
+		t.Fatalf("begin immediate transaction: %v", err)
+	}
+	if _, err := tx.ExecContext(ctx, "CREATE TABLE canceled_commit_probe (id INTEGER)"); err != nil {
+		cancel()
+		_ = tx.Rollback()
+		t.Fatalf("write within transaction: %v", err)
+	}
+	cancel()
+	if err := tx.Commit(); err != context.Canceled {
+		_ = tx.Rollback()
+		t.Fatalf("Commit() error = %v, want context.Canceled", err)
+	}
+	if err := tx.Rollback(); err != nil {
+		t.Fatalf("rollback canceled transaction: %v", err)
+	}
+	var count int
+	if err := database.db.QueryRowContext(context.Background(),
+		"SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'canceled_commit_probe'").Scan(&count); err != nil {
+		t.Fatalf("check canceled transaction rollback: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("canceled transaction created %d tables", count)
+	}
+}
+
 func TestPlanningLifecycleFactsPersistAtomicallyAndReconcileUnknown(t *testing.T) {
 	database, path := newTestStore(t)
 	ctx := context.Background()
@@ -99,6 +158,29 @@ func TestPlanningLifecycleFactsPersistAtomicallyAndReconcileUnknown(t *testing.T
 	turnReceipt, turn, err := database.AddPlanningTurnIntent(ctx, jobID, job.Revision, executionID, "session_1", turnCommand, strings.Repeat("d", 64), 500, principal)
 	if err != nil {
 		t.Fatalf("AddPlanningTurnIntent: %v", err)
+	}
+	second, err := Open(ctx, path)
+	if err != nil {
+		t.Fatalf("open second Store for replay contention: %v", err)
+	}
+	defer second.Close()
+	writer, err := second.db.Conn(ctx)
+	if err != nil {
+		t.Fatalf("acquire replay contention writer: %v", err)
+	}
+	defer writer.Close()
+	if _, err := writer.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
+		t.Fatalf("hold writer lock during committed replay: %v", err)
+	}
+	defer func() { _, _ = writer.ExecContext(context.Background(), "ROLLBACK") }()
+	replayedReceipt, replayedTurn, replayErr := database.AddPlanningTurnIntent(
+		ctx, jobID, job.Revision, executionID, "session_1", turnCommand, strings.Repeat("d", 64), 500, principal,
+	)
+	if replayErr != nil || replayedReceipt != turnReceipt || replayedTurn != turn {
+		t.Fatalf("committed replay under writer lock = %#v %#v %v", replayedReceipt, replayedTurn, replayErr)
+	}
+	if _, err := writer.ExecContext(ctx, "ROLLBACK"); err != nil {
+		t.Fatalf("release replay contention writer: %v", err)
 	}
 	retryReceipt, retryTurn, err := database.AddPlanningTurnIntent(ctx, jobID, turnReceipt.Revision, executionID, "session_1", turnCommand, strings.Repeat("d", 64), 500, principal)
 	if err != nil || retryReceipt != turnReceipt || retryTurn != turn {

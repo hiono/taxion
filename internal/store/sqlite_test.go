@@ -7,6 +7,7 @@ import (
 	"crypto/rsa"
 	"crypto/tls"
 	"crypto/x509"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -47,6 +48,373 @@ func newTestJob(t *testing.T, id, request string) domain.Job {
 		t.Fatalf("NewDraftJob() error = %v", err)
 	}
 	return job
+}
+
+func TestOpenUpgradesOlderSchemaVersionAndPreservesJob(t *testing.T) {
+	database, path := newTestStore(t)
+	ctx := context.Background()
+	job := newTestJob(t, "job_schema_upgrade", "Preserve the aggregate during schema upgrade.")
+	if _, err := database.createJob(ctx, job, "cmd_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", createLocalDraftJobCommandType); err != nil {
+		t.Fatalf("create Job before schema upgrade: %v", err)
+	}
+	if _, err := database.db.ExecContext(ctx, "DROP TRIGGER IF EXISTS job_aggregates_preserve_job_messages"); err != nil {
+		t.Fatalf("remove trigger to simulate the prior schema: %v", err)
+	}
+	if _, err := database.db.ExecContext(ctx, "PRAGMA user_version = 1"); err != nil {
+		t.Fatalf("set prior schema version: %v", err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatalf("close prior database: %v", err)
+	}
+
+	reopened, err := Open(ctx, path)
+	if err != nil {
+		t.Fatalf("Open() did not upgrade the supported prior schema: %v", err)
+	}
+	defer reopened.Close()
+	var version int
+	if err := reopened.db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil {
+		t.Fatalf("read upgraded schema version: %v", err)
+	}
+	if version != schemaVersion {
+		t.Fatalf("schema version = %d, want %d", version, schemaVersion)
+	}
+	got, err := reopened.GetJob(ctx, job.ID)
+	if err != nil || !reflect.DeepEqual(got, job) {
+		t.Fatalf("GetJob after schema upgrade = %#v, %v; want %#v", got, err, job)
+	}
+}
+
+func TestPlanningFactTransactionAcquiresWriterLockBeforeReading(t *testing.T) {
+	ctx := context.Background()
+	first, path := newTestStore(t)
+	second, err := Open(ctx, path)
+	if err != nil {
+		t.Fatalf("open second Store: %v", err)
+	}
+	defer second.Close()
+
+	if _, err := second.db.ExecContext(ctx, "PRAGMA busy_timeout = 0"); err != nil {
+		t.Fatalf("disable second writer busy timeout: %v", err)
+	}
+	firstTransaction, err := beginImmediateSQLiteTransaction(ctx, first.db)
+	if err != nil {
+		t.Fatalf("begin first immediate transaction: %v", err)
+	}
+	if _, err := beginImmediateSQLiteTransaction(ctx, second.db); err == nil ||
+		(!strings.Contains(strings.ToLower(err.Error()), "locked") && !strings.Contains(strings.ToLower(err.Error()), "busy")) {
+		_ = firstTransaction.Rollback()
+		t.Fatalf("second writer error = %v, want SQLITE_BUSY while first transaction is active", err)
+	}
+	if err := firstTransaction.Commit(); err != nil {
+		t.Fatalf("commit first immediate transaction: %v", err)
+	}
+	secondTransaction, err := beginImmediateSQLiteTransaction(ctx, second.db)
+	if err != nil {
+		t.Fatalf("second writer did not proceed after the first transaction committed: %v", err)
+	}
+	if err := secondTransaction.Rollback(); err != nil {
+		t.Fatalf("rollback second immediate transaction: %v", err)
+	}
+}
+
+func TestOpenCurrentSchemaDoesNotRequireSQLiteWriterLock(t *testing.T) {
+	first, path := newTestStore(t)
+	ctx := context.Background()
+	writer, err := first.db.Conn(ctx)
+	if err != nil {
+		t.Fatalf("acquire writer connection: %v", err)
+	}
+	defer writer.Close()
+	if _, err := writer.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
+		t.Fatalf("hold writer lock: %v", err)
+	}
+	defer func() { _, _ = writer.ExecContext(context.Background(), "ROLLBACK") }()
+	openContext, cancel := context.WithTimeout(ctx, 1500*time.Millisecond)
+	defer cancel()
+	reopened, err := Open(openContext, path)
+	if err != nil {
+		t.Fatalf("Open() blocked on a writer lock for a complete schema: %v", err)
+	}
+	if err := reopened.Close(); err != nil {
+		t.Fatalf("close reopened Store: %v", err)
+	}
+}
+
+func TestPreUpgradeProcessCannotOverwriteV2AggregateFacts(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "legacy-writer.sqlite")
+	legacyDB, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("open legacy process database: %v", err)
+	}
+	legacyDB.SetMaxOpenConns(1)
+	defer legacyDB.Close()
+	legacyConn, err := legacyDB.Conn(ctx)
+	if err != nil {
+		t.Fatalf("pin legacy process connection: %v", err)
+	}
+	defer legacyConn.Close()
+
+	for _, statement := range []string{
+		`PRAGMA journal_mode = WAL`,
+		`CREATE TABLE job_aggregates (
+			job_id TEXT PRIMARY KEY,
+			revision INTEGER NOT NULL CHECK (revision > 0),
+			payload_json TEXT NOT NULL,
+			integrity_sha256 TEXT NOT NULL,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		)`,
+		`PRAGMA user_version = 1`,
+	} {
+		if _, err := legacyConn.ExecContext(ctx, statement); err != nil {
+			t.Fatalf("initialize v1 database: %v", err)
+		}
+	}
+
+	job := newTestJob(t, "job_legacy_writer", "Preserve v2 aggregate facts across a live schema upgrade.")
+	legacyPayload, err := json.Marshal(job)
+	if err != nil {
+		t.Fatalf("marshal v1 Job: %v", err)
+	}
+	createdAt := job.CreatedAt.UTC().Format(time.RFC3339Nano)
+	if _, err := legacyConn.ExecContext(ctx,
+		`INSERT INTO job_aggregates
+			(job_id, revision, payload_json, integrity_sha256, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?)`,
+		job.ID, job.Revision, string(legacyPayload), digest(legacyPayload), createdAt,
+		job.UpdatedAt.UTC().Format(time.RFC3339Nano),
+	); err != nil {
+		t.Fatalf("insert v1 Job aggregate: %v", err)
+	}
+
+	upgraded, err := Open(ctx, path)
+	if err != nil {
+		t.Fatalf("upgrade database while legacy connection remains open: %v", err)
+	}
+	defer upgraded.Close()
+
+	var version int
+	if err := legacyConn.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil {
+		t.Fatalf("read schema version from legacy connection: %v", err)
+	}
+	if version != schemaVersion {
+		t.Fatalf("legacy connection schema version = %d, want %d", version, schemaVersion)
+	}
+
+	var aggregate map[string]json.RawMessage
+	if err := json.Unmarshal(legacyPayload, &aggregate); err != nil {
+		t.Fatalf("decode v1 aggregate payload: %v", err)
+	}
+	aggregate["job_messages"] = json.RawMessage(`[{"id":"message_1"}]`)
+	v2Payload, err := json.Marshal(aggregate)
+	if err != nil {
+		t.Fatalf("marshal v2 aggregate payload: %v", err)
+	}
+	v2UpdatedAt := job.UpdatedAt.Add(time.Minute).UTC()
+	if _, err := upgraded.db.ExecContext(ctx,
+		`UPDATE job_aggregates
+			SET revision = ?, payload_json = ?, integrity_sha256 = ?, updated_at = ?
+			WHERE job_id = ? AND revision = ?`,
+		2, string(v2Payload), digest(v2Payload), v2UpdatedAt.Format(time.RFC3339Nano), job.ID, 1,
+	); err != nil {
+		t.Fatalf("v2 writer appending the first facts: %v", err)
+	}
+
+	legacyUpdatedAt := v2UpdatedAt.Add(time.Minute)
+	_, err = legacyConn.ExecContext(ctx,
+		`UPDATE job_aggregates
+			SET revision = ?, payload_json = ?, integrity_sha256 = ?, updated_at = ?
+			WHERE job_id = ? AND revision = ?`,
+		3, string(legacyPayload), digest(legacyPayload), legacyUpdatedAt.Format(time.RFC3339Nano), job.ID, 2,
+	)
+	if err == nil || !strings.Contains(err.Error(), "append-only JobMessages") {
+		t.Fatalf("legacy v1 writer update error = %v, want JobMessage append-only guard rejection", err)
+	}
+
+	var storedRevision int64
+	var storedPayload, storedHash string
+	if err := upgraded.db.QueryRowContext(ctx,
+		"SELECT revision, payload_json, integrity_sha256 FROM job_aggregates WHERE job_id = ?",
+		job.ID,
+	).Scan(&storedRevision, &storedPayload, &storedHash); err != nil {
+		t.Fatalf("read aggregate after rejected legacy update: %v", err)
+	}
+	if storedRevision != 2 || storedPayload != string(v2Payload) || storedHash != digest(v2Payload) {
+		t.Fatalf("legacy update changed v2 aggregate: revision=%d payload=%s hash=%s",
+			storedRevision, storedPayload, storedHash)
+	}
+
+	mutatedAggregate := make(map[string]json.RawMessage, len(aggregate))
+	for field, value := range aggregate {
+		mutatedAggregate[field] = append(json.RawMessage(nil), value...)
+	}
+	var messages []map[string]string
+	if err := json.Unmarshal(mutatedAggregate["job_messages"], &messages); err != nil {
+		t.Fatalf("decode existing JobMessages: %v", err)
+	}
+	messages[0]["id"] = "message_mutated"
+	mutatedAggregate["job_messages"], err = json.Marshal(messages)
+	if err != nil {
+		t.Fatalf("mutate existing JobMessage fixture: %v", err)
+	}
+	mutatedPayload, err := json.Marshal(mutatedAggregate)
+	if err != nil {
+		t.Fatalf("marshal mutated aggregate: %v", err)
+	}
+	_, err = upgraded.db.ExecContext(ctx,
+		`UPDATE job_aggregates
+			SET revision = ?, payload_json = ?, integrity_sha256 = ?, updated_at = ?
+			WHERE job_id = ? AND revision = ?`,
+		3, string(mutatedPayload), digest(mutatedPayload),
+		v2UpdatedAt.Add(time.Minute).Format(time.RFC3339Nano), job.ID, 2,
+	)
+	if err == nil || !strings.Contains(err.Error(), "append-only JobMessages") {
+		t.Fatalf("writer mutation of an existing v2 fact error = %v, want JobMessage append-only guard rejection", err)
+	}
+
+	var existingMessages []json.RawMessage
+	if err := json.Unmarshal(aggregate["job_messages"], &existingMessages); err != nil {
+		t.Fatalf("decode existing JobMessages: %v", err)
+	}
+	existingMessages = append(existingMessages, json.RawMessage(`{"id":"message_2"}`))
+	aggregate["job_messages"], err = json.Marshal(existingMessages)
+	if err != nil {
+		t.Fatalf("append JobMessage: %v", err)
+	}
+	appendedPayload, err := json.Marshal(aggregate)
+	if err != nil {
+		t.Fatalf("marshal appended v2 aggregate: %v", err)
+	}
+	if _, err := upgraded.db.ExecContext(ctx,
+		`UPDATE job_aggregates
+			SET revision = ?, payload_json = ?, integrity_sha256 = ?, updated_at = ?
+			WHERE job_id = ? AND revision = ?`,
+		3, string(appendedPayload), digest(appendedPayload),
+		v2UpdatedAt.Add(2*time.Minute).Format(time.RFC3339Nano), job.ID, 2,
+	); err != nil {
+		t.Fatalf("v2 writer appending facts: %v", err)
+	}
+}
+
+func TestAggregateUpdateCannotRemoveAppendOnlyFacts(t *testing.T) {
+	database, path := newTestStore(t)
+	ctx := context.Background()
+	job := newTestJob(t, "job_append_only_trigger", "Preserve append-only facts against older writers.")
+	if _, err := database.createJob(ctx, job, "cmd_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", createLocalDraftJobCommandType); err != nil {
+		t.Fatalf("create Job: %v", err)
+	}
+	if _, err := database.db.ExecContext(ctx, "DROP TRIGGER IF EXISTS job_aggregates_preserve_job_messages"); err != nil {
+		t.Fatalf("remove trigger to simulate a version 2 database: %v", err)
+	}
+	if _, err := database.db.ExecContext(ctx, "PRAGMA user_version = 2"); err != nil {
+		t.Fatalf("set prior schema version: %v", err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatalf("close version 2 database: %v", err)
+	}
+
+	oldWriter, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("open pre-upgrade writer: %v", err)
+	}
+	oldWriter.SetMaxOpenConns(1)
+	oldWriter.SetMaxIdleConns(1)
+	defer oldWriter.Close()
+	if err := oldWriter.PingContext(ctx); err != nil {
+		t.Fatalf("connect pre-upgrade writer: %v", err)
+	}
+	oldWriteStatement, err := oldWriter.PrepareContext(ctx, `UPDATE job_aggregates
+		SET payload_json = json_remove(
+			payload_json,
+			'$.job_messages'
+		)
+		WHERE job_id = ?`)
+	if err != nil {
+		t.Fatalf("prepare pre-upgrade writer statement: %v", err)
+	}
+	defer oldWriteStatement.Close()
+
+	upgraded, err := Open(ctx, path)
+	if err != nil {
+		t.Fatalf("upgrade database while old writer remains open: %v", err)
+	}
+	defer upgraded.Close()
+	if _, err := upgraded.db.ExecContext(ctx, `UPDATE job_aggregates
+		SET payload_json = json_set(
+			payload_json,
+			'$.job_messages', json('[{"id":"message-1"}]')
+		)
+		WHERE job_id = ?`, job.ID); err != nil {
+		t.Fatalf("seed append-only facts after upgrade: %v", err)
+	}
+	if _, err := upgraded.db.ExecContext(ctx, `UPDATE job_aggregates
+		SET payload_json = json_set(
+			payload_json,
+			'$.job_messages', json('[{"id":"message-1"},{"id":"message-2"}]')
+		)
+		WHERE job_id = ?`, job.ID); err != nil {
+		t.Fatalf("append facts while preserving existing entries: %v", err)
+	}
+	if _, err := upgraded.db.ExecContext(ctx, `UPDATE job_aggregates
+		SET payload_json = json_set(
+			payload_json,
+			'$.job_messages', json('{"0":{"id":"message-1"}}')
+		)
+		WHERE job_id = ?`, job.ID); err == nil || !strings.Contains(err.Error(), "append-only JobMessages") {
+		t.Fatalf("non-array replacement error = %v, want append-only JobMessage guard rejection", err)
+	}
+	if _, err := oldWriteStatement.ExecContext(ctx, job.ID); err == nil ||
+		!strings.Contains(err.Error(), "append-only JobMessages") {
+		t.Fatalf("pre-upgrade prepared writer error = %v, want append-only fact trigger rejection", err)
+	}
+	if _, err := oldWriter.ExecContext(ctx, `UPDATE job_aggregates
+		SET payload_json = json_remove(
+			payload_json,
+			'$.job_messages'
+		)
+		WHERE job_id = ?`, job.ID); err == nil ||
+		!strings.Contains(err.Error(), "append-only JobMessages") {
+		t.Fatalf("pre-upgrade writer after statement reprepare error = %v, want append-only fact trigger rejection", err)
+	}
+	var payload string
+	if err := upgraded.db.QueryRowContext(ctx, "SELECT payload_json FROM job_aggregates WHERE job_id = ?", job.ID).Scan(&payload); err != nil {
+		t.Fatalf("read aggregate payload after rejected downgrade: %v", err)
+	}
+	for _, factID := range []string{"message-1", "message-2"} {
+		if !strings.Contains(payload, factID) {
+			t.Fatalf("aggregate payload lost append-only fact %q: %s", factID, payload)
+		}
+	}
+}
+
+func TestOpenRejectsFutureSchemaVersionWithoutChangingJournalMode(t *testing.T) {
+	database, path := newTestStore(t)
+	if _, err := database.db.ExecContext(context.Background(), "PRAGMA journal_mode = DELETE"); err != nil {
+		t.Fatalf("set DELETE journal mode: %v", err)
+	}
+	if _, err := database.db.ExecContext(context.Background(), "PRAGMA user_version = 99"); err != nil {
+		t.Fatalf("set future schema version: %v", err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatalf("close future-version database: %v", err)
+	}
+	if _, err := Open(context.Background(), path); !errors.Is(err, ErrUnsupportedSchema) {
+		t.Fatalf("Open() error = %v, want ErrUnsupportedSchema", err)
+	}
+	check, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("reopen future-version database for journal-mode check: %v", err)
+	}
+	defer check.Close()
+	var journalMode string
+	if err := check.QueryRowContext(context.Background(), "PRAGMA journal_mode").Scan(&journalMode); err != nil {
+		t.Fatalf("read journal mode after rejected Open: %v", err)
+	}
+	if journalMode != "delete" {
+		t.Fatalf("journal mode after rejected Open = %q, want delete", journalMode)
+	}
 }
 
 func TestCreateJobPersistsAggregateAndCommandReceipt(t *testing.T) {

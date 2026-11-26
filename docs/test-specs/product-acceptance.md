@@ -3,7 +3,7 @@
 Version: 1.0
 Date: 2026-11-20
 Governing contract: [Product Contract](../specifications/product-contract.md)
-Governing ADRs: ADR-001, ADR-100, ADR-101, ADR-200, ADR-201, ADR-202, ADR-300, ADR-301, ADR-400, ADR-408, ADR-409, ADR-500, ADR-501, ADR-502, ADR-503, ADR-504, ADR-505, ADR-506, ADR-507, ADR-700, ADR-701, ADR-800, ADR-801, ADR-802, ADR-811
+Governing ADRs: ADR-001, ADR-100, ADR-101, ADR-200, ADR-201, ADR-202, ADR-300, ADR-301, ADR-302, ADR-400, ADR-408, ADR-409, ADR-500, ADR-501, ADR-502, ADR-503, ADR-504, ADR-505, ADR-506, ADR-507, ADR-700, ADR-701, ADR-800, ADR-801, ADR-802, ADR-811
 Detailed Provider Adapter tests: [Provider Adapter テスト仕様書](provider-adapter-test-specification.md)
 
 ## 1. Purpose
@@ -73,17 +73,16 @@ Domain / Store検証ケースは [Job Contract Test Specification](job-contract-
 
 ### AT-005: JobMessage semantics and actor policy
 
-**Given** 6 Actorの認証済みendpoint間でJobMessageを送る。
-**When** MESSAGE / QUESTION / ANSWER / REQUEST / NOTIFICATION / HANDOFFを処理する。
+**Given** Planner / Coder / Reviewerが同一Job内で自然言語メッセージを交換する。
+**When** 質問、回答、補足、レビュー指摘を送受信する。
 **Then**
-- EnvelopeのSender / Recipient / Job / Task / RoleExecution identityはtrusted contextから確定する。
-- Bodyは自然言語であり、利用者へrouting metadataや固定JSONを要求しない。
-- 全30の非自己宛てActor関係を表現できるが、共通policyが許可を制御する。
-- ANSWERは既存QUESTIONにReplyToで相関する。
-- Question / Answer / Request / Notificationは実行権限を移転しない。
-- 承認済みJob内のTaskless PLANNERへの個別質問実行はJobQuestionAuthorizationに束縛し、QUESTION本文やMessageKindだけでgrantを作成しない。
-- BatchIDはfan-out全体で不変であり、Delivery状態はRecipientごとに分離する。
-- UNKNOWNを未配信と推測せずblind resendしない。
+- Sender / Recipientは信頼できるJob / RoleExecution contextから確定し、本文の自己申告で決めない。
+- Bodyは自然言語のまま保存・受け渡し、固定JSONやWorkflow DSLへ変換しない。
+- Job / 送受信Actorの識別に必要な情報だけを保持する。ReplyToは元の会話への復帰に必要な場合だけ保持する。
+- 通常の情報交換にMessageKind別認可、通信専用grant、BatchID、Recipient別Delivery状態機械を要求しない。
+- メッセージの保存・参照・転送だけではTask assignment、JobApproval、Execution Permission、Worktree ownershipを変更しない。
+- 追加Provider Send / Turnが必要な場合だけ、該当するProvider operationの認可を別途検証する。
+- 回答後に元のRoleExecution / Session / Contextへ戻り、同じJobで作業を継続できる。
 
 ### AT-006: Handoff safety
 
@@ -293,6 +292,20 @@ Domain / Store検証ケースは [Job Contract Test Specification](job-contract-
 - Execution AgentはJobの目的と要求能力に基づいてTaxionが選択する。
 - Ingress Clientの自己申告や指定だけでExecution Agent、Jobの依頼主体、Job authorityを確定しない。
 - 同じ製品がIngress ClientとExecution Agentの両方を担う場合も、Jobごとの役割とidentityを区別する。
+
+### AT-024: Reviewer finding and correction prompt handoff
+
+**Given** Reviewerが固定されたimmutable JobOutput / snapshotと承認済みAcceptance Criteriaを評価し、修正が必要な指摘を検出する。
+**When** Reviewerがレビュー結果をCoderへ返す。
+**Then**
+- レビュー結果は対象成果identity / digestと該当Acceptance Criteriaを特定できる。
+- 各有効な指摘は問題の内容、影響または判断理由、確認済みの対象箇所、実際に確認したADR / Product Contract / Acceptance Criteria / 実装 / テスト等の情報源、期待する修正、完了条件を示す。
+- 未確認または対象HEADと一致しない情報源は、その状態を明示する。
+- Reviewerは有効な指摘と情報源をまとめた、Coderが作業を開始できる自然言語の修正プロンプトを提示する。
+- Coderは指摘本文・コード・参照資料をuntrusted inputとして扱い、現在のコードと現行仕様で再検証する。既に解消済み、誤検知、再現しない、または現行仕様に適合する指摘は修正せず、その理由を報告する。
+- 修正プロンプトだけでJob scope、承認、Task assignment、Handoff、実行権限、外部副作用の許可を変更しない。
+- Coderの修正は新しい成果identityとして記録し、独立したReviewerが新しい成果を再評価する。過去の成果・Evidence・判断を上書きしない。
+- 通常のJobMessage以外に、固定JSON、MessageKind、通信専用grant、専用Workflow、独立Finding管理基盤を要求しない。
 
 ## 4. Evidence recording
 

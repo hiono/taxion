@@ -49,6 +49,7 @@ ADRがAcceptedであることは、実装や受入れが完了したことを意
 ### 300–399 Collaboration
 - [ADR-300: Collaborationの基本設計方針](300-collaboration-principles.md) — Accepted
 - [ADR-301: Taxion内部の6 Actor通信をJobMessageへ統一する](301-jobmessage-six-actor-communication.md) — Accepted
+- [ADR-302: Reviewerの指摘とCoder向け修正プロンプトを一体で引き継ぐ](302-review-findings-and-correction-prompts.md) — Accepted
 
 ### 400–499 Execution & Runtime
 - [ADR-400: Execution & Runtimeの基本設計方針](400-execution-runtime-principles.md) — Accepted

@@ -51,22 +51,18 @@ func (c *PlanningController) RecordStartObservation(
 	reconcilesUnknown bool,
 	principal auth.AuthenticatedPrincipal,
 ) (store.CommandReceipt, domain.ProviderStartObservation, error) {
-	job, err := c.store.GetJob(ctx, jobID)
-	if err != nil {
-		return store.CommandReceipt{}, domain.ProviderStartObservation{}, err
-	}
-	return c.store.AddProviderStartObservation(
-		ctx, jobID, job.Revision, operationID, commandID, status,
-		providerSessionID, receiptID, evidenceSHA256, reconcilesUnknown, principal,
-	)
+	return retryPlanningRevision(ctx, c.store, jobID, func(revision uint64) (store.CommandReceipt, domain.ProviderStartObservation, error) {
+		return c.store.AddProviderStartObservation(
+			ctx, jobID, revision, operationID, commandID, status,
+			providerSessionID, receiptID, evidenceSHA256, reconcilesUnknown, principal,
+		)
+	})
 }
 
 func (c *PlanningController) BeginTurn(ctx context.Context, jobID, roleExecutionID, providerSessionID, commandID, promptSHA256 string, reservedTokens uint64, principal auth.AuthenticatedPrincipal) (store.CommandReceipt, domain.PlanningTurnIntent, error) {
-	job, err := c.store.GetJob(ctx, jobID)
-	if err != nil {
-		return store.CommandReceipt{}, domain.PlanningTurnIntent{}, err
-	}
-	receipt, turn, err := c.store.AddPlanningTurnIntent(ctx, jobID, job.Revision, roleExecutionID, providerSessionID, commandID, promptSHA256, reservedTokens, principal)
+	receipt, turn, err := retryPlanningRevision(ctx, c.store, jobID, func(revision uint64) (store.CommandReceipt, domain.PlanningTurnIntent, error) {
+		return c.store.AddPlanningTurnIntent(ctx, jobID, revision, roleExecutionID, providerSessionID, commandID, promptSHA256, reservedTokens, principal)
+	})
 	if err != nil {
 		return receipt, turn, c.recordBoundaryDenial(ctx, jobID, roleExecutionID, commandID, err, principal)
 	}
@@ -74,19 +70,15 @@ func (c *PlanningController) BeginTurn(ctx context.Context, jobID, roleExecution
 }
 
 func (c *PlanningController) RecordTurnObservation(ctx context.Context, jobID, turnID, commandID, status string, tokensUsed uint64, evidenceSHA256 string, reconcilesUnknown bool, principal auth.AuthenticatedPrincipal) (store.CommandReceipt, domain.PlanningTurnObservation, error) {
-	job, err := c.store.GetJob(ctx, jobID)
-	if err != nil {
-		return store.CommandReceipt{}, domain.PlanningTurnObservation{}, err
-	}
-	return c.store.AddPlanningTurnObservation(ctx, jobID, job.Revision, turnID, commandID, status, tokensUsed, evidenceSHA256, reconcilesUnknown, principal)
+	return retryPlanningRevision(ctx, c.store, jobID, func(revision uint64) (store.CommandReceipt, domain.PlanningTurnObservation, error) {
+		return c.store.AddPlanningTurnObservation(ctx, jobID, revision, turnID, commandID, status, tokensUsed, evidenceSHA256, reconcilesUnknown, principal)
+	})
 }
 
 func (c *PlanningController) AuthorizeEffect(ctx context.Context, jobID, roleExecutionID, commandID, effect, contextSHA256 string, principal auth.AuthenticatedPrincipal) (store.CommandReceipt, domain.PlanningEffectDecision, error) {
-	job, err := c.store.GetJob(ctx, jobID)
-	if err != nil {
-		return store.CommandReceipt{}, domain.PlanningEffectDecision{}, err
-	}
-	receipt, decision, err := c.store.AddPlanningEffectDecision(ctx, jobID, job.Revision, roleExecutionID, commandID, effect, contextSHA256, principal)
+	receipt, decision, err := retryPlanningRevision(ctx, c.store, jobID, func(revision uint64) (store.CommandReceipt, domain.PlanningEffectDecision, error) {
+		return c.store.AddPlanningEffectDecision(ctx, jobID, revision, roleExecutionID, commandID, effect, contextSHA256, principal)
+	})
 	if err != nil {
 		return receipt, decision, c.recordBoundaryDenial(ctx, jobID, roleExecutionID, commandID, err, principal)
 	}
@@ -97,11 +89,9 @@ func (c *PlanningController) AuthorizeEffect(ctx context.Context, jobID, roleExe
 }
 
 func (c *PlanningController) Resume(ctx context.Context, jobID, roleExecutionID, providerSessionID, commandID, capabilityEvidenceSHA256 string, reattachmentSupported bool, principal auth.AuthenticatedPrincipal) (store.CommandReceipt, domain.PlanningResumeIntent, error) {
-	job, err := c.store.GetJob(ctx, jobID)
-	if err != nil {
-		return store.CommandReceipt{}, domain.PlanningResumeIntent{}, err
-	}
-	receipt, resume, err := c.store.AddPlanningResumeIntent(ctx, jobID, job.Revision, roleExecutionID, providerSessionID, commandID, capabilityEvidenceSHA256, reattachmentSupported, principal)
+	receipt, resume, err := retryPlanningRevision(ctx, c.store, jobID, func(revision uint64) (store.CommandReceipt, domain.PlanningResumeIntent, error) {
+		return c.store.AddPlanningResumeIntent(ctx, jobID, revision, roleExecutionID, providerSessionID, commandID, capabilityEvidenceSHA256, reattachmentSupported, principal)
+	})
 	if err != nil {
 		return receipt, resume, c.recordBoundaryDenial(ctx, jobID, roleExecutionID, commandID, err, principal)
 	}
@@ -109,11 +99,34 @@ func (c *PlanningController) Resume(ctx context.Context, jobID, roleExecutionID,
 }
 
 func (c *PlanningController) RecordResumeObservation(ctx context.Context, jobID, resumeID, commandID, status, evidenceSHA256 string, reconcilesUnknown bool, principal auth.AuthenticatedPrincipal) (store.CommandReceipt, domain.PlanningResumeObservation, error) {
-	job, err := c.store.GetJob(ctx, jobID)
-	if err != nil {
-		return store.CommandReceipt{}, domain.PlanningResumeObservation{}, err
+	return retryPlanningRevision(ctx, c.store, jobID, func(revision uint64) (store.CommandReceipt, domain.PlanningResumeObservation, error) {
+		return c.store.AddPlanningResumeObservation(ctx, jobID, revision, resumeID, commandID, status, evidenceSHA256, reconcilesUnknown, principal)
+	})
+}
+
+type planningJobReader interface {
+	GetJob(context.Context, string) (domain.Job, error)
+}
+
+func retryPlanningRevision[T any](
+	ctx context.Context,
+	reader planningJobReader,
+	jobID string,
+	write func(uint64) (store.CommandReceipt, T, error),
+) (store.CommandReceipt, T, error) {
+	var zero T
+	for attempt := 0; attempt < 2; attempt++ {
+		job, err := reader.GetJob(ctx, jobID)
+		if err != nil {
+			return store.CommandReceipt{}, zero, err
+		}
+		receipt, result, err := write(job.Revision)
+		if errors.Is(err, store.ErrIdempotencyConflict) && attempt == 0 {
+			continue
+		}
+		return receipt, result, err
 	}
-	return c.store.AddPlanningResumeObservation(ctx, jobID, job.Revision, resumeID, commandID, status, evidenceSHA256, reconcilesUnknown, principal)
+	return store.CommandReceipt{}, zero, store.ErrIdempotencyConflict
 }
 
 func (c *PlanningController) recordBoundaryDenial(ctx context.Context, jobID, roleExecutionID, sourceCommandID string, cause error, principal auth.AuthenticatedPrincipal) error {
