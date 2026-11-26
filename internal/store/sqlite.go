@@ -123,25 +123,21 @@ func Open(ctx context.Context, path string) (*Store, error) {
 }
 
 func (s *Store) initialize(ctx context.Context) error {
-	if err := s.db.PingContext(ctx); err != nil {
-		return fmt.Errorf("connect to SQLite database: %w", err)
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return fmt.Errorf("acquire SQLite schema connection: %w", err)
 	}
+	defer conn.Close()
 	for _, statement := range []string{
 		"PRAGMA foreign_keys = ON",
 		"PRAGMA busy_timeout = 5000",
 		"PRAGMA journal_mode = WAL",
 		"PRAGMA synchronous = FULL",
 	} {
-		if _, err := s.db.ExecContext(ctx, statement); err != nil {
+		if _, err := conn.ExecContext(ctx, statement); err != nil {
 			return fmt.Errorf("configure SQLite: %w", err)
 		}
 	}
-
-	conn, err := s.db.Conn(ctx)
-	if err != nil {
-		return fmt.Errorf("acquire SQLite schema connection: %w", err)
-	}
-	defer conn.Close()
 	if _, err := conn.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
 		return fmt.Errorf("begin immediate schema transaction: %w", err)
 	}
