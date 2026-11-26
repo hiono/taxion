@@ -55,6 +55,7 @@ func (c *OrchestratorController) ProcessPlannerInbox(
 		return nil, err
 	}
 	outcomes := make([]JobQuestionTurnOutcome, 0, len(inbox))
+	var processingErrors []error
 	for _, question := range inbox {
 		if question.Sender.Kind != domain.ActorCoder && question.Sender.Kind != domain.ActorReviewer {
 			continue
@@ -89,10 +90,14 @@ func (c *OrchestratorController) ProcessPlannerInbox(
 		outcome, err := c.questionTurn.Send(ctx, jobID, grant.ID, commandID, reservedTokens)
 		outcomes = append(outcomes, outcome)
 		if err != nil {
-			return outcomes, fmt.Errorf("process Planner question %s: %w", question.ID, err)
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				return outcomes, err
+			}
+			processingErrors = append(processingErrors, fmt.Errorf("process Planner question %s: %w", question.ID, err))
+			continue
 		}
 	}
-	return outcomes, nil
+	return outcomes, errors.Join(processingErrors...)
 }
 
 func questionAuthorizationForMessage(
