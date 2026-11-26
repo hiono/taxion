@@ -137,14 +137,23 @@ func (s *Store) initialize(ctx context.Context) error {
 		}
 	}
 
-	tx, err := s.db.BeginTx(ctx, nil)
+	conn, err := s.db.Conn(ctx)
 	if err != nil {
-		return fmt.Errorf("begin schema transaction: %w", err)
+		return fmt.Errorf("acquire SQLite schema connection: %w", err)
 	}
-	defer tx.Rollback()
+	defer conn.Close()
+	if _, err := conn.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
+		return fmt.Errorf("begin immediate schema transaction: %w", err)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_, _ = conn.ExecContext(context.Background(), "ROLLBACK")
+		}
+	}()
 
 	var version int
-	if err := tx.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil {
+	if err := conn.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil {
 		return fmt.Errorf("read schema version: %w", err)
 	}
 	if version > schemaVersion {
@@ -175,26 +184,27 @@ func (s *Store) initialize(ctx context.Context) error {
 		)`,
 	}
 	for _, statement := range statements {
-		if _, err := tx.ExecContext(ctx, statement); err != nil {
+		if _, err := conn.ExecContext(ctx, statement); err != nil {
 			return fmt.Errorf("create Job schema: %w", err)
 		}
 	}
 	if version < schemaVersion {
-		// This database trigger also fences old processes that opened the prior
-		// schema before migration and would otherwise discard unknown aggregate facts.
-		if _, err := tx.ExecContext(ctx, "DROP TRIGGER IF EXISTS job_aggregates_preserve_v2_facts"); err != nil {
+		// The trigger fences old processes that opened the prior schema before
+		// migration and would otherwise discard unknown append-only aggregate facts.
+		if _, err := conn.ExecContext(ctx, "DROP TRIGGER IF EXISTS job_aggregates_preserve_v2_facts"); err != nil {
 			return fmt.Errorf("replace JobAggregate fact-preservation trigger: %w", err)
 		}
-		if _, err := tx.ExecContext(ctx, preserveJobAggregateFactsTrigger); err != nil {
+		if _, err := conn.ExecContext(ctx, preserveJobAggregateFactsTrigger); err != nil {
 			return fmt.Errorf("install JobAggregate fact-preservation trigger: %w", err)
 		}
-		if _, err := tx.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d", schemaVersion)); err != nil {
+		if _, err := conn.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d", schemaVersion)); err != nil {
 			return fmt.Errorf("upgrade schema version: %w", err)
 		}
 	}
-	if err := tx.Commit(); err != nil {
+	if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
 		return fmt.Errorf("commit schema transaction: %w", err)
 	}
+	committed = true
 	return nil
 }
 
