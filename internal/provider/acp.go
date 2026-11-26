@@ -127,6 +127,7 @@ func (a *ACPAdapter) Start(ctx context.Context, request StartRequest, _ Credenti
 
 	process, err := a.startProcess()
 	if err != nil {
+		a.mu.Unlock()
 		return StartResult{}, err
 	}
 	if _, err = process.call(ctx, "initialize", map[string]any{
@@ -135,6 +136,7 @@ func (a *ACPAdapter) Start(ctx context.Context, request StartRequest, _ Credenti
 		"clientCapabilities": map[string]any{},
 	}); err != nil {
 		process.close()
+		a.mu.Unlock()
 		return StartResult{}, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown}
 	}
 	created, err := process.call(ctx, "session/new", map[string]any{
@@ -143,13 +145,20 @@ func (a *ACPAdapter) Start(ctx context.Context, request StartRequest, _ Credenti
 	})
 	if err != nil {
 		process.close()
+		a.mu.Unlock()
 		return StartResult{}, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown}
 	}
 	var sessionReply struct {
 		SessionID string `json:"sessionId"`
 	}
-	if json.Unmarshal(created, &sessionReply) != nil || sessionReply.SessionID == "" {
+	if json.Unmarshal(created, &sessionReply) != nil || !validIdentifier(sessionReply.SessionID) {
 		process.close()
+		a.mu.Unlock()
+		return StartResult{}, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown}
+	}
+	if _, exists := a.byID[sessionReply.SessionID]; exists {
+		process.close()
+		a.mu.Unlock()
 		return StartResult{}, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown}
 	}
 	session := &acpSession{
@@ -267,7 +276,7 @@ collected:
 }
 
 func (a *ACPAdapter) Stop(ctx context.Context, request StopRequest, _ CredentialLease) (StopResult, error) {
-	if err := request.Validate(); err != nil {
+	if ctx == nil || request.Validate() != nil {
 		return StopResult{}, ErrProviderInvalidRequest
 	}
 	a.mu.Lock()
@@ -277,6 +286,7 @@ func (a *ACPAdapter) Stop(ctx context.Context, request StopRequest, _ Credential
 		return StopResult{}, &OperationError{Class: FailureDefinitive, Code: OperationCodeNotFound}
 	}
 	_ = session.process.notify("session/cancel", map[string]string{"sessionId": request.SessionID})
+	_ = session.process.close()
 	// ACP cancellation is a request, not proof that tools or child processes are quiescent.
 	return StopResult{}, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown}
 }
