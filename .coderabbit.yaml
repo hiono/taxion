@@ -1,0 +1,6 @@
+reviews:
+  auto_review:
+    # Disable both initial PR-open reviews and automatic reviews on every push.
+    # Manual reviews remain available only when explicitly requested.
+    enabled: false
+    auto_incremental_review: false
