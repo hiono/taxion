@@ -9,6 +9,7 @@ import (
 
 	"github.com/hiono/taxion/internal/domain"
 	"github.com/hiono/taxion/internal/provider"
+	"github.com/hiono/taxion/internal/store"
 )
 
 type fakeQuestionReadOnlyContextResolver struct {
@@ -25,6 +26,32 @@ func (r *fakeQuestionReadOnlyContextResolver) ResolveReadOnlyBoundary(
 ) (QuestionReadOnlyContext, error) {
 	r.calls++
 	return r.result, r.err
+}
+
+type lateQuestionAuthorizationCommitStore struct {
+	JobQuestionAuthorizationStore
+	receipt       store.CommandReceipt
+	authorization domain.JobQuestionAuthorization
+	lookupCalls   int
+	addCalls      int
+	addErr        error
+}
+
+func (s *lateQuestionAuthorizationCommitStore) GetJobQuestionAuthorizationCommand(
+	ctx context.Context, jobID, commandID string,
+) (store.CommandReceipt, domain.JobQuestionAuthorization, bool, error) {
+	s.lookupCalls++
+	if s.lookupCalls == 1 {
+		return store.CommandReceipt{}, domain.JobQuestionAuthorization{}, false, nil
+	}
+	return s.receipt, s.authorization, true, nil
+}
+
+func (s *lateQuestionAuthorizationCommitStore) AddJobQuestionAuthorization(
+	context.Context, string, uint64, domain.JobQuestionAuthorizationRequest,
+) (store.CommandReceipt, domain.JobQuestionAuthorization, error) {
+	s.addCalls++
+	return store.CommandReceipt{}, domain.JobQuestionAuthorization{}, s.addErr
 }
 
 func TestCommunicationControllerPersistsCoderPlannerQuestionAndAnswer(t *testing.T) {
@@ -170,6 +197,38 @@ func TestCommunicationControllerPersistsCoderPlannerQuestionAndAnswer(t *testing
 	if questionGrant.RepositoryID != revision.Contract.TargetRepositories[0] ||
 		questionGrant.QuestionMessageID != question.Message.ID || resolver.calls != 1 {
 		t.Fatalf("JobQuestionAuthorization lost its scope or resolver was not called once: %#v calls=%d", questionGrant, resolver.calls)
+	}
+
+	for _, test := range []struct {
+		name        string
+		resolverErr error
+		addErr      error
+	}{
+		{name: "resolver failure after concurrent commit", resolverErr: errors.New("transient resolver failure")},
+		{name: "store conflict after concurrent commit", addErr: store.ErrIdempotencyConflict},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			lateStore := &lateQuestionAuthorizationCommitStore{
+				JobQuestionAuthorizationStore: database,
+				receipt: questionReceipt, authorization: questionGrant, addErr: test.addErr,
+			}
+			lateResolver := &fakeQuestionReadOnlyContextResolver{
+				result: resolver.result, err: test.resolverErr,
+			}
+			lateController, err := NewJobQuestionAuthorizationController(lateStore, lateResolver)
+			if err != nil {
+				t.Fatalf("NewJobQuestionAuthorizationController: %v", err)
+			}
+			replayedReceipt, replayedGrant, err := lateController.Authorize(
+				context.Background(), jobID, question.Message.ID, questionCommandID,
+				questionBudget, questionDeadline,
+			)
+			if err != nil || replayedReceipt != questionReceipt || replayedGrant.ID != questionGrant.ID ||
+				lateStore.lookupCalls != 2 || lateStore.addCalls != boolToInt(test.resolverErr == nil) {
+				t.Fatalf("concurrent committed command was not replayed: receipt=%#v grant=%#v lookups=%d adds=%d err=%v",
+					replayedReceipt, replayedGrant, lateStore.lookupCalls, lateStore.addCalls, err)
+			}
+		})
 	}
 	resolver.err = errors.New("read-only context resolver unavailable")
 	retryReceipt, retryGrant, err := questionAuthorizer.Authorize(
