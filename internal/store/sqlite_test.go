@@ -196,12 +196,7 @@ func TestPreUpgradeProcessCannotOverwriteV2AggregateFacts(t *testing.T) {
 	if err := json.Unmarshal(legacyPayload, &aggregate); err != nil {
 		t.Fatalf("decode v1 aggregate payload: %v", err)
 	}
-	for field, fact := range map[string]string{
-		"job_messages":                `{"id":"message_1"}`,
-		"job_question_authorizations": `{"id":"authorization_1"}`,
-	} {
-		aggregate[field] = json.RawMessage("[" + fact + "]")
-	}
+	aggregate["job_messages"] = json.RawMessage(`[{"id":"message_1"}]`)
 	v2Payload, err := json.Marshal(aggregate)
 	if err != nil {
 		t.Fatalf("marshal v2 aggregate payload: %v", err)
@@ -223,8 +218,8 @@ func TestPreUpgradeProcessCannotOverwriteV2AggregateFacts(t *testing.T) {
 			WHERE job_id = ? AND revision = ?`,
 		3, string(legacyPayload), digest(legacyPayload), legacyUpdatedAt.Format(time.RFC3339Nano), job.ID, 2,
 	)
-	if err == nil || !strings.Contains(err.Error(), "append-only v2 facts") {
-		t.Fatalf("legacy v1 writer update error = %v, want append-only v2 fact guard rejection", err)
+	if err == nil || !strings.Contains(err.Error(), "append-only JobMessages") {
+		t.Fatalf("legacy v1 writer update error = %v, want JobMessage append-only guard rejection", err)
 	}
 
 	var storedRevision int64
@@ -264,23 +259,18 @@ func TestPreUpgradeProcessCannotOverwriteV2AggregateFacts(t *testing.T) {
 		3, string(mutatedPayload), digest(mutatedPayload),
 		v2UpdatedAt.Add(time.Minute).Format(time.RFC3339Nano), job.ID, 2,
 	)
-	if err == nil || !strings.Contains(err.Error(), "append-only v2 facts") {
-		t.Fatalf("writer mutation of an existing v2 fact error = %v, want append-only v2 fact guard rejection", err)
+	if err == nil || !strings.Contains(err.Error(), "append-only JobMessages") {
+		t.Fatalf("writer mutation of an existing v2 fact error = %v, want JobMessage append-only guard rejection", err)
 	}
 
-	for field, fact := range map[string]string{
-		"job_messages":                `{"id":"message_2"}`,
-		"job_question_authorizations": `{"id":"authorization_2"}`,
-	} {
-		var existing []json.RawMessage
-		if err := json.Unmarshal(aggregate[field], &existing); err != nil {
-			t.Fatalf("decode existing %s: %v", field, err)
-		}
-		existing = append(existing, json.RawMessage(fact))
-		aggregate[field], err = json.Marshal(existing)
-		if err != nil {
-			t.Fatalf("append %s: %v", field, err)
-		}
+	var existingMessages []json.RawMessage
+	if err := json.Unmarshal(aggregate["job_messages"], &existingMessages); err != nil {
+		t.Fatalf("decode existing JobMessages: %v", err)
+	}
+	existingMessages = append(existingMessages, json.RawMessage(`{"id":"message_2"}`))
+	aggregate["job_messages"], err = json.Marshal(existingMessages)
+	if err != nil {
+		t.Fatalf("append JobMessage: %v", err)
 	}
 	appendedPayload, err := json.Marshal(aggregate)
 	if err != nil {
@@ -327,8 +317,7 @@ func TestAggregateUpdateCannotRemoveAppendOnlyFacts(t *testing.T) {
 	oldWriteStatement, err := oldWriter.PrepareContext(ctx, `UPDATE job_aggregates
 		SET payload_json = json_remove(
 			payload_json,
-			'$.job_messages',
-			'$.job_question_authorizations'
+			'$.job_messages'
 		)
 		WHERE job_id = ?`)
 	if err != nil {
@@ -344,8 +333,7 @@ func TestAggregateUpdateCannotRemoveAppendOnlyFacts(t *testing.T) {
 	if _, err := upgraded.db.ExecContext(ctx, `UPDATE job_aggregates
 		SET payload_json = json_set(
 			payload_json,
-			'$.job_messages', json('[{"id":"message-1"}]'),
-			'$.job_question_authorizations', json('[{"id":"grant-1"}]')
+			'$.job_messages', json('[{"id":"message-1"}]')
 		)
 		WHERE job_id = ?`, job.ID); err != nil {
 		t.Fatalf("seed append-only facts after upgrade: %v", err)
@@ -353,31 +341,29 @@ func TestAggregateUpdateCannotRemoveAppendOnlyFacts(t *testing.T) {
 	if _, err := upgraded.db.ExecContext(ctx, `UPDATE job_aggregates
 		SET payload_json = json_set(
 			payload_json,
-			'$.job_messages', json('[{"id":"message-1"},{"id":"message-2"}]'),
-			'$.job_question_authorizations', json('[{"id":"grant-1"},{"id":"grant-2"}]')
+			'$.job_messages', json('[{"id":"message-1"},{"id":"message-2"}]')
 		)
 		WHERE job_id = ?`, job.ID); err != nil {
 		t.Fatalf("append facts while preserving existing entries: %v", err)
 	}
 	if _, err := oldWriteStatement.ExecContext(ctx, job.ID); err == nil ||
-		!strings.Contains(err.Error(), "append-only v2 facts") {
+		!strings.Contains(err.Error(), "append-only JobMessages") {
 		t.Fatalf("pre-upgrade prepared writer error = %v, want append-only fact trigger rejection", err)
 	}
 	if _, err := oldWriter.ExecContext(ctx, `UPDATE job_aggregates
 		SET payload_json = json_remove(
 			payload_json,
-			'$.job_messages',
-			'$.job_question_authorizations'
+			'$.job_messages'
 		)
 		WHERE job_id = ?`, job.ID); err == nil ||
-		!strings.Contains(err.Error(), "append-only v2 facts") {
+		!strings.Contains(err.Error(), "append-only JobMessages") {
 		t.Fatalf("pre-upgrade writer after statement reprepare error = %v, want append-only fact trigger rejection", err)
 	}
 	var payload string
 	if err := upgraded.db.QueryRowContext(ctx, "SELECT payload_json FROM job_aggregates WHERE job_id = ?", job.ID).Scan(&payload); err != nil {
 		t.Fatalf("read aggregate payload after rejected downgrade: %v", err)
 	}
-	for _, factID := range []string{"message-1", "message-2", "grant-1", "grant-2"} {
+	for _, factID := range []string{"message-1", "message-2"} {
 		if !strings.Contains(payload, factID) {
 			t.Fatalf("aggregate payload lost append-only fact %q: %s", factID, payload)
 		}
