@@ -27,7 +27,9 @@ var (
 	ErrUnsupportedSchema   = errors.New("unsupported database schema version")
 )
 
-const schemaVersion = 2
+// schemaVersion covers both SQLite tables and the serialized JobAggregate contract.
+// Increment it when older binaries could discard newly added aggregate fields.
+const schemaVersion = 3
 const createLocalDraftJobCommandType = "CreateJob"
 const createTrustedDraftJobCommandType = "CreateTrustedDraftJob"
 const addPlanningAuthorizationCommandType = "AddPlanningAuthorization"
