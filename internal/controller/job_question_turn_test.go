@@ -175,16 +175,16 @@ func newJobQuestionTurnFixture(t *testing.T) jobQuestionTurnFixture {
 			{
 				Capability: provider.CapabilitySendIdempotency, Identity: runtime.identity,
 				TestID: "question-turn", EvidenceSHA256: strings.Repeat("a", 64),
-				EvidenceLevel: provider.EvidenceLive, VerifiedAt: time.Now().UTC(),
+				EvidenceLevel: provider.EvidenceSynthetic, VerifiedAt: time.Now().UTC(),
 			},
 			{
 				Capability: provider.CapabilityReadOnlyContextEnforcement, Identity: runtime.identity,
 				TestID: "read-only-context", EvidenceSHA256: strings.Repeat("b", 64),
-				EvidenceLevel: provider.EvidenceLive, VerifiedAt: time.Now().UTC(),
+				EvidenceLevel: provider.EvidenceSynthetic, VerifiedAt: time.Now().UTC(),
 			},
 		},
 	}
-	controller, err := NewJobQuestionTurnController(database, runtime)
+	controller, err := newJobQuestionTurnController(database, runtime, provider.EvidenceSynthetic)
 	if err != nil {
 		t.Fatalf("NewJobQuestionTurnController: %v", err)
 	}
@@ -250,12 +250,12 @@ func TestJobQuestionTurnControllerReconcilesUnknownWithoutBlindResend(t *testing
 		ReadOnlyContextEnforcement: true, FinalOutputRetrieval: true,
 		UsageIdentity: true, UsageCompleteness: true,
 		Evidence: []provider.CapabilityEvidence{
-			{Capability: provider.CapabilitySendIdempotency, Identity: f.runtime.identity, TestID: "send-idempotency", EvidenceSHA256: strings.Repeat("5", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
-			{Capability: provider.CapabilityReadOnlyContextEnforcement, Identity: f.runtime.identity, TestID: "read-only-context", EvidenceSHA256: strings.Repeat("6", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
-			{Capability: provider.CapabilitySendLookup, Identity: f.runtime.identity, TestID: "lookup", EvidenceSHA256: strings.Repeat("a", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
-			{Capability: provider.CapabilityFinalOutput, Identity: f.runtime.identity, TestID: "result", EvidenceSHA256: strings.Repeat("b", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
-			{Capability: provider.CapabilityUsageIdentity, Identity: f.runtime.identity, TestID: "usage-id", EvidenceSHA256: strings.Repeat("c", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
-			{Capability: provider.CapabilityUsageCompleteness, Identity: f.runtime.identity, TestID: "usage-complete", EvidenceSHA256: strings.Repeat("d", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
+			{Capability: provider.CapabilitySendIdempotency, Identity: f.runtime.identity, TestID: "send-idempotency", EvidenceSHA256: strings.Repeat("5", 64), EvidenceLevel: provider.EvidenceSynthetic, VerifiedAt: now},
+			{Capability: provider.CapabilityReadOnlyContextEnforcement, Identity: f.runtime.identity, TestID: "read-only-context", EvidenceSHA256: strings.Repeat("6", 64), EvidenceLevel: provider.EvidenceSynthetic, VerifiedAt: now},
+			{Capability: provider.CapabilitySendLookup, Identity: f.runtime.identity, TestID: "lookup", EvidenceSHA256: strings.Repeat("a", 64), EvidenceLevel: provider.EvidenceSynthetic, VerifiedAt: now},
+			{Capability: provider.CapabilityFinalOutput, Identity: f.runtime.identity, TestID: "result", EvidenceSHA256: strings.Repeat("b", 64), EvidenceLevel: provider.EvidenceSynthetic, VerifiedAt: now},
+			{Capability: provider.CapabilityUsageIdentity, Identity: f.runtime.identity, TestID: "usage-id", EvidenceSHA256: strings.Repeat("c", 64), EvidenceLevel: provider.EvidenceSynthetic, VerifiedAt: now},
+			{Capability: provider.CapabilityUsageCompleteness, Identity: f.runtime.identity, TestID: "usage-complete", EvidenceSHA256: strings.Repeat("d", 64), EvidenceLevel: provider.EvidenceSynthetic, VerifiedAt: now},
 		},
 	}
 	f.runtime.sendErr = &provider.OperationError{Class: provider.FailureAmbiguous, Code: provider.OperationCodeUnknown}
@@ -309,11 +309,11 @@ func TestJobQuestionTurnControllerReconcilesFailedLookupWithoutResult(t *testing
 		Identity: f.runtime.identity, SendIdempotency: true, SendLookup: true,
 		ReadOnlyContextEnforcement: true, UsageIdentity: true, UsageCompleteness: true,
 		Evidence: []provider.CapabilityEvidence{
-			{Capability: provider.CapabilitySendIdempotency, Identity: f.runtime.identity, TestID: "send-idempotency", EvidenceSHA256: strings.Repeat("5", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
-			{Capability: provider.CapabilityReadOnlyContextEnforcement, Identity: f.runtime.identity, TestID: "read-only-context", EvidenceSHA256: strings.Repeat("6", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
-			{Capability: provider.CapabilitySendLookup, Identity: f.runtime.identity, TestID: "lookup", EvidenceSHA256: strings.Repeat("a", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
-			{Capability: provider.CapabilityUsageIdentity, Identity: f.runtime.identity, TestID: "usage-id", EvidenceSHA256: strings.Repeat("c", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
-			{Capability: provider.CapabilityUsageCompleteness, Identity: f.runtime.identity, TestID: "usage-complete", EvidenceSHA256: strings.Repeat("d", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
+			{Capability: provider.CapabilitySendIdempotency, Identity: f.runtime.identity, TestID: "send-idempotency", EvidenceSHA256: strings.Repeat("5", 64), EvidenceLevel: provider.EvidenceSynthetic, VerifiedAt: now},
+			{Capability: provider.CapabilityReadOnlyContextEnforcement, Identity: f.runtime.identity, TestID: "read-only-context", EvidenceSHA256: strings.Repeat("6", 64), EvidenceLevel: provider.EvidenceSynthetic, VerifiedAt: now},
+			{Capability: provider.CapabilitySendLookup, Identity: f.runtime.identity, TestID: "lookup", EvidenceSHA256: strings.Repeat("a", 64), EvidenceLevel: provider.EvidenceSynthetic, VerifiedAt: now},
+			{Capability: provider.CapabilityUsageIdentity, Identity: f.runtime.identity, TestID: "usage-id", EvidenceSHA256: strings.Repeat("c", 64), EvidenceLevel: provider.EvidenceSynthetic, VerifiedAt: now},
+			{Capability: provider.CapabilityUsageCompleteness, Identity: f.runtime.identity, TestID: "usage-complete", EvidenceSHA256: strings.Repeat("d", 64), EvidenceLevel: provider.EvidenceSynthetic, VerifiedAt: now},
 		},
 	}
 	f.runtime.sendErr = &provider.OperationError{Class: provider.FailureAmbiguous, Code: provider.OperationCodeUnknown}
@@ -345,14 +345,50 @@ func TestJobQuestionTurnControllerReconcilesFailedLookupWithoutResult(t *testing
 	}
 }
 
+func TestJobQuestionTurnControllerRequiresLiveEvidenceOutsideSyntheticHarness(t *testing.T) {
+	f := newJobQuestionTurnFixture(t)
+	productionController, err := NewJobQuestionTurnController(f.database, f.runtime)
+	if err != nil {
+		t.Fatalf("NewJobQuestionTurnController: %v", err)
+	}
+	now := time.Now().UTC()
+	f.runtime.capabilities = provider.Capabilities{
+		Identity: f.runtime.identity, SendIdempotency: true, ReadOnlyContextEnforcement: true,
+		Evidence: []provider.CapabilityEvidence{
+			{
+				Capability: provider.CapabilitySendIdempotency, Identity: f.runtime.identity,
+				TestID: "synthetic-send-idempotency", EvidenceSHA256: strings.Repeat("a", 64),
+				EvidenceLevel: provider.EvidenceSynthetic, VerifiedAt: now,
+			},
+			{
+				Capability: provider.CapabilityReadOnlyContextEnforcement, Identity: f.runtime.identity,
+				TestID: "synthetic-read-only-context", EvidenceSHA256: strings.Repeat("b", 64),
+				EvidenceLevel: provider.EvidenceSynthetic, VerifiedAt: now,
+			},
+		},
+	}
+	if _, err := productionController.Send(context.Background(), f.jobID, f.authorizationID,
+		"cmd_b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1", 100); !errors.Is(err, provider.ErrUnsupportedCapability) {
+		t.Fatalf("production Send with synthetic evidence = %v, want ErrUnsupportedCapability", err)
+	}
+	job, err := f.database.GetJob(context.Background(), f.jobID)
+	if err != nil {
+		t.Fatalf("GetJob: %v", err)
+	}
+	if len(job.JobQuestionTurnIntents) != 0 || f.runtime.sendCalls != 0 {
+		t.Fatalf("synthetic evidence crossed the production gate: intents=%d sends=%d",
+			len(job.JobQuestionTurnIntents), f.runtime.sendCalls)
+	}
+}
+
 func TestJobQuestionTurnControllerRejectsProviderWithoutSafeSend(t *testing.T) {
 	f := newJobQuestionTurnFixture(t)
 	now := time.Now().UTC()
 	f.runtime.capabilities = provider.Capabilities{
 		Identity: f.runtime.identity, SendLookup: true, ReadOnlyContextEnforcement: true,
 		Evidence: []provider.CapabilityEvidence{
-			{Capability: provider.CapabilitySendLookup, Identity: f.runtime.identity, TestID: "lookup-only", EvidenceSHA256: strings.Repeat("a", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
-			{Capability: provider.CapabilityReadOnlyContextEnforcement, Identity: f.runtime.identity, TestID: "read-only-context", EvidenceSHA256: strings.Repeat("b", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
+			{Capability: provider.CapabilitySendLookup, Identity: f.runtime.identity, TestID: "lookup-only", EvidenceSHA256: strings.Repeat("a", 64), EvidenceLevel: provider.EvidenceSynthetic, VerifiedAt: now},
+			{Capability: provider.CapabilityReadOnlyContextEnforcement, Identity: f.runtime.identity, TestID: "read-only-context", EvidenceSHA256: strings.Repeat("b", 64), EvidenceLevel: provider.EvidenceSynthetic, VerifiedAt: now},
 		},
 	}
 	if _, err := f.controller.Send(context.Background(), f.jobID, f.authorizationID,
@@ -376,7 +412,7 @@ func TestJobQuestionTurnControllerRejectsProviderWithoutReadOnlyContextEnforceme
 		Evidence: []provider.CapabilityEvidence{{
 			Capability: provider.CapabilitySendIdempotency, Identity: f.runtime.identity,
 			TestID: "send-idempotency", EvidenceSHA256: strings.Repeat("a", 64),
-			EvidenceLevel: provider.EvidenceLive, VerifiedAt: now,
+			EvidenceLevel: provider.EvidenceSynthetic, VerifiedAt: now,
 		}},
 	}
 	if _, err := f.controller.Send(context.Background(), f.jobID, f.authorizationID,
@@ -610,7 +646,7 @@ func TestOrchestratorReplaysCompletedTurnAfterReplyPersistenceFailure(t *testing
 		t.Fatalf("NewJobQuestionAuthorizationController: %v", err)
 	}
 	replyStore := &failOnceQuestionReplyStore{Store: fixture.database}
-	turnController, err := NewJobQuestionTurnController(replyStore, fixture.runtime)
+	turnController, err := newJobQuestionTurnController(replyStore, fixture.runtime, provider.EvidenceSynthetic)
 	if err != nil {
 		t.Fatalf("NewJobQuestionTurnController: %v", err)
 	}
