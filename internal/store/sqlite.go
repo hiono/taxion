@@ -58,7 +58,6 @@ BEGIN
 	SELECT RAISE(ABORT, 'append-only JobMessages');
 END`
 
-
 const preserveJobQuestionAuthorizationsTrigger = `CREATE TRIGGER IF NOT EXISTS job_aggregates_preserve_job_question_authorizations
 BEFORE UPDATE OF payload_json ON job_aggregates
 WHEN EXISTS (
