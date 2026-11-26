@@ -2,6 +2,7 @@ package provider
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -16,6 +17,8 @@ import (
 	"sync/atomic"
 	"time"
 )
+
+const maxACPOutputBytes = 4 * 1024 * 1024
 
 // ACPConfig selects one Copilot CLI ACP process for each RoleExecution.
 // Tool permission requests are denied by default; this adapter does not infer
@@ -37,6 +40,7 @@ var allowedACPEnvironment = map[string]struct{}{
 type ACPAdapter struct {
 	config ACPConfig
 	mu     sync.Mutex
+	closed bool
 	byRole map[string]*acpSession
 	byID   map[string]*acpSession
 	byOp   map[string]StartResult
@@ -47,7 +51,8 @@ type acpSession struct {
 	processID       int
 	sessionID       string
 	process         *acpProcess
-	mu              sync.Mutex
+	turnGate        chan struct{}
+	mu              sync.RWMutex
 	turns           map[string]TurnResult
 }
 
@@ -57,26 +62,31 @@ type acpProcess struct {
 	pending  sync.Map
 	updates  chan json.RawMessage
 	done     chan struct{}
+	stop     chan struct{}
 	failed   chan struct{}
 	failMu   sync.Mutex
 	failErr  error
 	failOnce sync.Once
-	writeMu  sync.Mutex
+	stopOnce sync.Once
+	closing  atomic.Bool
+	writeGate chan struct{}
 	nextID   atomic.Uint64
 }
 
 type acpMessage struct {
-	ID     json.RawMessage `json:"id,omitempty"`
-	Method string          `json:"method,omitempty"`
-	Params json.RawMessage `json:"params,omitempty"`
-	Result json.RawMessage `json:"result,omitempty"`
-	Error  *struct {
-		Code    int    `json:"code"`
-		Message string `json:"message"`
-	} `json:"error,omitempty"`
+	JSONRPC string          `json:"jsonrpc"`
+	ID      json.RawMessage `json:"id,omitempty"`
+	Method  string          `json:"method,omitempty"`
+	Params  json.RawMessage `json:"params,omitempty"`
+	Result  json.RawMessage `json:"result,omitempty"`
+	Error   json.RawMessage `json:"error,omitempty"`
 }
 
 func NewACPAdapter(config ACPConfig) (*ACPAdapter, error) {
+	// Copy caller-owned slices before validation so later mutation cannot
+	// change the command or environment that will be passed to the child.
+	config.Args = append([]string(nil), config.Args...)
+	config.Environment = append([]string(nil), config.Environment...)
 	if config.Command == "" || config.WorkingDirectory == "" {
 		return nil, errors.New("ACP command and working directory are required")
 	}
@@ -105,7 +115,12 @@ func NewACPAdapter(config ACPConfig) (*ACPAdapter, error) {
 		seenEnvironment[name] = struct{}{}
 	}
 	config.WorkingDirectory = absolute
-	return &ACPAdapter{config: config, byRole: make(map[string]*acpSession), byID: make(map[string]*acpSession), byOp: make(map[string]StartResult)}, nil
+	return &ACPAdapter{
+		config: config,
+		byRole: make(map[string]*acpSession),
+		byID:   make(map[string]*acpSession),
+		byOp:   make(map[string]StartResult),
+	}, nil
 }
 
 func (a *ACPAdapter) Identity() Identity {
@@ -128,14 +143,34 @@ func (a *ACPAdapter) Capabilities(ctx context.Context) (Capabilities, error) {
 	return Capabilities{Identity: a.config.Identity}, nil
 }
 
-// Start deliberately does not expose CredentialLease to Copilot CLI. ACP tools may
-// inherit the CLI process environment, so passing a token there would cross the
-// Tool credential boundary. The production capability gate remains fail-closed.
+func acpInitialTurnID(roleExecutionID string) string {
+	return "start_" + sha256Hex(roleExecutionID)[:32]
+}
+
+func acpReceiptID(prefix, value string) string {
+	return prefix + sha256Hex(value)[:32]
+}
+
 func (a *ACPAdapter) Start(ctx context.Context, request StartRequest, _ CredentialLease) (StartResult, error) {
 	if a == nil || ctx == nil || request.Validate() != nil {
 		return StartResult{}, ErrProviderInvalidRequest
 	}
+	operationCtx, cancel := context.WithDeadline(ctx, request.Deadline)
+	defer cancel()
+	if err := operationCtx.Err(); err != nil {
+		return StartResult{}, err
+	}
+	initialPrompt := acpStartPrompt(request)
+	initialTurnID := acpInitialTurnID(request.RoleExecutionID)
+	if !validIdentifier(initialTurnID) {
+		return StartResult{}, ErrProviderInvalidRequest
+	}
+
 	a.mu.Lock()
+	if a.closed {
+		a.mu.Unlock()
+		return StartResult{}, &OperationError{Class: FailureDefinitive, Code: OperationCodeUnavailable}
+	}
 	if existing, ok := a.byOp[request.OperationID]; ok {
 		a.mu.Unlock()
 		return existing, nil
@@ -144,36 +179,41 @@ func (a *ACPAdapter) Start(ctx context.Context, request StartRequest, _ Credenti
 		a.mu.Unlock()
 		return StartResult{}, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown}
 	}
-	if err := ctx.Err(); err != nil {
-		a.mu.Unlock()
-		return StartResult{}, err
-	}
 
 	process, err := a.startProcess()
 	if err != nil {
 		a.mu.Unlock()
 		return StartResult{}, err
 	}
-	if _, err = process.call(ctx, "initialize", map[string]any{
+	initialized, err := process.call(operationCtx, "initialize", map[string]any{
 		"protocolVersion":    1,
 		"clientInfo":         map[string]string{"name": "taxion", "version": "0.1"},
 		"clientCapabilities": map[string]any{},
-	}); err != nil {
-		process.close(ctx)
+	}, nil)
+	if err != nil {
+		_ = process.close(operationCtx)
 		a.mu.Unlock()
 		return StartResult{}, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown}
 	}
-	if err := process.notify("initialized", map[string]any{}); err != nil {
-		process.close(ctx)
+	var negotiated struct {
+		ProtocolVersion int `json:"protocolVersion"`
+	}
+	if json.Unmarshal(initialized, &negotiated) != nil || negotiated.ProtocolVersion != 1 {
+		_ = process.close(operationCtx)
+		a.mu.Unlock()
+		return StartResult{}, &OperationError{Class: FailureDefinitive, Code: OperationCodeUnsupported}
+	}
+	if err := process.notify(operationCtx, "initialized", map[string]any{}); err != nil {
+		_ = process.close(operationCtx)
 		a.mu.Unlock()
 		return StartResult{}, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown}
 	}
-	created, err := process.call(ctx, "session/new", map[string]any{
+	created, err := process.call(operationCtx, "session/new", map[string]any{
 		"cwd":        a.config.WorkingDirectory,
 		"mcpServers": []any{},
-	})
+	}, nil)
 	if err != nil {
-		process.close(ctx)
+		_ = process.close(operationCtx)
 		a.mu.Unlock()
 		return StartResult{}, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown}
 	}
@@ -181,50 +221,56 @@ func (a *ACPAdapter) Start(ctx context.Context, request StartRequest, _ Credenti
 		SessionID string `json:"sessionId"`
 	}
 	if json.Unmarshal(created, &sessionReply) != nil || !validIdentifier(sessionReply.SessionID) {
-		process.close(ctx)
+		_ = process.close(operationCtx)
 		a.mu.Unlock()
 		return StartResult{}, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown}
 	}
 	if _, exists := a.byID[sessionReply.SessionID]; exists {
-		process.close(ctx)
+		_ = process.close(operationCtx)
 		a.mu.Unlock()
 		return StartResult{}, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown}
 	}
+	turnGate := make(chan struct{}, 1)
+	turnGate <- struct{}{}
 	session := &acpSession{
 		roleExecutionID: request.RoleExecutionID,
 		processID:       process.cmd.Process.Pid,
 		sessionID:       sessionReply.SessionID,
 		process:         process,
+		turnGate:        turnGate,
 		turns:           make(map[string]TurnResult),
 	}
 	result := StartResult{
 		OperationID:    request.OperationID,
 		SessionID:      session.sessionID,
-		ReceiptID:      "acp-session-" + request.RoleExecutionID,
+		ReceiptID:      acpReceiptID("acp-session-", request.RoleExecutionID),
 		EvidenceSHA256: sha256Hex(string(created)),
 	}
 	a.byRole[request.RoleExecutionID] = session
 	a.byID[session.sessionID] = session
 	a.mu.Unlock()
-	initialPrompt := acpStartPrompt(request)
+
 	initialTurn := TurnRequest{
 		OperationID:  request.OperationID,
-		TurnID:       "start_" + request.RoleExecutionID,
+		TurnID:       initialTurnID,
 		SessionID:    session.sessionID,
 		PromptSHA256: sha256Hex(initialPrompt),
 		Prompt:       initialPrompt,
 		MaxTokens:    request.MaxTokens,
 		Deadline:     request.Deadline,
 	}
-	if _, err := a.Send(ctx, initialTurn, nil); err != nil {
-		a.mu.Lock()
-		delete(a.byRole, request.RoleExecutionID)
-		delete(a.byID, session.sessionID)
-		a.mu.Unlock()
-		_ = process.close(ctx)
+	if _, err := a.Send(operationCtx, initialTurn, nil); err != nil {
+		a.detachSession(session)
+		session.process.terminate()
 		return StartResult{}, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown}
 	}
+
 	a.mu.Lock()
+	if a.closed || a.byID[session.sessionID] != session {
+		a.mu.Unlock()
+		session.process.terminate()
+		return StartResult{}, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown}
+	}
 	a.byOp[request.OperationID] = result
 	a.mu.Unlock()
 	return result, nil
@@ -248,83 +294,118 @@ func (a *ACPAdapter) Send(ctx context.Context, request TurnRequest, _ Credential
 	if a == nil || ctx == nil || request.Validate() != nil {
 		return TurnResult{}, ErrProviderInvalidRequest
 	}
+	operationCtx, cancel := context.WithDeadline(ctx, request.Deadline)
+	defer cancel()
+
 	a.mu.Lock()
 	session := a.byID[request.SessionID]
 	a.mu.Unlock()
 	if session == nil {
 		return TurnResult{}, &OperationError{Class: FailureDefinitive, Code: OperationCodeNotFound}
 	}
-	session.mu.Lock()
-	defer session.mu.Unlock()
-	if existing, ok := session.turns[request.OperationID]; ok {
+	session.mu.RLock()
+	existing, cached := session.turns[request.OperationID]
+	session.mu.RUnlock()
+	if cached {
 		return existing, nil
 	}
-	if err := ctx.Err(); err != nil {
-		return TurnResult{}, err
+	select {
+	case <-session.turnGate:
+		defer func() { session.turnGate <- struct{}{} }()
+	case <-operationCtx.Done():
+		return TurnResult{}, operationCtx.Err()
+	case <-session.process.stop:
+		return TurnResult{}, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown}
+	case <-session.process.done:
+		return TurnResult{}, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown}
+	case <-session.process.failed:
+		return TurnResult{}, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown}
 	}
-	for {
-		select {
-		case <-session.process.updates:
-		default:
-			goto drained
+	session.mu.RLock()
+	existing, cached = session.turns[request.OperationID]
+	session.mu.RUnlock()
+	if cached {
+		return existing, nil
+	}
+
+	var output strings.Builder
+	onUpdate := func(raw json.RawMessage) error {
+		var notification struct {
+			Method string `json:"method"`
+			Params struct {
+				Update struct {
+					SessionUpdate string `json:"sessionUpdate"`
+					Content       struct {
+						Type string `json:"type"`
+						Text string `json:"text"`
+					} `json:"content"`
+				} `json:"update"`
+			} `json:"params"`
 		}
+		if err := json.Unmarshal(raw, &notification); err != nil {
+			return errors.New("invalid ACP session update")
+		}
+		if notification.Method != "session/update" ||
+			notification.Params.Update.SessionUpdate != "agent_message_chunk" ||
+			notification.Params.Update.Content.Type != "text" {
+			return nil
+		}
+		chunk := notification.Params.Update.Content.Text
+		if output.Len()+len(chunk) > maxACPOutputBytes {
+			return errors.New("ACP output limit exceeded")
+		}
+		output.WriteString(chunk)
+		return nil
 	}
-drained:
-	response, err := session.process.call(ctx, "session/prompt", map[string]any{
+	response, err := session.process.call(operationCtx, "session/prompt", map[string]any{
 		"sessionId": request.SessionID,
 		"prompt":    []map[string]string{{"type": "text", "text": request.Prompt}},
-	})
+	}, onUpdate)
 	if err != nil {
-		_ = session.process.notify("session/cancel", map[string]string{"sessionId": request.SessionID})
+		if operationCtx.Err() != nil {
+			cancelCtx, cancelNotify := context.WithTimeout(context.Background(), 100*time.Millisecond)
+			_ = session.process.notify(cancelCtx, "session/cancel", map[string]string{"sessionId": request.SessionID})
+			cancelNotify()
+		}
+		a.detachSession(session)
+		session.process.terminate()
 		return TurnResult{}, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown}
 	}
 	var promptReply struct {
 		StopReason string `json:"stopReason"`
 	}
-	if json.Unmarshal(response, &promptReply) != nil || promptReply.StopReason == "" {
-		return TurnResult{}, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown}
-	}
-	var output strings.Builder
-	for {
-		select {
-		case update := <-session.process.updates:
-			var notification struct {
-				Method string `json:"method"`
-				Params struct {
-					Update struct {
-						SessionUpdate string `json:"sessionUpdate"`
-						Content       struct {
-							Type string `json:"type"`
-							Text string `json:"text"`
-						} `json:"content"`
-					} `json:"update"`
-				} `json:"params"`
-			}
-			if json.Unmarshal(update, &notification) == nil &&
-				notification.Method == "session/update" &&
-				notification.Params.Update.SessionUpdate == "agent_message_chunk" &&
-				notification.Params.Update.Content.Type == "text" {
-				output.WriteString(notification.Params.Update.Content.Text)
-			}
-		default:
-			goto collected
-		}
-	}
-collected:
-	if session.process.failure() != nil {
-		return TurnResult{}, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown}
-	}
-	if output.Len() == 0 {
+	if json.Unmarshal(response, &promptReply) != nil || promptReply.StopReason != "end_turn" || output.Len() == 0 {
 		return TurnResult{}, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown}
 	}
 	result := TurnResult{
 		OperationID: request.OperationID, TurnID: request.TurnID,
-		SessionID: request.SessionID, ReceiptID: "acp-turn-" + request.TurnID,
+		SessionID: request.SessionID, ReceiptID: acpReceiptID("acp-turn-", request.TurnID),
 		Status: "COMPLETED", Output: output.String(),
 		EvidenceSHA256: sha256Hex(string(response) + "\n" + output.String()),
 	}
+	session.mu.Lock()
 	session.turns[request.OperationID] = result
+	session.mu.Unlock()
 	return result, nil
+}
+
+func (a *ACPAdapter) detachSession(session *acpSession) {
+	if a == nil || session == nil {
+		return
+	}
+	a.mu.Lock()
+	if a.byID[session.sessionID] == session {
+		delete(a.byID, session.sessionID)
+	}
+	if a.byRole[session.roleExecutionID] == session {
+		delete(a.byRole, session.roleExecutionID)
+	}
+	for operationID, result := range a.byOp {
+		if result.SessionID == session.sessionID {
+			delete(a.byOp, operationID)
+		}
+	}
+	a.mu.Unlock()
 }
 
 func (a *ACPAdapter) Stop(ctx context.Context, request StopRequest, _ CredentialLease) (StopResult, error) {
@@ -337,9 +418,12 @@ func (a *ACPAdapter) Stop(ctx context.Context, request StopRequest, _ Credential
 	if session == nil {
 		return StopResult{}, &OperationError{Class: FailureDefinitive, Code: OperationCodeNotFound}
 	}
-	_ = session.process.notify("session/cancel", map[string]string{"sessionId": request.SessionID})
-	_ = session.process.close(ctx)
-	// ACP cancellation is a request, not proof that tools or child processes are quiescent.
+	a.detachSession(session)
+	cancelCtx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
+	_ = session.process.notify(cancelCtx, "session/cancel", map[string]string{"sessionId": request.SessionID})
+	cancel()
+	session.process.terminate()
+	// Cancellation is not proof that tools or child processes are quiescent.
 	return StopResult{}, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown}
 }
 
@@ -352,8 +436,11 @@ func (a *ACPAdapter) Lookup(context.Context, LookupRequest, CredentialLease) (Lo
 }
 
 func (a *ACPAdapter) Result(ctx context.Context, request ResultRequest, _ CredentialLease) (Result, error) {
-	if err := request.Validate(); err != nil {
+	if ctx == nil || request.Validate() != nil {
 		return Result{}, ErrProviderInvalidRequest
+	}
+	if err := ctx.Err(); err != nil {
+		return Result{}, err
 	}
 	a.mu.Lock()
 	session := a.byID[request.SessionID]
@@ -361,10 +448,11 @@ func (a *ACPAdapter) Result(ctx context.Context, request ResultRequest, _ Creden
 	if session == nil {
 		return Result{}, ErrUnsupportedCapability
 	}
-	session.mu.Lock()
-	defer session.mu.Unlock()
+	session.mu.RLock()
+	defer session.mu.RUnlock()
 	for _, turn := range session.turns {
-		if turn.OperationID == request.OperationID && (request.TurnID == "" || turn.TurnID == request.TurnID) {
+		if turn.Status == "COMPLETED" && turn.OperationID == request.OperationID &&
+			(request.TurnID == "" || turn.TurnID == request.TurnID) {
 			return Result{
 				OperationID: turn.OperationID, SessionID: turn.SessionID, TurnID: turn.TurnID,
 				Content: turn.Output, ResultSHA256: sha256Hex(turn.Output), Final: true,
@@ -388,18 +476,36 @@ func (a *ACPAdapter) Close() error {
 		return nil
 	}
 	a.mu.Lock()
+	if a.closed {
+		a.mu.Unlock()
+		return nil
+	}
+	a.closed = true
 	sessions := make([]*acpSession, 0, len(a.byID))
 	for _, session := range a.byID {
 		sessions = append(sessions, session)
 	}
 	a.byID = make(map[string]*acpSession)
 	a.byRole = make(map[string]*acpSession)
+	a.byOp = make(map[string]StartResult)
 	a.mu.Unlock()
-	var joined error
+
+	var wait sync.WaitGroup
+	errorsCh := make(chan error, len(sessions))
 	for _, session := range sessions {
-		if err := session.process.close(context.Background()); err != nil {
-			joined = errors.Join(joined, err)
-		}
+		wait.Add(1)
+		go func(session *acpSession) {
+			defer wait.Done()
+			if err := session.process.close(context.Background()); err != nil {
+				errorsCh <- err
+			}
+		}(session)
+	}
+	wait.Wait()
+	close(errorsCh)
+	var joined error
+	for err := range errorsCh {
+		joined = errors.Join(joined, err)
 	}
 	return joined
 }
@@ -458,76 +564,133 @@ func (a *ACPAdapter) startProcess() (*acpProcess, error) {
 		env[index] = ""
 	}
 	command.Env = nil
-	process := &acpProcess{
-		cmd: command, stdin: stdin, updates: make(chan json.RawMessage, 256),
-		done: make(chan struct{}), failed: make(chan struct{}),
-	}
-	go process.read(stdout)
+	process := newACPProcess(command, stdin)
 	go func() {
+		// StdoutPipe must be fully drained before Wait closes its read end.
+		process.read(stdout)
 		_ = command.Wait()
 		cleanupHome()
 		close(process.done)
 	}()
 	return process, nil
 }
+
+func newACPProcess(command *exec.Cmd, stdin io.WriteCloser) *acpProcess {
+	writeGate := make(chan struct{}, 1)
+	writeGate <- struct{}{}
+	return &acpProcess{
+		cmd: command, stdin: stdin, updates: make(chan json.RawMessage, 256),
+		done: make(chan struct{}), stop: make(chan struct{}), failed: make(chan struct{}),
+		writeGate: writeGate,
+	}
+}
+
 func (p *acpProcess) read(stdout io.Reader) {
+	defer p.closePending()
 	scanner := bufio.NewScanner(stdout)
 	scanner.Buffer(make([]byte, 64*1024), 4*1024*1024)
 	for scanner.Scan() {
 		line := append([]byte(nil), scanner.Bytes()...)
 		var message acpMessage
-		if json.Unmarshal(line, &message) != nil {
+		if err := json.Unmarshal(line, &message); err != nil || validateACPMessage(message) != nil {
 			p.fail(errors.New("invalid ACP JSON-RPC message"))
 			return
 		}
 		if message.Method != "" {
 			if len(message.ID) != 0 {
-				// Permission requests are denied unless a future trusted controller
-				// integration supplies a separately verified authorization handler.
+				response := map[string]any{
+					"jsonrpc": "2.0",
+					"id":      json.RawMessage(message.ID),
+				}
 				if message.Method == "session/request_permission" || message.Method == "requestPermission" {
-					_ = p.write(map[string]any{
-						"jsonrpc": "2.0", "id": json.RawMessage(message.ID),
-						"result": map[string]any{"outcome": map[string]string{"outcome": "cancelled"}},
-					})
+					response["result"] = map[string]any{"outcome": map[string]string{"outcome": "cancelled"}}
 				} else {
-					_ = p.write(map[string]any{
-						"jsonrpc": "2.0", "id": json.RawMessage(message.ID),
-						"error": map[string]any{"code": -32601, "message": "Method not found"},
-					})
+					response["error"] = map[string]any{"code": -32601, "message": "Method not found"}
+				}
+				ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+				err := p.write(ctx, response)
+				cancel()
+				if err != nil {
+					p.fail(errors.New("ACP server request response failed"))
+					return
 				}
 				continue
 			}
 			select {
 			case p.updates <- line:
-			case <-p.done:
+			case <-p.stop:
 				return
-			default:
-				p.fail(errors.New("ACP notification queue overflow"))
+			case <-p.failed:
 				return
 			}
 			continue
 		}
-		if len(message.ID) != 0 {
-			if waiter, ok := p.pending.LoadAndDelete(string(message.ID)); ok {
-				waiter.(chan acpMessage) <- message
+		if waiter, ok := p.pending.LoadAndDelete(string(message.ID)); ok {
+			select {
+			case waiter.(chan acpMessage) <- message:
+			default:
+				p.fail(errors.New("duplicate ACP JSON-RPC response"))
+				return
 			}
 		}
 	}
 	if err := scanner.Err(); err != nil {
 		p.fail(errors.New("ACP stdout read failed"))
+		return
 	}
-	for {
-		closed := false
-		p.pending.Range(func(key, value any) bool {
-			p.pending.Delete(key)
-			close(value.(chan acpMessage))
-			closed = true
-			return true
-		})
-		if !closed {
-			break
+	if !p.closing.Load() {
+		p.fail(errors.New("ACP stdout closed"))
+	}
+}
+
+func validateACPMessage(message acpMessage) error {
+	if message.JSONRPC != "2.0" {
+		return errors.New("ACP JSON-RPC version is invalid")
+	}
+	hasID := len(bytes.TrimSpace(message.ID)) > 0
+	hasMethod := message.Method != ""
+	hasResult := len(bytes.TrimSpace(message.Result)) > 0
+	errorValue := bytes.TrimSpace(message.Error)
+	hasError := len(errorValue) > 0 && !bytes.Equal(errorValue, []byte("null"))
+	if hasMethod {
+		if hasResult || hasError {
+			return errors.New("ACP JSON-RPC request contains response fields")
 		}
+		if hasID && !validACPJSONRPCID(message.ID) {
+			return errors.New("ACP JSON-RPC request ID is invalid")
+		}
+		return nil
 	}
+	if !hasID || !validACPJSONRPCID(message.ID) || hasResult == hasError {
+		return errors.New("ACP JSON-RPC response envelope is invalid")
+	}
+	return nil
+}
+
+func validACPJSONRPCID(raw json.RawMessage) bool {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	var value any
+	if decoder.Decode(&value) != nil {
+		return false
+	}
+	switch typed := value.(type) {
+	case string:
+		return typed != ""
+	case json.Number:
+		return typed != ""
+	default:
+		return false
+	}
+}
+
+func (p *acpProcess) closePending() {
+	p.pending.Range(func(key, value any) bool {
+		if waiter, ok := p.pending.LoadAndDelete(key); ok {
+			close(waiter.(chan acpMessage))
+		}
+		return true
+	})
 }
 
 func (p *acpProcess) fail(err error) {
@@ -536,9 +699,7 @@ func (p *acpProcess) fail(err error) {
 		p.failErr = err
 		p.failMu.Unlock()
 		close(p.failed)
-		if p.cmd != nil && p.cmd.Process != nil {
-			_ = p.cmd.Process.Kill()
-		}
+		p.terminate()
 	})
 }
 
@@ -553,58 +714,170 @@ func (p *acpProcess) failure() error {
 	}
 }
 
-func (p *acpProcess) call(ctx context.Context, method string, params any) (json.RawMessage, error) {
+func (p *acpProcess) terminate() {
+	p.stopOnce.Do(func() {
+		p.closing.Store(true)
+		close(p.stop)
+		if p.stdin != nil {
+			_ = p.stdin.Close()
+		}
+		if p.cmd != nil && p.cmd.Process != nil {
+			_ = p.cmd.Process.Kill()
+		}
+	})
+}
+
+func acpResponse(waiter <-chan acpMessage, ctx context.Context) (json.RawMessage, error, bool) {
+	select {
+	case response, ok := <-waiter:
+		if !ok {
+			return nil, errors.New("ACP process exited"), true
+		}
+		if err := ctx.Err(); err != nil {
+			return nil, err, true
+		}
+		if len(bytes.TrimSpace(response.Error)) > 0 && !bytes.Equal(bytes.TrimSpace(response.Error), []byte("null")) {
+			return nil, errors.New("ACP request failed"), true
+		}
+		if len(bytes.TrimSpace(response.Result)) == 0 {
+			return nil, errors.New("ACP response result is missing"), true
+		}
+		return response.Result, nil, true
+	default:
+		return nil, nil, false
+	}
+}
+
+func (p *acpProcess) call(ctx context.Context, method string, params any, onUpdate func(json.RawMessage) error) (json.RawMessage, error) {
+	if ctx == nil {
+		return nil, ErrProviderInvalidRequest
+	}
+	if err := p.failure(); err != nil {
+		return nil, errors.New("ACP transport failed")
+	}
 	id := strconv.FormatUint(p.nextID.Add(1), 10)
 	waiter := make(chan acpMessage, 1)
 	p.pending.Store(id, waiter)
-	if err := p.write(map[string]any{"jsonrpc": "2.0", "id": json.Number(id), "method": method, "params": params}); err != nil {
+	if err := p.write(ctx, map[string]any{
+		"jsonrpc": "2.0", "id": json.Number(id), "method": method, "params": params,
+	}); err != nil {
 		p.pending.Delete(id)
 		return nil, err
 	}
-	select {
-	case response, ok := <-waiter:
-		if !ok || response.Error != nil || len(response.Result) == 0 {
-			return nil, errors.New("ACP request failed")
+	for {
+		if response, err, ok := acpResponse(waiter, ctx); ok {
+			return response, err
 		}
-		return response.Result, nil
-	case <-ctx.Done():
-		p.pending.Delete(id)
-		return nil, ctx.Err()
-	case <-p.done:
-		p.pending.Delete(id)
-		return nil, errors.New("ACP process exited")
-	case <-p.failed:
-		p.pending.Delete(id)
-		return nil, errors.New("ACP notification stream failed")
+		select {
+		case response, ok := <-waiter:
+			if !ok {
+				return nil, errors.New("ACP process exited")
+			}
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			if len(bytes.TrimSpace(response.Error)) > 0 && !bytes.Equal(bytes.TrimSpace(response.Error), []byte("null")) {
+				return nil, errors.New("ACP request failed")
+			}
+			if len(bytes.TrimSpace(response.Result)) == 0 {
+				return nil, errors.New("ACP response result is missing")
+			}
+			return response.Result, nil
+		case update := <-p.updates:
+			if onUpdate != nil {
+				if err := onUpdate(update); err != nil {
+					p.pending.Delete(id)
+					p.fail(errors.New("ACP update processing failed"))
+					return nil, err
+				}
+			}
+		case <-ctx.Done():
+			p.pending.Delete(id)
+			return nil, ctx.Err()
+		case <-p.failed:
+			if response, err, ok := acpResponse(waiter, ctx); ok {
+				return response, err
+			}
+			p.pending.Delete(id)
+			return nil, errors.New("ACP transport failed")
+		case <-p.stop:
+			if response, err, ok := acpResponse(waiter, ctx); ok {
+				return response, err
+			}
+			p.pending.Delete(id)
+			return nil, errors.New("ACP transport closed")
+		case <-p.done:
+			if response, err, ok := acpResponse(waiter, ctx); ok {
+				return response, err
+			}
+			p.pending.Delete(id)
+			return nil, errors.New("ACP process exited")
+		}
 	}
 }
 
-func (p *acpProcess) notify(method string, params any) error {
-	return p.write(map[string]any{"jsonrpc": "2.0", "method": method, "params": params})
+func (p *acpProcess) notify(ctx context.Context, method string, params any) error {
+	return p.write(ctx, map[string]any{"jsonrpc": "2.0", "method": method, "params": params})
 }
 
-func (p *acpProcess) write(message any) error {
+func (p *acpProcess) write(ctx context.Context, message any) error {
+	if ctx == nil {
+		return ErrProviderInvalidRequest
+	}
 	encoded, err := json.Marshal(message)
 	if err != nil {
 		return err
 	}
-	p.writeMu.Lock()
-	defer p.writeMu.Unlock()
-	if _, err := p.stdin.Write(append(encoded, '\n')); err != nil {
-		return err
+	frame := append(encoded, '\n')
+	select {
+	case <-p.writeGate:
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-p.failed:
+		return errors.New("ACP transport failed")
+	case <-p.stop:
+		return errors.New("ACP transport closed")
+	case <-p.done:
+		return errors.New("ACP process exited")
 	}
-	return nil
+	defer func() { p.writeGate <- struct{}{} }()
+	if p.failure() != nil {
+		return errors.New("ACP transport failed")
+	}
+	written := make(chan error, 1)
+	go func() {
+		n, writeErr := p.stdin.Write(frame)
+		if writeErr == nil && n != len(frame) {
+			writeErr = io.ErrShortWrite
+		}
+		written <- writeErr
+	}()
+	select {
+	case writeErr := <-written:
+		if writeErr != nil {
+			p.fail(errors.New("ACP stdin write failed"))
+			return writeErr
+		}
+		return nil
+	case <-ctx.Done():
+		p.fail(errors.New("ACP stdin write interrupted"))
+		return ctx.Err()
+	case <-p.failed:
+		return errors.New("ACP transport failed")
+	case <-p.stop:
+		return errors.New("ACP transport closed")
+	case <-p.done:
+		return errors.New("ACP process exited")
+	}
 }
 
 func (p *acpProcess) close(ctx context.Context) error {
 	if ctx == nil {
 		return ErrProviderInvalidRequest
 	}
-	_ = p.stdin.Close()
-	kill := func() {
-		if p.cmd != nil && p.cmd.Process != nil {
-			_ = p.cmd.Process.Kill()
-		}
+	p.closing.Store(true)
+	if p.stdin != nil {
+		_ = p.stdin.Close()
 	}
 	timer := time.NewTimer(2 * time.Second)
 	defer timer.Stop()
@@ -612,12 +885,10 @@ func (p *acpProcess) close(ctx context.Context) error {
 	case <-p.done:
 		return nil
 	case <-ctx.Done():
-		kill()
-		<-p.done
+		p.terminate()
 		return ctx.Err()
 	case <-timer.C:
-		kill()
-		<-p.done
-		return nil
+		p.terminate()
+		return errors.New("ACP process termination requested; exit unconfirmed")
 	}
 }
