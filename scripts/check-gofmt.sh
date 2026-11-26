@@ -15,8 +15,8 @@ if [[ -z "$required_go_version" ]]; then
   exit 1
 fi
 
-toolchain="go${required_go_version}+auto"
-if ! toolchain_goroot="$(GOTOOLCHAIN="$toolchain" go env GOROOT 2>/dev/null)"; then
+toolchain="go${required_go_version}"
+if ! toolchain_goroot="$(GOWORK=off GOTOOLCHAIN="$toolchain" go env GOROOT 2>/dev/null)"; then
   printf 'Could not obtain the Go %s toolchain required for formatting. Check network access or install that toolchain.\n' "$required_go_version" >&2
   exit 1
 fi
