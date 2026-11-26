@@ -177,6 +177,11 @@ func (t JobQuestionTurnIntent) Validate(job Job) error {
 		t.RequestSHA256 != jobQuestionTurnRequestSHA256(t) {
 		return errors.New("JobQuestionTurnIntent does not bind its JobQuestionAuthorization")
 	}
+	for _, revision := range job.JobContractRevisions {
+		if revision.Revision > grant.ContractRevision && revision.CreatedRevision < t.CreatedRevision {
+			return errors.New("JobQuestionTurnIntent was created after its JobQuestionAuthorization was superseded")
+		}
+	}
 	planner, found := roleExecutionByID(job, t.RoleExecutionID)
 	if !found || planner.Role != RolePlanner || planner.TaskID != "" {
 		return errors.New("JobQuestionTurnIntent requires the authorized Taskless PLANNER RoleExecution")
@@ -452,6 +457,17 @@ func jobQuestionTurnBudgetUsed(job Job, authorizationID string) (uint32, uint64,
 }
 
 func jobQuestionTurnBudgetUsedBefore(job Job, authorizationID string, beforeRevision uint64) (uint32, uint64, error) {
+	observationsByIntent := make(map[string]JobQuestionTurnObservation, len(job.JobQuestionTurnObservations))
+	for _, observation := range job.JobQuestionTurnObservations {
+		if observation.CreatedRevision >= beforeRevision {
+			continue
+		}
+		previous, found := observationsByIntent[observation.IntentID]
+		if !found || observation.CreatedRevision > previous.CreatedRevision {
+			observationsByIntent[observation.IntentID] = observation
+		}
+	}
+
 	var turns uint32
 	var tokens uint64
 	for _, intent := range job.JobQuestionTurnIntents {
@@ -459,7 +475,7 @@ func jobQuestionTurnBudgetUsedBefore(job Job, authorizationID string, beforeRevi
 			continue
 		}
 		turns++
-		observation, found := latestJobQuestionTurnObservation(job, intent.ID)
+		observation, found := observationsByIntent[intent.ID]
 		if !found || observation.Status == JobQuestionTurnUnknown {
 			return turns, tokens, errors.New("previous JobQuestion Provider Turn is unresolved; reconcile the same OperationID before another turn")
 		}
