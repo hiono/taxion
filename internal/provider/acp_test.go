@@ -54,7 +54,7 @@ func TestACPHelperProcess(t *testing.T) {
 		}
 		switch request.Method {
 		case "initialize":
-			if signalPath := os.Getenv("TAXION_ACP_TEST_SIGNAL"); signalPath != "" {
+			if signalPath := acpHelperSetting("signal"); signalPath != "" {
 				file, openErr := os.OpenFile(signalPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
 				if openErr == nil {
 					_, _ = io.WriteString(file, "initialize\n")
@@ -122,7 +122,7 @@ func TestACPHelperProcess(t *testing.T) {
 				return
 			}
 			if block := acpHelperSetting("block"); block != "" && promptText == block {
-				if signalPath := os.Getenv("TAXION_ACP_TEST_SIGNAL"); signalPath != "" {
+				if signalPath := acpHelperSetting("signal"); signalPath != "" {
 					file, openErr := os.OpenFile(signalPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
 					if openErr == nil {
 						_, _ = io.WriteString(file, "prompt\n")
@@ -808,12 +808,11 @@ func TestACPAdapterStopDoesNotWaitForAnotherRoleStartNegotiation(t *testing.T) {
 	if err := signalFile.Close(); err != nil {
 		t.Fatalf("Close signal file: %v", err)
 	}
-	t.Setenv("TAXION_ACP_HELPER", "1;delay-initialize=700")
-	t.Setenv("TAXION_ACP_TEST_SIGNAL", signalPath)
+	t.Setenv("TAXION_ACP_HELPER", "1;delay-initialize=700;signal="+signalPath)
 	adapter, err := NewACPAdapter(ACPConfig{
 		Command: os.Args[0], Args: []string{"-test.run=TestACPHelperProcess"},
 		WorkingDirectory: t.TempDir(), Identity: testIdentity(),
-		Environment: []string{"TAXION_ACP_HELPER", "TAXION_ACP_TEST_SIGNAL"},
+		Environment: []string{"TAXION_ACP_HELPER"},
 	})
 	if err != nil {
 		t.Fatalf("NewACPAdapter: %v", err)
@@ -880,12 +879,11 @@ func TestACPAdapterKeepsOperationIDReservedUntilInitialPromptCompletes(t *testin
 	if err := signalFile.Close(); err != nil {
 		t.Fatalf("Close signal file: %v", err)
 	}
-	t.Setenv("TAXION_ACP_HELPER", "1;block=blocked-start")
-	t.Setenv("TAXION_ACP_TEST_SIGNAL", signalPath)
+	t.Setenv("TAXION_ACP_HELPER", "1;block=blocked-start;signal="+signalPath)
 	adapter, err := NewACPAdapter(ACPConfig{
 		Command: os.Args[0], Args: []string{"-test.run=TestACPHelperProcess"},
 		WorkingDirectory: t.TempDir(), Identity: testIdentity(),
-		Environment: []string{"TAXION_ACP_HELPER", "TAXION_ACP_TEST_SIGNAL"},
+		Environment: []string{"TAXION_ACP_HELPER"},
 	})
 	if err != nil {
 		t.Fatalf("NewACPAdapter: %v", err)

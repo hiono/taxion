@@ -818,17 +818,15 @@ func (p *acpProcess) read(stdout io.Reader) {
 			}
 			if message.Method == "session/update" {
 				var notification struct {
-					Params struct {
-						Update struct {
-							SessionUpdate string `json:"sessionUpdate"`
-						} `json:"update"`
-					} `json:"params"`
+					Update struct {
+						SessionUpdate string `json:"sessionUpdate"`
+					} `json:"update"`
 				}
-				if json.Unmarshal(message.Params, &notification) != nil || notification.Params.Update.SessionUpdate == "" {
+				if json.Unmarshal(message.Params, &notification) != nil || notification.Update.SessionUpdate == "" {
 					p.fail(errors.New("invalid ACP session update"))
 					return
 				}
-				if notification.Params.Update.SessionUpdate != "agent_message_chunk" {
+				if notification.Update.SessionUpdate != "agent_message_chunk" {
 					continue
 				}
 				lineBytes := int64(len(line))
