@@ -80,11 +80,11 @@ func NewJobMessage(job Job, commandID string, request JobMessageRequest, now tim
 		}
 	}
 
-	message:= JobMessage{
-		ID:               JobMessageID(commandID), CommandID: commandID, JobID: job.ID,
-		Sender:           request.Sender, Recipient: request.Recipient,
+	message := JobMessage{
+		ID: JobMessageID(commandID), CommandID: commandID, JobID: job.ID,
+		Sender: request.Sender, Recipient: request.Recipient,
 		ReplyToMessageID: request.ReplyToMessageID, Body: request.Body,
-		CreatedAt:        now.UTC().Round(0), CreatedRevision: job.Revision + 1,
+		CreatedAt: now.UTC().Round(0), CreatedRevision: job.Revision + 1,
 	}
 	if err := message.Validate(job); err != nil {
 		return JobMessage{}, err
@@ -151,15 +151,15 @@ func (a ActorRef) Validate(job Job) error {
 		if !found || execution.Role != string(a.Kind) {
 			return errors.New("Role Actor must reference a matching RoleExecution in the same Job")
 		}
-	default: 
+	default:    
 		return errors.New("Actor kind is unsupported")
 	}
 	return nil
 }
 
 func validateJobMessageFacts(job Job) error {
-	seenIDs:= make(map[string]struct{}, len(job.JobMessages))
-	seenCommands:= make(map[string]struct{}, len(job.JobMessages))
+	seenIDs := make(map[string]struct{}, len(job.JobMessages))
+	seenCommands := make(map[string]struct{}, len(job.JobMessages))
 	var previousRevision uint64
 	var previousCreatedAt time.Time
 	for _, message := range job.JobMessages {

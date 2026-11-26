@@ -7,12 +7,12 @@ import (
 )
 
 func TestJobQuestionAuthorizationBindsOneApprovedQuestionAndPlannerSession(t *testing.T) {
-	pinnedRepository:= "https://example.com/team/repo.git@" + strings.Repeat("a", 40)
+	pinnedRepository := "https://example.com/team/repo.git@" + strings.Repeat("a", 40)
 	if !repositoryInJobContract(JobContract{TargetRepositories: []string{pinnedRepository}}, pinnedRepository) {
 		t.Fatal("exact JobContract membership rejected an approved commit-pinned repository target")
 	}
 	job, task, now := approvedJobWithTaskForExecutionPermission(t)
-	contract:= job.JobContractRevisions[len(job.JobContractRevisions)-1].Contract
+	contract := job.JobContractRevisions[len(job.JobContractRevisions)-1].Contract
 	contract.TargetRepositories = append(contract.TargetRepositories, pinnedRepository)
 	canonicalContract, canonicalHash, err := CanonicalizeJobContract(
 		contract, job.JobContractRevisions[len(job.JobContractRevisions)-1].CanonicalizationVersion,
@@ -20,7 +20,7 @@ func TestJobQuestionAuthorizationBindsOneApprovedQuestionAndPlannerSession(t *te
 	if err != nil {
 		t.Fatalf("CanonicalizeJobContract with commit-pinned target: %v", err)
 	}
-	latestRevision:= len(job.JobContractRevisions) - 1
+	latestRevision := len(job.JobContractRevisions) - 1
 	job.JobContractRevisions[latestRevision].Contract = canonicalContract
 	job.JobContractRevisions[latestRevision].CanonicalHash = canonicalHash
 	job.JobApprovals[len(job.JobApprovals)-1].CanonicalHash = canonicalHash
@@ -36,7 +36,7 @@ func TestJobQuestionAuthorizationBindsOneApprovedQuestionAndPlannerSession(t *te
 	if err := job.Validate(); err != nil {
 		t.Fatalf("Job.Validate with commit-pinned approved target: %v", err)
 	}
-	permissionRequest:= executionPermissionTestRequest(job, now)
+	permissionRequest := executionPermissionTestRequest(job, now)
 	permissionSHA, err := ExecutionPermissionRequestSHA256(permissionRequest)
 	if err != nil {
 		t.Fatalf("ExecutionPermissionRequestSHA256: %v", err)
@@ -100,13 +100,13 @@ func TestJobQuestionAuthorizationBindsOneApprovedQuestionAndPlannerSession(t *te
 	if !found || startObservation.Status != ProviderStartAccepted {
 		t.Fatal("Planner does not have an accepted Provider Session")
 	}
-	authorizationTime:= now.Add(3 * time.Minute)
-	request:= JobQuestionAuthorizationRequest{
-		JobID:               job.ID, CommandID: "cmd_73737373737373737373737373737373",
-		QuestionMessageID:   message.ID, PlannerRoleExecutionID: planner.ID,
-		ProviderSessionID:   startObservation.ProviderSessionID,
-		RepositoryID:        pinnedRepository, PlanningRepositoryID: planningGrant.RepositoryID,
-		ProviderID:          planningGrant.ProviderID, AccountID: planningGrant.AccountID,
+	authorizationTime := now.Add(3 * time.Minute)
+	request := JobQuestionAuthorizationRequest{
+		JobID: job.ID, CommandID: "cmd_73737373737373737373737373737373",
+		QuestionMessageID: message.ID, PlannerRoleExecutionID: planner.ID,
+		ProviderSessionID:  startObservation.ProviderSessionID,
+		RepositoryID: pinnedRepository, PlanningRepositoryID: planningGrant.RepositoryID,
+		ProviderID: planningGrant.ProviderID, AccountID: planningGrant.AccountID,
 		ConfigurationSHA256: planningGrant.ConfigurationSHA256,
 		ReadOnlyBoundary:    PlanningReadOnlyBoundary{
 			Mode: PlanningReadOnlyBoundarySnapshot, Reference: "question_snapshot_1", SHA256: strings.Repeat("d", 64),
@@ -125,7 +125,7 @@ func TestJobQuestionAuthorizationBindsOneApprovedQuestionAndPlannerSession(t *te
 		authorization.ProviderSessionID != startObservation.ProviderSessionID {
 		t.Fatalf("authorization lost its exact authority or question binding: %#v", authorization)
 	}
-	unpersistedRequest:= request
+	unpersistedRequest := request
 	unpersistedRequest.CommandID = "cmd_74747474747474747474747474747474"
 	unpersistedGrant, err := NewJobQuestionAuthorization(job, unpersistedRequest, authorizationTime)
 	if err != nil {
@@ -162,7 +162,7 @@ func TestJobQuestionAuthorizationBindsOneApprovedQuestionAndPlannerSession(t *te
 
 func TestJobQuestionAuthorizationRejectsScopeAndBudgetExpansion(t *testing.T) {
 	job, task, now := approvedJobWithTaskForExecutionPermission(t)
-	permissionRequest:= executionPermissionTestRequest(job, now)
+	permissionRequest := executionPermissionTestRequest(job, now)
 	permissionSHA, err := ExecutionPermissionRequestSHA256(permissionRequest)
 	if err != nil {
 		t.Fatalf("ExecutionPermissionRequestSHA256: %v", err)
@@ -188,7 +188,7 @@ func TestJobQuestionAuthorizationRejectsScopeAndBudgetExpansion(t *testing.T) {
 	job.ProviderStartIntents = append(job.ProviderStartIntents, start.ProviderStartIntent)
 	job.Revision++
 	job.UpdatedAt = start.RoleExecution.CreatedAt
-	planner:= job.RoleExecutions[0]
+	planner := job.RoleExecutions[0]
 	message, err := NewJobMessage(job, "cmd_75757575757575757575757575757575", JobMessageRequest{
 		Sender:    ActorRef{Kind: ActorCoder, ID: start.RoleExecution.ID},
 		Recipient: ActorRef{Kind: ActorPlanner, ID: planner.ID},
@@ -200,16 +200,16 @@ func TestJobQuestionAuthorizationRejectsScopeAndBudgetExpansion(t *testing.T) {
 	job.JobMessages = append(job.JobMessages, message)
 	job.Revision++
 	job.UpdatedAt = message.CreatedAt
-	grant:= job.PlanningAuthorizations[0]
+	grant := job.PlanningAuthorizations[0]
 	startObservation, _ := latestProviderStartObservation(job, planner.ProviderStartOperationID)
-	contract:= job.JobContractRevisions[len(job.JobContractRevisions)-1].Contract
-	base:= JobQuestionAuthorizationRequest{
-		JobID:             job.ID, CommandID: "cmd_76767676767676767676767676767676",
+	contract := job.JobContractRevisions[len(job.JobContractRevisions)-1].Contract
+	base := JobQuestionAuthorizationRequest{
+		JobID: job.ID, CommandID: "cmd_76767676767676767676767676767676",
 		QuestionMessageID: message.ID, PlannerRoleExecutionID: planner.ID,
-		ProviderSessionID: startObservation.ProviderSessionID,
-		RepositoryID:      contract.TargetRepositories[0], PlanningRepositoryID: grant.RepositoryID, ProviderID: grant.ProviderID,
-		AccountID:         grant.AccountID, ConfigurationSHA256: grant.ConfigurationSHA256,
-		ReadOnlyBoundary:  PlanningReadOnlyBoundary{
+		ProviderSessionID:  startObservation.ProviderSessionID,
+		RepositoryID: contract.TargetRepositories[0], PlanningRepositoryID: grant.RepositoryID, ProviderID: grant.ProviderID,
+		AccountID: grant.AccountID, ConfigurationSHA256: grant.ConfigurationSHA256,
+		ReadOnlyBoundary:   PlanningReadOnlyBoundary{
 			Mode: PlanningReadOnlyBoundarySnapshot, Reference: "question_snapshot_2", SHA256: strings.Repeat("d", 64),
 		},
 		Budget: PlanningBudget{MaxTurns: 1, MaxTokens: 100}, Deadline: contract.Deadline.Add(-time.Minute),
@@ -217,7 +217,7 @@ func TestJobQuestionAuthorizationRejectsScopeAndBudgetExpansion(t *testing.T) {
 	if _, err := NewJobQuestionAuthorization(job, base, now.Add(3*time.Minute)); err != nil {
 		t.Fatalf("unmodified JobQuestionAuthorization request is invalid: %v", err)
 	}
-	tests:= []struct {
+	tests := []struct {
 		name   string
 		mutate func(*JobQuestionAuthorizationRequest)
 	}{
@@ -232,7 +232,7 @@ func TestJobQuestionAuthorizationRejectsScopeAndBudgetExpansion(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			request:= base
+			request := base
 			test.mutate(&request)
 			if _, err := NewJobQuestionAuthorization(job, request, now.Add(3*time.Minute)); err == nil {
 				t.Fatal("invalid JobQuestionAuthorization request was accepted")
@@ -242,13 +242,13 @@ func TestJobQuestionAuthorizationRejectsScopeAndBudgetExpansion(t *testing.T) {
 			}
 		})
 	}
-	contractMismatchJob:= job
+	contractMismatchJob := job
 	contractMismatchJob.JobContractRevisions = append([]JobContractRevision(nil), job.JobContractRevisions...)
 	contractMismatchJob.JobApprovals = append([]JobApproval(nil), job.JobApprovals...)
 	contractMismatchJob.Tasks = append([]Task(nil), job.Tasks...)
-	latestIndex:= len(contractMismatchJob.JobContractRevisions) - 1
-	latestRevision:= contractMismatchJob.JobContractRevisions[latestIndex]
-	previousHash:= latestRevision.CanonicalHash
+	latestIndex := len(contractMismatchJob.JobContractRevisions) - 1
+	latestRevision := contractMismatchJob.JobContractRevisions[latestIndex]
+	previousHash := latestRevision.CanonicalHash
 	latestRevision.Contract.ConfigurationSHA256 = strings.Repeat("0", 64)
 	mismatchedContract, mismatchedHash, err := CanonicalizeJobContract(
 		latestRevision.Contract, latestRevision.CanonicalizationVersion,
@@ -270,16 +270,16 @@ func TestJobQuestionAuthorizationRejectsScopeAndBudgetExpansion(t *testing.T) {
 		}
 	}
 	for i := range contractMismatchJob.ExecutionPermissions {
-		permission:= &contractMismatchJob.ExecutionPermissions[i]
+		permission := &contractMismatchJob.ExecutionPermissions[i]
 		permission.CanonicalHash = mismatchedHash
 		permission.ConfigurationSHA256 = mismatchedContract.ConfigurationSHA256
-		permissionRequest:= ExecutionPermissionRequest{
-			JobID:               permission.JobID, TaskID: permission.TaskID, CommandID: permission.CommandID,
-			Role:                permission.Role, Effect: permission.Effect, Resource: permission.Resource,
-			ProviderID:          permission.ProviderID, AccountID: permission.AccountID,
-			ConfigurationSHA256: permission.ConfigurationSHA256,
-			ReservedTurns:       permission.ReservedTurns, ReservedTokens: permission.ReservedTokens,
-			ExpiresAt:           permission.ExpiresAt,
+		permissionRequest := ExecutionPermissionRequest{
+			JobID: permission.JobID, TaskID: permission.TaskID, CommandID: permission.CommandID,
+			Role: permission.Role, Effect: permission.Effect, Resource: permission.Resource,
+			ProviderID: permission.ProviderID, AccountID: permission.AccountID,
+			ConfigurationSHA256:    permission.ConfigurationSHA256,
+			ReservedTurns: permission.ReservedTurns, ReservedTokens: permission.ReservedTokens,
+			ExpiresAt:  permission.ExpiresAt,
 		}
 		permission.RequestSHA256, err = ExecutionPermissionRequestSHA256(permissionRequest)
 		if err != nil {
@@ -293,7 +293,7 @@ func TestJobQuestionAuthorizationRejectsScopeAndBudgetExpansion(t *testing.T) {
 		}
 	}
 	for i := range contractMismatchJob.ProviderStartIntents {
-		intent:= &contractMismatchJob.ProviderStartIntents[i]
+		intent := &contractMismatchJob.ProviderStartIntents[i]
 		for _, permission := range contractMismatchJob.ExecutionPermissions {
 			if intent.ExecutionPermissionID == permission.ID {
 				intent.ConfigurationSHA256 = permission.ConfigurationSHA256
@@ -303,7 +303,7 @@ func TestJobQuestionAuthorizationRejectsScopeAndBudgetExpansion(t *testing.T) {
 		}
 	}
 	for i := range contractMismatchJob.ProviderStartObservations {
-		observation:= &contractMismatchJob.ProviderStartObservations[i]
+		observation := &contractMismatchJob.ProviderStartObservations[i]
 		for _, intent := range contractMismatchJob.ProviderStartIntents {
 			if observation.OperationID == intent.ID {
 				observation.ConfigurationSHA256 = intent.ConfigurationSHA256
@@ -314,7 +314,7 @@ func TestJobQuestionAuthorizationRejectsScopeAndBudgetExpansion(t *testing.T) {
 	if err := contractMismatchJob.Validate(); err != nil {
 		t.Fatalf("Job.Validate with a separately approved configuration digest: %v", err)
 	}
-	plannerStartMatchesRequest:= false
+	plannerStartMatchesRequest := false
 	for _, candidate := range contractMismatchJob.ProviderStartIntents {
 		if candidate.RoleExecutionID == planner.ID {
 			plannerStartMatchesRequest = candidate.ConfigurationSHA256 == base.ConfigurationSHA256
