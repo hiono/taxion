@@ -283,13 +283,12 @@ func validateJobQuestionAuthorizationFacts(job Job) error {
 		seenQuestions[authorization.QuestionMessageID] = struct{}{}
 		previousRevision, previousAt = authorization.CreatedRevision, authorization.CreatedAt
 	}
-	if len(job.JobContractRevisions) > 0 {
-		latest := job.JobContractRevisions[len(job.JobContractRevisions)-1]
-		turns, tokens, err := jobQuestionAuthorizationBudgetUsed(job, latest.Revision)
+	for _, revision := range job.JobContractRevisions {
+		turns, tokens, err := jobQuestionAuthorizationBudgetUsed(job, revision.Revision)
 		if err != nil {
 			return err
 		}
-		if turns > uint64(latest.Contract.Budget.MaxTurns) || tokens > latest.Contract.Budget.MaxTokens {
+		if turns > uint64(revision.Contract.Budget.MaxTurns) || tokens > revision.Contract.Budget.MaxTokens {
 			return errors.New("JobQuestionAuthorizations and ExecutionPermissions exceed the approved Job budget")
 		}
 	}
