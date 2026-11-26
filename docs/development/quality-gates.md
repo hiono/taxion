@@ -42,7 +42,7 @@ macOS固有の問題は記録して保留し、まとまったタイミングで
 ## 5. Push前のローカルゲート
 
 - Push前に .githooks/pre-push が scripts/check-gofmt.sh を実行し、cmd / internal 配下のGoファイルを検査します。
-- 検査にはgo.modに指定されたバージョンのGo toolchainに含まれるgofmtを使用します。ローカルのGo本体が古い場合はGoのtoolchain自動選択機能で必要なtoolchainを取得するため、Go 1.23環境でもGo 1.26のgofmtで検査できます。
+- 検査にはgo.modに指定されたバージョンのGo toolchainに含まれるgofmtを厳密に使用します。`GOWORK=off`でWorkspaceのtoolchain指定を無効化し、`GOTOOLCHAIN=go<version>`でgo.modのバージョンを固定します。指定toolchainを取得できない場合はPushを拒否します。
 - 必要なtoolchainを取得できない場合、または対応するgofmtが見つからない場合はPushを拒否し、原因を表示します。ネットワーク接続またはtoolchainのインストールを解決して再実行します。
 - 書式不備がある場合は対象ファイルと差分を表示してPushを拒否します。修正後にPushを再実行します。
 - CIも同じ scripts/check-gofmt.sh を実行します。ローカルとCIで書式判定の実装を分岐させません。
