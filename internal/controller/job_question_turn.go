@@ -222,14 +222,29 @@ func (c *JobQuestionTurnController) reconcileUnknown(
 		}
 	}
 
+	currentJob, err := c.store.GetJob(ctx, intent.JobID)
+	if err != nil {
+		return outcome, err
+	}
+	if err := currentJob.Validate(); err != nil {
+		return outcome, fmt.Errorf("validate Job before retrying UNKNOWN Planner question turn: %w", err)
+	}
+	currentGrant, found := findJobQuestionAuthorization(currentJob, grant.ID)
+	if !found {
+		return outcome, errors.New("JobQuestionAuthorization disappeared before retry")
+	}
+	currentQuestion, found := findJobMessage(currentJob, question.ID)
+	if !found {
+		return outcome, errors.New("source Question disappeared before retry")
+	}
 	now := c.now().UTC().Round(0)
-	if err := grant.ValidateFor(job, question.ID, grant.PlannerRoleExecutionID, grant.ProviderSessionID, now); err != nil {
+	if err := currentGrant.ValidateFor(currentJob, currentQuestion.ID, currentGrant.PlannerRoleExecutionID, currentGrant.ProviderSessionID, now); err != nil {
 		return outcome, err
 	}
 	if !capabilities.SupportsSafeSend() {
 		return outcome, provider.ErrUnsupportedCapability
 	}
-	return c.dispatch(ctx, outcome, grant, question, intent, capabilities)
+	return c.dispatch(ctx, outcome, currentGrant, currentQuestion, intent, capabilities)
 }
 
 func (c *JobQuestionTurnController) dispatch(
@@ -258,6 +273,22 @@ func (c *JobQuestionTurnController) dispatch(
 	if err := request.Validate(); err != nil {
 		return outcome, fmt.Errorf("validate bounded Planner question Provider Turn: %w", err)
 	}
+	job, err := c.store.GetJob(ctx, intent.JobID)
+	if err != nil {
+		return outcome, err
+	}
+	if err := job.Validate(); err != nil {
+		return outcome, fmt.Errorf("validate Job immediately before Provider Send: %w", err)
+	}
+	currentGrant, found := findJobQuestionAuthorization(job, grant.ID)
+	if !found {
+		return outcome, errors.New("JobQuestionAuthorization disappeared before Provider Send")
+	}
+	if err := currentGrant.ValidateFor(
+		job, question.ID, currentGrant.PlannerRoleExecutionID, currentGrant.ProviderSessionID, c.now().UTC().Round(0),
+	); err != nil {
+		return outcome, err
+	}
 	result, err := c.runtime.Send(ctx, request)
 	if err != nil {
 		if providerOperationMayHaveStarted(err) {
@@ -282,9 +313,10 @@ func (c *JobQuestionTurnController) dispatch(
 		receipt, observation, persistErr := c.persistObservation(
 			ctx, intent.JobID, intent.ID, domain.JobQuestionTurnUnknown, 0, "", "", "",
 		)
-		if persistErr == nil {
-			outcome.ObservationReceipt, outcome.Observation = receipt, observation
+		if persistErr != nil {
+			return outcome, fmt.Errorf("persist UNKNOWN after invalid Provider Turn: %w", persistErr)
 		}
+		outcome.ObservationReceipt, outcome.Observation = receipt, observation
 		if err != nil {
 			return outcome, fmt.Errorf("Provider returned an invalid Planner question Turn: %w", err)
 		}
