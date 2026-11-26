@@ -73,17 +73,16 @@ Domain / Store検証ケースは [Job Contract Test Specification](job-contract-
 
 ### AT-005: JobMessage semantics and actor policy
 
-**Given** 6 Actorの認証済みendpoint間でJobMessageを送る。
-**When** MESSAGE / QUESTION / ANSWER / REQUEST / NOTIFICATION / HANDOFFを処理する。
+**Given** Planner / Coder / Reviewerが同一Job内で自然言語メッセージを交換する。
+**When** 質問、回答、補足、レビュー指摘を送受信する。
 **Then**
-- EnvelopeのSender / Recipient / Job / Task / RoleExecution identityはtrusted contextから確定する。
-- Bodyは自然言語であり、利用者へrouting metadataや固定JSONを要求しない。
-- 全30の非自己宛てActor関係を表現できるが、共通policyが許可を制御する。
-- ANSWERは既存QUESTIONにReplyToで相関する。
-- Question / Answer / Request / Notificationは実行権限を移転しない。
-- 承認済みJob内のTaskless PLANNERへの個別質問実行はJobQuestionAuthorizationに束縛し、QUESTION本文やMessageKindだけでgrantを作成しない。
-- BatchIDはfan-out全体で不変であり、Delivery状態はRecipientごとに分離する。
-- UNKNOWNを未配信と推測せずblind resendしない。
+- Sender / Recipientは信頼できるJob / RoleExecution contextから確定し、本文の自己申告で決めない。
+- Bodyは自然言語のまま保存・受け渡し、固定JSONやWorkflow DSLへ変換しない。
+- Job / 送受信Actorの識別に必要な情報だけを保持する。ReplyToは元の会話への復帰に必要な場合だけ保持する。
+- 通常の情報交換にMessageKind別認可、通信専用grant、BatchID、Recipient別Delivery状態機械を要求しない。
+- メッセージの保存・参照・転送だけではTask assignment、JobApproval、Execution Permission、Worktree ownershipを変更しない。
+- 追加Provider Send / Turnが必要な場合だけ、該当するProvider operationの認可を別途検証する。
+- 回答後に元のRoleExecution / Session / Contextへ戻り、同じJobで作業を継続できる。
 
 ### AT-006: Handoff safety
 
