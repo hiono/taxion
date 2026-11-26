@@ -207,9 +207,11 @@ func (c *JobQuestionTurnController) reconcileUnknown(
 				outcome.ObservationReceipt, outcome.Observation = receipt, observation
 				return outcome, errors.New("Planner question Provider operation failed")
 			}
-			if !capabilities.HasEvidenceAtLeast(provider.CapabilityFinalOutput, provider.EvidenceLive) ||
-				lookup.ResultSHA256 == "" {
+			if !capabilities.HasEvidenceAtLeast(provider.CapabilityFinalOutput, provider.EvidenceLive) {
 				return outcome, provider.ErrUnsupportedCapability
+			}
+			if lookup.ResultSHA256 == "" {
+				return outcome, provider.ErrProviderInvalidResult
 			}
 			result, err := c.runtime.Result(ctx, provider.ResultRequest{
 				OperationID: intent.OperationID, SessionID: intent.ProviderSessionID, TurnID: intent.ID,
