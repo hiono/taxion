@@ -221,6 +221,8 @@ func newTestAdapter(capabilities ...Capability) *testAdapter {
 			declaration.SendIdempotency = true
 		case CapabilitySendLookup:
 			declaration.SendLookup = true
+		case CapabilityReadOnlyContextEnforcement:
+			declaration.ReadOnlyContextEnforcement = true
 		case CapabilitySessionReattach:
 			declaration.CrossProcessSessionReattach = true
 		case CapabilityEventReplay:
@@ -255,7 +257,9 @@ func validTurnRequest() TurnRequest {
 	prompt := "Continue planning"
 	return TurnRequest{
 		OperationID: "provider_turn_1", TurnID: "turn_1", SessionID: "session_1",
-		PromptSHA256: sha256Hex(prompt), Prompt: prompt, MaxTokens: 20,
+		PromptSHA256: sha256Hex(prompt), Prompt: prompt,
+		ReadOnlyBoundary: ReadOnlyContextBoundary{Mode: "snapshot", Reference: "snapshot_1", SHA256: sha256Hex("snapshot")},
+		MaxTokens: 20,
 		Deadline: time.Now().UTC().Add(time.Hour),
 	}
 }
@@ -458,8 +462,23 @@ func TestRuntimeRejectsEventReplayWithoutDurableEvidenceBeforeCredentialAcquisit
 	}
 }
 
-func TestRuntimeSendPreservesUnknownAndRejectsCredentialBearingOutput(t *testing.T) {
+func TestRuntimeSendRejectsMissingReadOnlyEnforcementBeforeCredentialAcquisition(t *testing.T) {
 	adapter := newTestAdapter(CapabilitySendIdempotency)
+	broker := &testBroker{secret: []byte("runtime-test-secret")}
+	runtime, err := newTestRuntime(adapter, broker)
+	if err != nil {
+		t.Fatalf("newTestRuntime: %v", err)
+	}
+	if _, err := runtime.Send(context.Background(), validTurnRequest()); !errors.Is(err, ErrUnsupportedCapability) {
+		t.Fatalf("Send without read-only enforcement = %v, want ErrUnsupportedCapability", err)
+	}
+	if adapter.sendCalls != 0 || broker.acquires != 0 {
+		t.Fatalf("unsupported Send acquired credentials or called Adapter: sends=%d acquires=%d", adapter.sendCalls, broker.acquires)
+	}
+}
+
+func TestRuntimeSendPreservesUnknownAndRejectsCredentialBearingOutput(t *testing.T) {
+	adapter := newTestAdapter(CapabilitySendIdempotency, CapabilityReadOnlyContextEnforcement)
 	adapter.sendResult = TurnResult{Status: "UNKNOWN"}
 	adapter.sendOutput = "Provider echoed runtime-test-secret"
 	broker := &testBroker{secret: []byte("runtime-test-secret")}
