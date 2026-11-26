@@ -88,6 +88,39 @@ func (c *CommunicationController) SendFromRole(ctx context.Context, request Role
 	})
 }
 
+// InboxForRole returns messages addressed to the active RoleExecution without recording delivery state.
+func (c *CommunicationController) InboxForRole(
+	ctx context.Context,
+	jobID, roleExecutionID, providerSessionID string,
+) ([]domain.JobMessage, error) {
+	if ctx == nil || jobID == "" || roleExecutionID == "" || providerSessionID == "" {
+		return nil, errors.New("Role inbox requires Job, RoleExecution, and Session identities")
+	}
+	job, err := c.store.GetJob(ctx, jobID)
+	if err != nil {
+		return nil, err
+	}
+	if err := job.Validate(); err != nil {
+		return nil, fmt.Errorf("validate Job before reading Role inbox: %w", err)
+	}
+	execution, found := findRoleExecution(job, roleExecutionID)
+	if !found || !hasAcceptedRoleSession(job, execution, providerSessionID) {
+		return nil, errors.New("Role inbox Session is not bound to the RoleExecution")
+	}
+	actorKind, err := actorKindForRole(execution.Role)
+	if err != nil {
+		return nil, err
+	}
+	recipient := domain.ActorRef{Kind: actorKind, ID: execution.ID}
+	var inbox []domain.JobMessage
+	for _, message := range job.JobMessages {
+		if message.Recipient == recipient {
+			inbox = append(inbox, message)
+		}
+	}
+	return inbox, nil
+}
+
 func (c *CommunicationController) SendFromHuman(
 	ctx context.Context,
 	request HumanMessageRequest,
