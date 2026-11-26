@@ -130,6 +130,8 @@ func (c *JobQuestionAuthorizationController) Authorize(
 			ctx, jobID, questionMessageID, commandID, budget, deadline,
 		); replayErr == nil && found {
 			return receipt, authorization, nil
+		} else if replayErr != nil {
+			return store.CommandReceipt{}, domain.JobQuestionAuthorization{}, replayErr
 		}
 		return store.CommandReceipt{}, domain.JobQuestionAuthorization{}, fmt.Errorf("resolve immutable read-only question context: %w", err)
 	}
@@ -159,6 +161,8 @@ func (c *JobQuestionAuthorizationController) Authorize(
 			ctx, jobID, questionMessageID, commandID, budget, deadline,
 		); replayErr == nil && found {
 			return replayReceipt, replayAuthorization, nil
+		} else if replayErr != nil {
+			return store.CommandReceipt{}, domain.JobQuestionAuthorization{}, replayErr
 		}
 		return store.CommandReceipt{}, domain.JobQuestionAuthorization{}, err
 	}
