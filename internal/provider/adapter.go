@@ -499,6 +499,15 @@ func (r LookupResult) Validate(request LookupRequest) error {
 		r.TurnID != request.TurnID {
 		return errors.New("Provider Lookup found result does not match the requested operation")
 	}
+	if request.TurnID != "" {
+		terminal := r.Status == "COMPLETED" || r.Status == "FAILED"
+		if terminal && r.UsageID == "" {
+			return errors.New("Provider terminal Turn Lookup is missing usage identity")
+		}
+		if r.Status == "COMPLETED" && r.ResultSHA256 == "" {
+			return errors.New("completed Provider Turn Lookup is missing its result digest")
+		}
+	}
 	return nil
 }
 
