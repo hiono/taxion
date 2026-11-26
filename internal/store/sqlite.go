@@ -40,7 +40,7 @@ WHEN
 		WHERE NOT EXISTS (
 			SELECT 1
 			FROM json_each(NEW.payload_json, '$.job_messages') AS new_fact
-			WHERE json(new_fact.value) = json(old_fact.value)
+			WHERE new_fact.key = old_fact.key AND json(new_fact.value) = json(old_fact.value)
 		)
 	)
 	OR EXISTS (
@@ -49,7 +49,7 @@ WHEN
 		WHERE NOT EXISTS (
 			SELECT 1
 			FROM json_each(NEW.payload_json, '$.delivery_observations') AS new_fact
-			WHERE json(new_fact.value) = json(old_fact.value)
+			WHERE new_fact.key = old_fact.key AND json(new_fact.value) = json(old_fact.value)
 		)
 	)
 	OR EXISTS (
@@ -58,7 +58,7 @@ WHEN
 		WHERE NOT EXISTS (
 			SELECT 1
 			FROM json_each(NEW.payload_json, '$.job_question_authorizations') AS new_fact
-			WHERE json(new_fact.value) = json(old_fact.value)
+			WHERE new_fact.key = old_fact.key AND json(new_fact.value) = json(old_fact.value)
 		)
 	)
 BEGIN
