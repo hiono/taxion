@@ -223,8 +223,12 @@ func TestCommunicationControllerPersistsCoderPlannerQuestionAndAnswer(t *testing
 				context.Background(), jobID, question.Message.ID, questionCommandID,
 				questionBudget, questionDeadline,
 			)
+			expectedAddCalls := 0
+			if test.resolverErr == nil {
+				expectedAddCalls = 1
+			}
 			if err != nil || replayedReceipt != questionReceipt || replayedGrant.ID != questionGrant.ID ||
-				lateStore.lookupCalls != 2 || lateStore.addCalls != boolToInt(test.resolverErr == nil) {
+				lateStore.lookupCalls != 2 || lateStore.addCalls != expectedAddCalls {
 				t.Fatalf("concurrent committed command was not replayed: receipt=%#v grant=%#v lookups=%d adds=%d err=%v",
 					replayedReceipt, replayedGrant, lateStore.lookupCalls, lateStore.addCalls, err)
 			}
