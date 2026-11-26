@@ -257,5 +257,42 @@ func TestJobQuestionAuthorizationStorePersistsAndReplays(t *testing.T) {
 			}
 		})
 	}
+	tamperedRequest := request
+	tamperedRequest.ReadOnlyBoundary.SHA256 = strings.Repeat("f", 64)
+	tamperedRequest.Deadline = tamperedRequest.Deadline.UTC().Round(0)
+	tamperedRequestJSON, err := json.Marshal(tamperedRequest)
+	if err != nil {
+		t.Fatalf("marshal tampered request: %v", err)
+	}
+	tamperedHash := digest(tamperedRequestJSON)
+	tamperedReceipt := receipt
+	tamperedReceipt.PayloadSHA256 = tamperedHash
+	encodedTamperedReceipt, err := json.Marshal(tamperedReceipt)
+	if err != nil {
+		t.Fatalf("marshal tampered receipt: %v", err)
+	}
+	if _, err := reopened.db.ExecContext(ctx,
+		"UPDATE job_commands SET payload_sha256 = ?, receipt_json = ? WHERE command_id = ?",
+		tamperedHash, string(encodedTamperedReceipt), request.CommandID,
+	); err != nil {
+		t.Fatalf("tamper question authorization payload hash: %v", err)
+	}
+	if _, _, found, err := reopened.GetJobQuestionAuthorizationCommand(ctx, job.ID, request.CommandID); !errors.Is(err, ErrIntegrity) || found {
+		t.Fatalf("receipt lookup accepted a payload hash that does not describe its grant: found=%v err=%v", found, err)
+	}
+	if _, _, err := reopened.AddJobQuestionAuthorization(ctx, restarted.ID, restarted.Revision, tamperedRequest); !errors.Is(err, ErrIntegrity) {
+		t.Fatalf("direct Store replay accepted a payload hash that does not describe its grant: %v", err)
+	}
+	originalReceipt, err := json.Marshal(receipt)
+	if err != nil {
+		t.Fatalf("marshal original receipt after payload tampering: %v", err)
+	}
+	if _, err := reopened.db.ExecContext(ctx,
+		"UPDATE job_commands SET payload_sha256 = ?, receipt_json = ? WHERE command_id = ?",
+		receipt.PayloadSHA256, string(originalReceipt), request.CommandID,
+	); err != nil {
+		t.Fatalf("restore original question authorization payload hash: %v", err)
+	}
+
 	_ = messageReceipt
 }
