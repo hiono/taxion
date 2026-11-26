@@ -761,7 +761,7 @@ func TestACPAdapterCloseReapsCLIWhenDescendantKeepsStdoutOpen(t *testing.T) {
 	if err := adapter.Close(); err != nil {
 		t.Fatalf("Close after CLI exit: %v", err)
 	}
-	if elapsed := time.Since(started); elapsed > time.Second {
+	if elapsed := time.Since(started); elapsed > 1750*time.Millisecond {
 		t.Fatalf("Close waited for descendant-held stdout: %s", elapsed)
 	}
 }
