@@ -57,20 +57,20 @@ type acpSession struct {
 }
 
 type acpProcess struct {
-	cmd      *exec.Cmd
-	stdin    io.WriteCloser
-	pending  sync.Map
-	updates  chan json.RawMessage
-	done     chan struct{}
-	stop     chan struct{}
-	failed   chan struct{}
-	failMu   sync.Mutex
-	failErr  error
-	failOnce sync.Once
-	stopOnce sync.Once
-	closing  atomic.Bool
+	cmd       *exec.Cmd
+	stdin     io.WriteCloser
+	pending   sync.Map
+	updates   chan json.RawMessage
+	done      chan struct{}
+	stop      chan struct{}
+	failed    chan struct{}
+	failMu    sync.Mutex
+	failErr   error
+	failOnce  sync.Once
+	stopOnce  sync.Once
+	closing   atomic.Bool
 	writeGate chan struct{}
-	nextID   atomic.Uint64
+	nextID    atomic.Uint64
 }
 
 type acpMessage struct {
