@@ -29,7 +29,7 @@ func createMessageTestPlanner(t *testing.T, database *Store, jobID string) (doma
 		ProviderID: "provider.test", AccountID: "account.primary",
 		ConfigurationSHA256: strings.Repeat("a", 64),
 		RepositoryID:        "https://github.com/example/project@" + strings.Repeat("b", 40),
-		ReadOnlyBoundary:    domain.PlanningReadOnlyBoundary{
+		ReadOnlyBoundary: domain.PlanningReadOnlyBoundary{
 			Mode: domain.PlanningReadOnlyBoundarySnapshot, Reference: "snapshot_1", SHA256: strings.Repeat("c", 64),
 		},
 		Budget:   domain.PlanningBudget{MaxTurns: 3, MaxTokens: 1000},
