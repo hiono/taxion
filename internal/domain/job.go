@@ -275,6 +275,10 @@ func (w WorktreeAssignment) Validate(job Job) error {
 		execution.WorktreeAssignmentID != w.ID || execution.WorktreePath != w.WorktreePath {
 		return errors.New("WorktreeAssignment does not match its owning RoleExecution")
 	}
+	permission, permissionFound := executionPermissionByID(job, execution.ExecutionPermissionID)
+	if !permissionFound || permission.TaskID != w.TaskID || permission.Resource != w.RepositoryID {
+		return errors.New("WorktreeAssignment repository is outside the owning ExecutionPermission")
+	}
 	var intent ProviderStartIntent
 	intentFound := false
 	for _, candidate := range job.ProviderStartIntents {
@@ -334,7 +338,7 @@ func NewWorktreeAssignmentBinding(
 		return WorktreeAssignment{}, errors.New("WorktreeAssignment paths must be distinct absolute canonical paths")
 	}
 	for _, existing := range job.WorktreeAssignments {
-		if existing.TaskID == assignment.TaskID || existing.ID == assignment.ID ||
+		if (existing.TaskID == assignment.TaskID && existing.RepositoryID == assignment.RepositoryID) || existing.ID == assignment.ID ||
 			existing.WorktreePath == assignment.WorktreePath {
 			return WorktreeAssignment{}, errors.New("Task already has a Worktree assignment")
 		}

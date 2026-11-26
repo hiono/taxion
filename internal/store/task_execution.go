@@ -59,8 +59,8 @@ func (s *Store) BindRoleExecutionWorktree(
 	assignment domain.WorktreeAssignment,
 ) (CommandReceipt, domain.WorktreeAssignment, error) {
 	request := struct {
-		JobID           string                  `json:"job_id"`
-		RoleExecutionID string                  `json:"role_execution_id"`
+		JobID           string                    `json:"job_id"`
+		RoleExecutionID string                    `json:"role_execution_id"`
 		Assignment      domain.WorktreeAssignment `json:"assignment"`
 	}{
 		JobID: jobID, RoleExecutionID: roleExecutionID, Assignment: assignment,
