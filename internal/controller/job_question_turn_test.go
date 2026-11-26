@@ -23,9 +23,9 @@ func (r fixedQuestionTurnContextResolver) ResolveReadOnlyBoundary(
 }
 
 type jobQuestionTurnFixture struct {
-	controller *JobQuestionTurnController
-	runtime *fakePlanningProviderRuntime
-	database *store.Store
+	controller                                                        *JobQuestionTurnController
+	runtime                                                           *fakePlanningProviderRuntime
+	database                                                          *store.Store
 	jobID, authorizationID, questionID, coderID, plannerID, sessionID string
 }
 
@@ -56,10 +56,10 @@ func newJobQuestionTurnFixture(t *testing.T) jobQuestionTurnFixture {
 		JobID: jobID, CommandID: "cmd_93939393939393939393939393939393",
 		Title: "Question response task", Purpose: "Exercise bounded Planner question response",
 		TargetRepositories: []string{contract.TargetRepositories[0]},
-		Workspaces: []string{contract.Workspaces[0]},
+		Workspaces:         []string{contract.Workspaces[0]},
 		AcceptanceCriteria: []string{"Planner answer returns to the original Role"},
-		Budget: contract.Budget, ConcurrencyCeiling: 1, Deadline: contract.Deadline,
-		ProhibitedEffects: contract.ProhibitedEffects,
+		Budget:             contract.Budget, ConcurrencyCeiling: 1, Deadline: contract.Deadline,
+		ProhibitedEffects:       contract.ProhibitedEffects,
 		ApprovalRequiredEffects: contract.ApprovalRequiredEffects,
 	}
 	if _, _, err := database.AddTask(ctx, job.Revision, taskRequest); err != nil {
@@ -72,10 +72,10 @@ func newJobQuestionTurnFixture(t *testing.T) jobQuestionTurnFixture {
 	permissionRequest := domain.ExecutionPermissionRequest{
 		JobID: jobID, TaskID: job.Tasks[len(job.Tasks)-1].ID,
 		CommandID: "cmd_94949494949494949494949494949494",
-		Role: domain.RoleCoder, Effect: "repository.write", Resource: contract.TargetRepositories[0],
+		Role:      domain.RoleCoder, Effect: "repository.write", Resource: contract.TargetRepositories[0],
 		ProviderID: "provider.test", AccountID: "account.primary",
 		ConfigurationSHA256: contract.ConfigurationSHA256,
-		ReservedTurns: 1, ReservedTokens: 100, ExpiresAt: contract.Deadline.Add(-time.Minute),
+		ReservedTurns:       1, ReservedTokens: 100, ExpiresAt: contract.Deadline.Add(-time.Minute),
 	}
 	permissionSHA, err := domain.ExecutionPermissionRequestSHA256(permissionRequest)
 	if err != nil {
@@ -108,9 +108,9 @@ func newJobQuestionTurnFixture(t *testing.T) jobQuestionTurnFixture {
 	plannerID := "cmd_cccccccccccccccccccccccccccccccc"
 	_, question, err := database.AddJobMessage(ctx, jobID, job.Revision,
 		"cmd_96969696969696969696969696969696", domain.JobMessageRequest{
-			Sender: domain.ActorRef{Kind: domain.ActorCoder, ID: coderStart.RoleExecution.ID},
+			Sender:    domain.ActorRef{Kind: domain.ActorCoder, ID: coderStart.RoleExecution.ID},
 			Recipient: domain.ActorRef{Kind: domain.ActorPlanner, ID: plannerID},
-			Body: "Please clarify the approved implementation constraint.",
+			Body:      "Please clarify the approved implementation constraint.",
 		})
 	if err != nil {
 		t.Fatalf("AddJobMessage: %v", err)
