@@ -278,7 +278,7 @@ func TestJobQuestionAuthorizationRejectsScopeAndBudgetExpansion(t *testing.T) {
 			Role: permission.Role, Effect: permission.Effect, Resource: permission.Resource,
 			ProviderID: permission.ProviderID, AccountID: permission.AccountID,
 			ConfigurationSHA256: permission.ConfigurationSHA256,
-			ReservedTurns: permission.ReservedTurns, ReservedTokens: permission.ReservedTokens,
+			ReservedTurns:       permission.ReservedTurns, ReservedTokens: permission.ReservedTokens,
 			ExpiresAt: permission.ExpiresAt,
 		}
 		permission.RequestSHA256, err = ExecutionPermissionRequestSHA256(permissionRequest)
