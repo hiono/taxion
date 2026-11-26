@@ -881,3 +881,59 @@ func TestACPProcessWakesReaderWhenTurnConsumerExitsWithFullQueue(t *testing.T) {
 		t.Fatal("reader remained blocked after its active consumer exited")
 	}
 }
+
+func TestACPProcessBoundsQueuedUpdateBytes(t *testing.T) {
+	process := newACPProcess(nil, &acpTestWriter{})
+	process.closing.Store(true)
+	process.beginUpdateConsumer()
+	chunk := strings.Repeat("x", 2*1024*1024)
+	notification := `{"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"` + chunk + `"}}}}` + "
+"
+	go process.read(strings.NewReader(strings.Repeat(notification, 5)))
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	updates := 0
+	for {
+		if err := process.drainUpdates(ctx, func(json.RawMessage) error {
+			updates++
+			return nil
+		}); err != nil {
+			t.Fatalf("drainUpdates: %v", err)
+		}
+		select {
+		case <-process.readerDone:
+			if updates != 5 {
+				t.Fatalf("drained %d updates, want 5", updates)
+			}
+			if process.updateBytes != 0 {
+				t.Fatalf("queued bytes after drain = %d, want 0", process.updateBytes)
+			}
+			if err := process.endUpdateConsumer(); err != nil {
+				t.Fatalf("endUpdateConsumer: %v", err)
+			}
+			return
+		case <-ctx.Done():
+			t.Fatal("reader did not resume after queued bytes were released")
+		default:
+			time.Sleep(time.Millisecond)
+		}
+	}
+}
+
+func TestACPProcessNotificationDrainHonorsDeadline(t *testing.T) {
+	process := newACPProcess(nil, &acpTestWriter{})
+	update := json.RawMessage(`{"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"agent_message_chunk"}}}`)
+	for i := 0; i < 32; i++ {
+		process.updates <- update
+		process.updateBytes += int64(len(update))
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Millisecond)
+	defer cancel()
+	err := process.drainUpdates(ctx, func(json.RawMessage) error {
+		time.Sleep(10 * time.Millisecond)
+		return nil
+	})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("drainUpdates error = %v, want deadline exceeded", err)
+	}
+}

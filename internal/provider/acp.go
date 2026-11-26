@@ -80,6 +80,7 @@ type acpProcess struct {
 	closing           atomic.Bool
 	updateMu          sync.Mutex
 	updateConsumers   int
+	updateBytes       int64
 	updateWake        chan struct{}
 	permissionMu      sync.RWMutex
 	permissionHandler func(context.Context, json.RawMessage) bool
@@ -762,6 +763,11 @@ func (p *acpProcess) read(stdout io.Reader) {
 				if notification.Params.Update.SessionUpdate != "agent_message_chunk" {
 					continue
 				}
+				lineBytes := int64(len(line))
+				if lineBytes > maxACPQueuedUpdateBytes {
+					p.fail(errors.New("ACP update frame exceeds the queued byte budget"))
+					return
+				}
 				for {
 					p.updateMu.Lock()
 					if p.updateConsumers == 0 {
@@ -769,13 +775,13 @@ func (p *acpProcess) read(stdout io.Reader) {
 						p.fail(errors.New("ACP agent output arrived without an active Turn consumer"))
 						return
 					}
-					select {
-					case p.updates <- line:
+					if len(p.updates) < cap(p.updates) && p.updateBytes+lineBytes <= maxACPQueuedUpdateBytes {
+						p.updateBytes += lineBytes
+						p.updates <- line
 						p.updateMu.Unlock()
-						goto updateQueued
-					default:
-						p.updateMu.Unlock()
+						break
 					}
+					p.updateMu.Unlock()
 					select {
 					case <-p.updateWake:
 						continue
@@ -785,7 +791,6 @@ func (p *acpProcess) read(stdout io.Reader) {
 						return
 					}
 				}
-			updateQueued:
 			}
 			continue
 		}
@@ -858,6 +863,16 @@ func (p *acpProcess) signalUpdateWake() {
 	}
 }
 
+func (p *acpProcess) releaseUpdate(update json.RawMessage) {
+	p.updateMu.Lock()
+	p.updateBytes -= int64(len(update))
+	if p.updateBytes < 0 {
+		p.updateBytes = 0
+	}
+	p.updateMu.Unlock()
+	p.signalUpdateWake()
+}
+
 func (p *acpProcess) beginUpdateConsumer() {
 	p.updateMu.Lock()
 	p.updateConsumers++
@@ -881,17 +896,22 @@ func (p *acpProcess) endUpdateConsumer() error {
 	return nil
 }
 
-func (p *acpProcess) drainUpdates(onUpdate func(json.RawMessage) error) error {
+func (p *acpProcess) drainUpdates(ctx context.Context, onUpdate func(json.RawMessage) error) error {
 	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		select {
 		case update := <-p.updates:
-			p.signalUpdateWake()
+			p.releaseUpdate(update)
 			if onUpdate != nil {
 				if err := onUpdate(update); err != nil {
 					p.fail(errors.New("ACP update processing failed"))
 					return err
 				}
 			}
+		case <-ctx.Done():
+			return ctx.Err()
 		default:
 			return nil
 		}
@@ -899,8 +919,15 @@ func (p *acpProcess) drainUpdates(onUpdate func(json.RawMessage) error) error {
 }
 
 
+// The operation deadline takes precedence: a response received after expiry is not accepted.
 func (p *acpProcess) handleResponse(response acpMessage, ok bool, ctx context.Context, onUpdate func(json.RawMessage) error) (json.RawMessage, error) {
-	if err := p.drainUpdates(onUpdate); err != nil {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := p.drainUpdates(ctx, onUpdate); err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	if !ok {
@@ -965,7 +992,7 @@ func (p *acpProcess) callForSession(ctx context.Context, session *acpSession, me
 		case response, ok := <-waiter:
 			return p.handleResponse(response, ok, ctx, onUpdate)
 		case update := <-p.updates:
-			p.signalUpdateWake()
+			p.releaseUpdate(update)
 			if onUpdate != nil {
 				if err := onUpdate(update); err != nil {
 					p.pending.Delete(id)
