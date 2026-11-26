@@ -242,18 +242,18 @@ func (c *JobQuestionTurnController) dispatch(
 ) (JobQuestionTurnOutcome, error) {
 	prompt := jobQuestionTurnPrompt(question.Body)
 	request := provider.TurnRequest{
-		OperationID: intent.OperationID,
-		TurnID: intent.ID,
-		SessionID: intent.ProviderSessionID,
+		OperationID:  intent.OperationID,
+		TurnID:       intent.ID,
+		SessionID:    intent.ProviderSessionID,
 		PromptSHA256: intent.PromptSHA256,
-		Prompt: prompt,
+		Prompt:       prompt,
 		ReadOnlyBoundary: provider.ReadOnlyContextBoundary{
-			Mode: string(grant.ReadOnlyBoundary.Mode),
+			Mode:      string(grant.ReadOnlyBoundary.Mode),
 			Reference: grant.ReadOnlyBoundary.Reference,
-			SHA256: grant.ReadOnlyBoundary.SHA256,
+			SHA256:    grant.ReadOnlyBoundary.SHA256,
 		},
 		MaxTokens: intent.ReservedTokens,
-		Deadline: intent.Deadline,
+		Deadline:  intent.Deadline,
 	}
 	if err := request.Validate(); err != nil {
 		return outcome, fmt.Errorf("validate bounded Planner question Provider Turn: %w", err)
@@ -373,13 +373,13 @@ func (c *JobQuestionTurnController) persistQuestionReply(
 	observation domain.JobQuestionTurnObservation,
 ) (CommunicationOutcome, error) {
 	return c.communication.SendFromRole(ctx, RoleMessageRequest{
-		JobID: jobID,
-		RoleExecutionID: grant.PlannerRoleExecutionID,
+		JobID:             jobID,
+		RoleExecutionID:   grant.PlannerRoleExecutionID,
 		ProviderSessionID: grant.ProviderSessionID,
-		CommandID: jobQuestionReplyCommandID(intent.ID),
-		Recipient: question.Sender,
-		ReplyToMessageID: question.ID,
-		Body: observation.Content,
+		CommandID:         jobQuestionReplyCommandID(intent.ID),
+		Recipient:         question.Sender,
+		ReplyToMessageID:  question.ID,
+		Body:              observation.Content,
 	})
 }
 
@@ -455,7 +455,7 @@ func jobQuestionTurnObservationCommandID(
 }
 
 func jobQuestionReplyCommandID(intentID string) string {
-	return "cmd_" + sha256String("taxion:job-question-reply:v1:"+intentID)[:32]
+	return "cmd_" + sha256String("taxion:job-question-reply:v1:" + intentID)[:32]
 }
 
 func validQuestionTurnEvidence(value string) bool {
