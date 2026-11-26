@@ -3,6 +3,7 @@ package store
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/tls"
@@ -224,13 +225,51 @@ func TestPreUpgradeProcessCannotOverwriteV2AggregateFacts(t *testing.T) {
 }
 
 func TestAggregateUpdateCannotRemoveAppendOnlyFacts(t *testing.T) {
-	database, _ := newTestStore(t)
+	database, path := newTestStore(t)
 	ctx := context.Background()
 	job := newTestJob(t, "job_append_only_trigger", "Preserve append-only facts against older writers.")
 	if _, err := database.createJob(ctx, job, "cmd_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", createLocalDraftJobCommandType); err != nil {
 		t.Fatalf("create Job: %v", err)
 	}
-	if _, err := database.db.ExecContext(ctx, `UPDATE job_aggregates
+	if _, err := database.db.ExecContext(ctx, "DROP TRIGGER IF EXISTS job_aggregates_preserve_v2_facts"); err != nil {
+		t.Fatalf("remove trigger to simulate a version 2 database: %v", err)
+	}
+	if _, err := database.db.ExecContext(ctx, "PRAGMA user_version = 2"); err != nil {
+		t.Fatalf("set prior schema version: %v", err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatalf("close version 2 database: %v", err)
+	}
+
+	oldWriter, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("open pre-upgrade writer: %v", err)
+	}
+	oldWriter.SetMaxOpenConns(1)
+	oldWriter.SetMaxIdleConns(1)
+	defer oldWriter.Close()
+	if err := oldWriter.PingContext(ctx); err != nil {
+		t.Fatalf("connect pre-upgrade writer: %v", err)
+	}
+	oldWriteStatement, err := oldWriter.PrepareContext(ctx, `UPDATE job_aggregates
+		SET payload_json = json_remove(
+			payload_json,
+			'$.job_messages',
+			'$.delivery_observations',
+			'$.job_question_authorizations'
+		)
+		WHERE job_id = ?`)
+	if err != nil {
+		t.Fatalf("prepare pre-upgrade writer statement: %v", err)
+	}
+	defer oldWriteStatement.Close()
+
+	upgraded, err := Open(ctx, path)
+	if err != nil {
+		t.Fatalf("upgrade database while old writer remains open: %v", err)
+	}
+	defer upgraded.Close()
+	if _, err := upgraded.db.ExecContext(ctx, `UPDATE job_aggregates
 		SET payload_json = json_set(
 			payload_json,
 			'$.job_messages', json('[{"id":"message-1"}]'),
@@ -238,9 +277,9 @@ func TestAggregateUpdateCannotRemoveAppendOnlyFacts(t *testing.T) {
 			'$.job_question_authorizations', json('[{"id":"grant-1"}]')
 		)
 		WHERE job_id = ?`, job.ID); err != nil {
-		t.Fatalf("seed append-only facts: %v", err)
+		t.Fatalf("seed append-only facts after upgrade: %v", err)
 	}
-	if _, err := database.db.ExecContext(ctx, `UPDATE job_aggregates
+	if _, err := upgraded.db.ExecContext(ctx, `UPDATE job_aggregates
 		SET payload_json = json_set(
 			payload_json,
 			'$.job_messages', json('[{"id":"message-1"},{"id":"message-2"}]'),
@@ -250,7 +289,10 @@ func TestAggregateUpdateCannotRemoveAppendOnlyFacts(t *testing.T) {
 		WHERE job_id = ?`, job.ID); err != nil {
 		t.Fatalf("append facts while preserving existing entries: %v", err)
 	}
-	if _, err := database.db.ExecContext(ctx, `UPDATE job_aggregates
+	if _, err := oldWriteStatement.ExecContext(ctx, job.ID); err == nil {
+		t.Fatal("pre-upgrade prepared writer removed append-only facts without being rejected")
+	}
+	if _, err := oldWriter.ExecContext(ctx, `UPDATE job_aggregates
 		SET payload_json = json_remove(
 			payload_json,
 			'$.job_messages',
@@ -258,10 +300,10 @@ func TestAggregateUpdateCannotRemoveAppendOnlyFacts(t *testing.T) {
 			'$.job_question_authorizations'
 		)
 		WHERE job_id = ?`, job.ID); err == nil {
-		t.Fatal("aggregate update removed append-only facts without being rejected")
+		t.Fatal("pre-upgrade writer removed append-only facts after statement reprepare")
 	}
 	var payload string
-	if err := database.db.QueryRowContext(ctx, "SELECT payload_json FROM job_aggregates WHERE job_id = ?", job.ID).Scan(&payload); err != nil {
+	if err := upgraded.db.QueryRowContext(ctx, "SELECT payload_json FROM job_aggregates WHERE job_id = ?", job.ID).Scan(&payload); err != nil {
 		t.Fatalf("read aggregate payload after rejected downgrade: %v", err)
 	}
 	for _, factID := range []string{"message-1", "message-2", "delivery-1", "delivery-2", "grant-1", "grant-2"} {
