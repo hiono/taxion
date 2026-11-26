@@ -173,6 +173,18 @@ func (a JobQuestionAuthorization) Validate(job Job) error {
 		!a.CreatedAt.Equal(a.IssuedAt) || a.CreatedRevision == 0 || a.CreatedRevision > job.Revision+1 {
 		return errors.New("JobQuestionAuthorization identity or metadata is invalid")
 	}
+	var latestAtIssuance *JobContractRevision
+	for i := range job.JobContractRevisions {
+		candidate := &job.JobContractRevisions[i]
+		if candidate.CreatedRevision < a.CreatedRevision &&
+			(latestAtIssuance == nil || candidate.CreatedRevision > latestAtIssuance.CreatedRevision) {
+			latestAtIssuance = candidate
+		}
+	}
+	if latestAtIssuance == nil || latestAtIssuance.Revision != a.ContractRevision {
+		return errors.New("JobQuestionAuthorization does not bind the latest JobContract revision at issuance")
+	}
+
 	var revision *JobContractRevision
 	for i := range job.JobContractRevisions {
 		if job.JobContractRevisions[i].Revision == a.ContractRevision {
@@ -225,10 +237,22 @@ func (a JobQuestionAuthorization) Validate(job Job) error {
 	startObservation, observed := latestProviderStartObservation(job, start.ID)
 	if !observed || startObservation.Status != ProviderStartAccepted ||
 		startObservation.ProviderSessionID != a.ProviderSessionID ||
-		startObservation.CreatedRevision >= a.CreatedRevision {
+		startObservation.CreatedRevision >= a.CreatedRevision ||
+		a.IssuedAt.Before(startObservation.CreatedAt) {
 		return errors.New("JobQuestionAuthorization does not bind the accepted Planner Session")
 	}
 	return nil
+}
+
+func sameJobQuestionAuthorization(left, right JobQuestionAuthorization) bool {
+	leftIssuedAt, leftDeadline, leftCreatedAt := left.IssuedAt, left.Deadline, left.CreatedAt
+	rightIssuedAt, rightDeadline, rightCreatedAt := right.IssuedAt, right.Deadline, right.CreatedAt
+	left.IssuedAt, left.Deadline, left.CreatedAt = time.Time{}, time.Time{}, time.Time{}
+	right.IssuedAt, right.Deadline, right.CreatedAt = time.Time{}, time.Time{}, time.Time{}
+	return left == right &&
+		leftIssuedAt.Equal(rightIssuedAt) &&
+		leftDeadline.Equal(rightDeadline) &&
+		leftCreatedAt.Equal(rightCreatedAt)
 }
 
 func (a JobQuestionAuthorization) ValidateFor(
@@ -241,7 +265,7 @@ func (a JobQuestionAuthorization) ValidateFor(
 	}
 	persisted := false
 	for _, candidate := range job.JobQuestionAuthorizations {
-		if candidate == a {
+		if sameJobQuestionAuthorization(candidate, a) {
 			persisted = true
 			break
 		}
