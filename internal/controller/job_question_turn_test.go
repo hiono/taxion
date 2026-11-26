@@ -306,3 +306,74 @@ func TestJobQuestionTurnControllerRejectsProviderWithoutSafeSend(t *testing.T) {
 		t.Fatalf("unsupported Provider Send created intent or ran Provider: %#v", job.JobQuestionTurnIntents)
 	}
 }
+
+
+func TestOrchestratorRoutesPlannerInboxAndReturnsAnswerToOriginalCoder(t *testing.T) {
+	fixture := newJobQuestionTurnFixture(t)
+	communication, err := NewCommunicationController(fixture.database)
+	if err != nil {
+		t.Fatalf("NewCommunicationController: %v", err)
+	}
+	boundary := domain.PlanningReadOnlyBoundary{
+		Mode: domain.PlanningReadOnlyBoundarySnapshot, Reference: "question_snapshot_1",
+		SHA256: sha256String("immutable question snapshot"),
+	}
+	authorization, err := NewJobQuestionAuthorizationController(
+		fixture.database, fixedQuestionTurnContextResolver{
+			context: QuestionReadOnlyContext{
+				RepositoryID: "https://github.com/example/project",
+				Boundary: boundary,
+			},
+		},
+	)
+	if err != nil {
+		t.Fatalf("NewJobQuestionAuthorizationController: %v", err)
+	}
+	orchestrator, err := NewOrchestratorController(
+		fixture.database, communication, authorization, fixture.controller,
+		domain.PlanningBudget{MaxTurns: 1, MaxTokens: 100},
+	)
+	if err != nil {
+		t.Fatalf("NewOrchestratorController: %v", err)
+	}
+	outcomes, err := orchestrator.ProcessPlannerInbox(
+		context.Background(), fixture.jobID, fixture.plannerID,
+	)
+	if err != nil {
+		t.Fatalf("ProcessPlannerInbox: %v", err)
+	}
+	if len(outcomes) != 1 || outcomes[0].Observation.Status != domain.JobQuestionTurnCompleted ||
+		fixture.runtime.sendCalls != 1 {
+		t.Fatalf("Orchestrator did not process the persisted Planner inbox: %#v calls=%d",
+			outcomes, fixture.runtime.sendCalls)
+	}
+	inbox, err := communication.InboxForRole(context.Background(), fixture.jobID, fixture.coderID)
+	if err != nil {
+		t.Fatalf("Coder InboxForRole: %v", err)
+	}
+	var answer *domain.JobMessage
+	for i := range inbox {
+		if inbox[i].ReplyToMessageID == fixture.questionID {
+			answer = &inbox[i]
+			break
+		}
+	}
+	if answer == nil || answer.Sender != (domain.ActorRef{Kind: domain.ActorPlanner, ID: fixture.plannerID}) ||
+		answer.Recipient != (domain.ActorRef{Kind: domain.ActorCoder, ID: fixture.coderID}) {
+		t.Fatalf("original Coder Inbox does not contain the correlated Planner answer: %#v", inbox)
+	}
+	// Reprocessing the same inbox is idempotent and must not create another Provider Turn or reply.
+	if _, err := orchestrator.ProcessPlannerInbox(context.Background(), fixture.jobID, fixture.plannerID); err != nil {
+		t.Fatalf("replay ProcessPlannerInbox: %v", err)
+	}
+	job, err := fixture.database.GetJob(context.Background(), fixture.jobID)
+	if err != nil {
+		t.Fatalf("GetJob after inbox replay: %v", err)
+	}
+	if fixture.runtime.sendCalls != 1 || len(job.JobQuestionTurnIntents) != 1 ||
+		len(job.JobQuestionTurnObservations) != 1 || len(job.JobMessages) != 2 {
+		t.Fatalf("Planner inbox replay was not idempotent: sends=%d intents=%d observations=%d messages=%d",
+			fixture.runtime.sendCalls, len(job.JobQuestionTurnIntents),
+			len(job.JobQuestionTurnObservations), len(job.JobMessages))
+	}
+}
