@@ -49,14 +49,14 @@ type Job struct {
 	ProviderStopIntents                   []ProviderStopIntent         `json:"provider_stop_intents,omitempty"`
 	ProviderStopObservations              []ProviderStopObservation    `json:"provider_stop_observations,omitempty"`
 	ProviderResultObservations            []ProviderResultObservation  `json:"provider_result_observations,omitempty"`
-	ProviderUsageObservations              []ProviderUsageObservation   `json:"provider_usage_observations,omitempty"`
+	ProviderUsageObservations             []ProviderUsageObservation   `json:"provider_usage_observations,omitempty"`
 	ProviderLifecycleEnforcedFromRevision uint64                       `json:"provider_lifecycle_enforced_from_revision,omitempty"`
 	PlanningTurnIntents                   []PlanningTurnIntent         `json:"planning_turn_intents,omitempty"`
 	PlanningTurnObservations              []PlanningTurnObservation    `json:"planning_turn_observations,omitempty"`
 	PlanningEffectDecisions               []PlanningEffectDecision     `json:"planning_effect_decisions,omitempty"`
 	PlanningResumeIntents                 []PlanningResumeIntent       `json:"planning_resume_intents,omitempty"`
 	PlanningResumeObservations            []PlanningResumeObservation  `json:"planning_resume_observations,omitempty"`
-	PlanningBoundaryDecisions              []PlanningBoundaryDecision   `json:"planning_boundary_decisions,omitempty"`
+	PlanningBoundaryDecisions             []PlanningBoundaryDecision   `json:"planning_boundary_decisions,omitempty"`
 	JobMessages                           []JobMessage                 `json:"job_messages,omitempty"`
 	JobQuestionAuthorizations             []JobQuestionAuthorization   `json:"job_question_authorizations,omitempty"`
 	JobQuestionTurnIntents                []JobQuestionTurnIntent      `json:"job_question_turn_intents,omitempty"`
