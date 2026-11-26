@@ -255,7 +255,7 @@ func persistPlanningFact[T any](ctx context.Context, s *Store, jobID string, exp
 	if now.Before(job.UpdatedAt) {
 		return CommandReceipt{}, zero, errors.New("planning lifecycle command time precedes current Job revision")
 	}
-	fact, err := create(job, now)
+	fact, err = create(job, now)
 	if err != nil {
 		return CommandReceipt{}, zero, err
 	}
@@ -273,7 +273,7 @@ func persistPlanningFact[T any](ctx context.Context, s *Store, jobID string, exp
 		return CommandReceipt{}, zero, fmt.Errorf("encode Job with planning lifecycle fact: %w", err)
 	}
 	aggregateHash := digest(payload)
-	receipt := CommandReceipt{CommandID: commandID, JobID: jobID, Revision: job.Revision, PayloadSHA256: requestHash, CreatedAt: now}
+	receipt = CommandReceipt{CommandID: commandID, JobID: jobID, Revision: job.Revision, PayloadSHA256: requestHash, CreatedAt: now}
 	encodedReceipt, err := json.Marshal(receipt)
 	if err != nil {
 		return CommandReceipt{}, zero, fmt.Errorf("encode planning lifecycle receipt: %w", err)
