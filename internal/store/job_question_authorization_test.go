@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"reflect"
 	"strings"
@@ -187,6 +188,64 @@ func TestJobQuestionAuthorizationStorePersistsAndReplays(t *testing.T) {
 	changed.ReadOnlyBoundary.SHA256 = strings.Repeat("f", 64)
 	if _, _, err := reopened.AddJobQuestionAuthorization(ctx, restarted.ID, restarted.Revision, changed); !errors.Is(err, ErrIdempotencyConflict) {
 		t.Fatalf("changed JobQuestionAuthorization payload returned %v, want ErrIdempotencyConflict", err)
+	}
+
+	for _, test := range []struct {
+		name   string
+		mutate func(*CommandReceipt)
+	}{
+		{
+			name: "revision",
+			mutate: func(receipt *CommandReceipt) {
+				receipt.Revision++
+			},
+		},
+		{
+			name: "created time",
+			mutate: func(receipt *CommandReceipt) {
+				receipt.CreatedAt = receipt.CreatedAt.Add(time.Second)
+			},
+		},
+	} {
+		t.Run("receipt grant mismatch "+test.name, func(t *testing.T) {
+			tampered := receipt
+			test.mutate(&tampered)
+			encodedReceipt, err := json.Marshal(tampered)
+			if err != nil {
+				t.Fatalf("marshal tampered receipt: %v", err)
+			}
+			_, err = reopened.db.ExecContext(ctx,
+				`UPDATE job_commands
+					SET resulting_revision = ?, receipt_json = ?, created_at = ?
+					WHERE command_id = ?`,
+				tampered.Revision, string(encodedReceipt),
+				tampered.CreatedAt.UTC().Format(time.RFC3339Nano), request.CommandID,
+			)
+			if err != nil {
+				t.Fatalf("tamper command receipt: %v", err)
+			}
+
+			if _, _, found, err := reopened.GetJobQuestionAuthorizationCommand(ctx, job.ID, request.CommandID); !errors.Is(err, ErrIntegrity) || found {
+				t.Fatalf("receipt lookup accepted mismatched grant metadata: found=%v err=%v", found, err)
+			}
+			if _, _, err := reopened.AddJobQuestionAuthorization(ctx, restarted.ID, restarted.Revision, request); !errors.Is(err, ErrIntegrity) {
+				t.Fatalf("direct Store replay accepted mismatched grant metadata: %v", err)
+			}
+
+			originalReceipt, err := json.Marshal(receipt)
+			if err != nil {
+				t.Fatalf("marshal original receipt: %v", err)
+			}
+			if _, err := reopened.db.ExecContext(ctx,
+				`UPDATE job_commands
+					SET resulting_revision = ?, receipt_json = ?, created_at = ?
+					WHERE command_id = ?`,
+				receipt.Revision, string(originalReceipt),
+				receipt.CreatedAt.UTC().Format(time.RFC3339Nano), request.CommandID,
+			); err != nil {
+				t.Fatalf("restore command receipt: %v", err)
+			}
+		})
 	}
 	_ = messageReceipt
 }
