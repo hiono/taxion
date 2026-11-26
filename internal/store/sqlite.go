@@ -31,7 +31,7 @@ var (
 // Increment it when older binaries could discard newly added aggregate fields.
 const schemaVersion = 2
 
-const preserveJobAggregateFactsTrigger = `CREATE TRIGGER IF NOT EXISTS job_aggregates_preserve_v2_facts
+const preserveJobAggregateFactsTrigger = `CREATE TRIGGER IF NOT EXISTS job_aggregates_preserve_job_messages
 BEFORE UPDATE OF payload_json ON job_aggregates
 WHEN
 	COALESCE((
