@@ -78,7 +78,14 @@ func TestACPHelperProcess(t *testing.T) {
 			}
 			write(map[string]any{
 				"jsonrpc": "2.0", "id": 77, "method": "session/request_permission",
-				"params": map[string]any{"sessionId": "fake-session", "toolCall": map[string]any{"title": "run"}},
+				"params": map[string]any{
+					"sessionId": "fake-session",
+					"toolCall": map[string]any{"title": "run", "kind": "execute", "rawInput": map[string]string{"command": "git status", "cwd": "/tmp/worktree"}},
+					"options": []map[string]string{
+						{"optionId": "allow-once", "name": "Allow once", "kind": "allow_once"},
+						{"optionId": "reject-once", "name": "Reject", "kind": "reject_once"},
+					},
+				},
 			})
 			if !scanner.Scan() {
 				return
@@ -86,12 +93,24 @@ func TestACPHelperProcess(t *testing.T) {
 			var permissionReply struct {
 				Result struct {
 					Outcome struct {
-						Outcome string `json:"outcome"`
-					} `json:"outcome"`
-				} `json:"result"`
+						Outcome string
+						OptionID string
+					}
+				}
 			}
-			if json.Unmarshal(scanner.Bytes(), &permissionReply) != nil || permissionReply.Result.Outcome.Outcome != "cancelled" {
-				_, _ = writer.WriteString("permission was not denied\n")
+			if json.Unmarshal(scanner.Bytes(), &permissionReply) != nil {
+				_, _ = writer.WriteString("permission response was invalid\n")
+				_ = writer.Flush()
+				return
+			}
+			selected := permissionReply.Result.Outcome.Outcome == "selected" && permissionReply.Result.Outcome.OptionID == "allow-once"
+			if permissionReply.Result.Outcome.Outcome != "cancelled" && !selected {
+				_, _ = writer.WriteString("permission response was not a one-time allow or denial\n")
+				_ = writer.Flush()
+				return
+			}
+			if acpHelperSetting("require-allow") == "1" && !selected {
+				_, _ = writer.WriteString("expected one-time permission approval\n")
 				_ = writer.Flush()
 				return
 			}
@@ -799,4 +818,42 @@ func TestACPAdapterStopDoesNotWaitForAnotherRoleStartNegotiation(t *testing.T) {
 	case <-time.After(6 * time.Second):
 		t.Fatal("second Start did not finish")
 	}
+}
+
+type acpTestPermissionAuthorizer struct { calls int }
+
+func (a *acpTestPermissionAuthorizer) Authorize(_ context.Context, request ACPToolPermissionRequest) error {
+	a.calls++
+	if request.OperationID != "operation_start_1" || request.JobID != "job_1" ||
+		request.RoleExecutionID != "role_execution_1" || request.TaskID != "task_1" ||
+		request.ExecutionPermissionID != "permission_1" || request.SessionID != "fake-session" ||
+		request.RequestSHA256 != strings.Repeat("a", 64) || request.ProviderIdentity.ProviderID != "provider" ||
+		!strings.Contains(string(request.ToolCall), "git status") {
+		return errors.New("ACP permission request did not preserve its exact Task authority")
+	}
+	return nil
+}
+
+func TestACPAdapterAllowsOnlyAuthorizedTaskPermissionOnce(t *testing.T) {
+	t.Setenv("TAXION_ACP_HELPER", "1;require-allow=1")
+	identity := testIdentity()
+	authorizer := &acpTestPermissionAuthorizer{}
+	adapter, err := NewACPAdapter(ACPConfig{
+		Command: os.Args[0], Args: []string{"-test.run=TestACPHelperProcess"},
+		WorkingDirectory: t.TempDir(), Identity: identity,
+		Environment: []string{"TAXION_ACP_HELPER"}, PermissionAuthorizer: authorizer,
+	})
+	if err != nil { t.Fatalf("NewACPAdapter: %v", err) }
+	defer adapter.Close()
+	prompt := "execute the approved task"
+	request := StartRequest{
+		OperationID: "operation_start_1", JobID: "job_1", RoleExecutionID: "role_execution_1",
+		TaskID: "task_1", ExecutionPermissionID: "permission_1",
+		RequestSHA256: strings.Repeat("a", 64), Prompt: prompt, PromptSHA256: sha256Hex(prompt),
+		MaxTurns: 1, MaxTokens: 1000, Deadline: time.Now().Add(8 * time.Second),
+	}
+	if _, err := adapter.Start(context.Background(), request, nil); err != nil {
+		t.Fatalf("Start with authorized Task tool request: %v", err)
+	}
+	if authorizer.calls != 1 { t.Fatalf("permission authorizer calls = %d, want 1", authorizer.calls) }
 }

@@ -310,20 +310,43 @@ func (d ContextDocument) Validate() error {
 }
 
 type StartRequest struct {
-	OperationID     string
-	JobID           string
-	RoleExecutionID string
-	RequestSHA256   string
-	PromptSHA256    string
-	Prompt          string
-	Context         []ContextDocument
-	MaxTurns        uint32
-	MaxTokens       uint64
-	Deadline        time.Time
+	OperationID           string
+	JobID                 string
+	RoleExecutionID       string
+	TaskID                string
+	ExecutionPermissionID string
+	RequestSHA256         string
+	PromptSHA256          string
+	Prompt                string
+	Context               []ContextDocument
+	MaxTurns              uint32
+	MaxTokens             uint64
+	Deadline              time.Time
+}
+
+type ACPToolPermissionRequest struct {
+	OperationID           string
+	JobID                 string
+	RoleExecutionID       string
+	TaskID                string
+	ExecutionPermissionID string
+	SessionID             string
+	RequestSHA256         string
+	ProviderIdentity      Identity
+	ToolCall              []byte
+}
+
+// ACPToolPermissionAuthorizer must validate the current JobApproval and exact
+// Task ExecutionPermission, then classify the requested tool operation.
+// A nil authorizer always results in permission denial.
+type ACPToolPermissionAuthorizer interface {
+	Authorize(context.Context, ACPToolPermissionRequest) error
 }
 
 func (r StartRequest) Validate() error {
 	if !validIdentifier(r.OperationID) || !validIdentifier(r.JobID) || !validIdentifier(r.RoleExecutionID) ||
+		(r.TaskID == "") != (r.ExecutionPermissionID == "") ||
+		(r.TaskID != "" && (!validIdentifier(r.TaskID) || !validIdentifier(r.ExecutionPermissionID))) ||
 		!validSHA256(r.RequestSHA256) || !validSHA256(r.PromptSHA256) ||
 		r.Prompt == "" || sha256Hex(r.Prompt) != r.PromptSHA256 ||
 		r.MaxTurns == 0 || r.MaxTokens == 0 || r.Deadline.IsZero() {

@@ -40,6 +40,79 @@ type PlanningProviderRuntime interface {
 	Usage(context.Context, provider.UsageRequest) (provider.Usage, error)
 }
 
+type ACPToolCallEvaluator interface {
+	// Evaluate must derive the exact effect and resource from the structured ACP tool call.
+	// Unknown tool kinds or inputs must be rejected.
+	Evaluate(context.Context, provider.ACPToolPermissionRequest) (effect, resource string, err error)
+}
+
+type ACPExecutionPermissionAuthorizer struct {
+	store ProviderExecutionStore
+	evaluator ACPToolCallEvaluator
+	now func() time.Time
+}
+
+func NewACPExecutionPermissionAuthorizer(executionStore ProviderExecutionStore, evaluator ACPToolCallEvaluator) (*ACPExecutionPermissionAuthorizer, error) {
+	if executionStore == nil || evaluator == nil {
+		return nil, errors.New("ProviderExecutionStore and trusted ACPToolCallEvaluator are required")
+	}
+	return &ACPExecutionPermissionAuthorizer{
+		store: executionStore, evaluator: evaluator,
+		now: func() time.Time { return time.Now().UTC().Round(0) },
+	}, nil
+}
+
+// Authorize revalidates the current JobApproval, Task, RoleExecution, ProviderStartIntent,
+// and exact ExecutionPermission before permitting one ACP tool call.
+func (a *ACPExecutionPermissionAuthorizer) Authorize(ctx context.Context, request provider.ACPToolPermissionRequest) error {
+	if a == nil || a.store == nil || a.evaluator == nil || ctx == nil ||
+		request.OperationID == "" || request.JobID == "" || request.RoleExecutionID == "" ||
+		request.TaskID == "" || request.ExecutionPermissionID == "" || request.SessionID == "" ||
+		request.RequestSHA256 == "" || len(request.ToolCall) == 0 || request.ProviderIdentity.Validate() != nil {
+		return errors.New("ACP tool permission request is incomplete")
+	}
+	job, err := a.store.GetJob(ctx, request.JobID)
+	if err != nil {
+		return errors.New("ACP tool permission Job lookup failed")
+	}
+	var execution domain.RoleExecution
+	executionFound := false
+	for _, candidate := range job.RoleExecutions {
+		if candidate.ID == request.RoleExecutionID { execution, executionFound = candidate, true; break }
+	}
+	if !executionFound || execution.JobID != request.JobID || execution.TaskID != request.TaskID ||
+		execution.Role != domain.RoleCoder || execution.ExecutionPermissionID != request.ExecutionPermissionID {
+		return errors.New("ACP tool permission is outside the active Coder RoleExecution")
+	}
+	var startIntent domain.ProviderStartIntent
+	intentFound := false
+	for _, candidate := range job.ProviderStartIntents {
+		if candidate.ID == request.OperationID { startIntent, intentFound = candidate, true; break }
+	}
+	if !intentFound || startIntent.JobID != request.JobID || startIntent.RoleExecutionID != request.RoleExecutionID ||
+		startIntent.TaskID != request.TaskID || startIntent.ExecutionPermissionID != request.ExecutionPermissionID ||
+		startIntent.RequestSHA256 != request.RequestSHA256 {
+		return errors.New("ACP tool permission is outside the current Provider Start operation")
+	}
+	var permission domain.ExecutionPermission
+	permissionFound := false
+	for _, candidate := range job.ExecutionPermissions {
+		if candidate.ID == request.ExecutionPermissionID { permission, permissionFound = candidate, true; break }
+	}
+	if !permissionFound || permission.TaskID != request.TaskID || permission.RequestSHA256 != request.RequestSHA256 ||
+		permission.ProviderID != request.ProviderIdentity.ProviderID || permission.AccountID != request.ProviderIdentity.AccountID ||
+		permission.ConfigurationSHA256 != request.ProviderIdentity.ConfigurationSHA256 {
+		return errors.New("ACP tool permission differs from the approved ExecutionPermission identity")
+	}
+	if err := permission.ValidateFor(job, request.OperationID, request.RequestSHA256, a.now()); err != nil {
+		return errors.New("ACP tool permission is stale, expired, or no longer approved")
+	}
+	effect, resource, err := a.evaluator.Evaluate(ctx, request)
+	if err != nil || effect != permission.Effect || resource != permission.Resource {
+		return errors.New("ACP tool call exceeds the exact approved effect or resource")
+	}
+	return nil
+}
 type ProviderController struct {
 	store     ProviderExecutionStore
 	runtime   PlanningProviderRuntime
@@ -306,6 +379,7 @@ func (c *ProviderController) DispatchTaskExecution(
 	}
 	request := provider.StartRequest{
 		OperationID: intent.ID, JobID: job.ID, RoleExecutionID: execution.ID,
+		TaskID: execution.TaskID, ExecutionPermissionID: permission.ID,
 		RequestSHA256: permission.RequestSHA256, Prompt: prompt, PromptSHA256: sha256String(prompt),
 		MaxTurns: permission.ReservedTurns, MaxTokens: permission.ReservedTokens, Deadline: intent.Deadline,
 	}

@@ -24,10 +24,11 @@ const maxACPOutputBytes = 4 * 1024 * 1024
 // Tool permission requests are denied by default; this adapter does not infer
 // Job authority from ACP prompts or tool metadata.
 type ACPConfig struct {
-	Command          string
-	Args             []string
-	WorkingDirectory string
-	Identity         Identity
+	Command              string
+	Args                 []string
+	WorkingDirectory     string
+	Identity             Identity
+	PermissionAuthorizer ACPToolPermissionAuthorizer
 	// Environment lists non-secret host variables explicitly passed to the CLI.
 	Environment []string
 }
@@ -64,22 +65,24 @@ type acpSession struct {
 }
 
 type acpProcess struct {
-	cmd             *exec.Cmd
-	stdin           io.WriteCloser
-	pending         sync.Map
-	updates         chan json.RawMessage
-	done            chan struct{}
-	readerDone      chan struct{}
-	stop            chan struct{}
-	failed          chan struct{}
-	failMu          sync.Mutex
-	failErr         error
-	failOnce        sync.Once
-	stopOnce        sync.Once
-	closing         atomic.Bool
-	updateConsumers atomic.Int32
-	writeGate       chan struct{}
-	nextID          atomic.Uint64
+	cmd               *exec.Cmd
+	stdin             io.WriteCloser
+	pending           sync.Map
+	updates           chan json.RawMessage
+	done              chan struct{}
+	readerDone        chan struct{}
+	stop              chan struct{}
+	failed            chan struct{}
+	failMu            sync.Mutex
+	failErr           error
+	failOnce          sync.Once
+	stopOnce          sync.Once
+	closing           atomic.Bool
+	updateConsumers   atomic.Int32
+	permissionMu      sync.RWMutex
+	permissionHandler func(context.Context, json.RawMessage) bool
+	writeGate         chan struct{}
+	nextID            atomic.Uint64
 }
 
 type acpMessage struct {
@@ -251,6 +254,28 @@ func (a *ACPAdapter) Start(ctx context.Context, request StartRequest, _ Credenti
 		process:         process,
 		turnGate:        turnGate,
 		turns:           make(map[string]TurnResult),
+	}
+	if request.TaskID != "" && request.ExecutionPermissionID != "" && a.config.PermissionAuthorizer != nil {
+		process.setPermissionHandler(func(permissionCtx context.Context, raw json.RawMessage) bool {
+			var permissionRequest struct {
+				SessionID string `json:"sessionId"`
+				ToolCall  json.RawMessage `json:"toolCall"`
+			}
+			if json.Unmarshal(raw, &permissionRequest) != nil ||
+				permissionRequest.SessionID != session.sessionID ||
+				len(bytes.TrimSpace(permissionRequest.ToolCall)) == 0 ||
+				bytes.Equal(bytes.TrimSpace(permissionRequest.ToolCall), []byte("null")) {
+				return false
+			}
+			return a.config.PermissionAuthorizer.Authorize(permissionCtx, ACPToolPermissionRequest{
+				OperationID: request.OperationID, JobID: request.JobID,
+				RoleExecutionID: request.RoleExecutionID, TaskID: request.TaskID,
+				ExecutionPermissionID: request.ExecutionPermissionID,
+				SessionID: session.sessionID, RequestSHA256: request.RequestSHA256,
+				ProviderIdentity: a.config.Identity,
+				ToolCall: append([]byte(nil), permissionRequest.ToolCall...),
+			}) == nil
+		})
 	}
 	result := StartResult{
 		OperationID:    request.OperationID,
@@ -651,6 +676,18 @@ func newACPProcess(command *exec.Cmd, stdin io.WriteCloser) *acpProcess {
 	}
 }
 
+func (p *acpProcess) setPermissionHandler(handler func(context.Context, json.RawMessage) bool) {
+	p.permissionMu.Lock()
+	p.permissionHandler = handler
+	p.permissionMu.Unlock()
+}
+
+func (p *acpProcess) currentPermissionHandler() func(context.Context, json.RawMessage) bool {
+	p.permissionMu.RLock()
+	defer p.permissionMu.RUnlock()
+	return p.permissionHandler
+}
+
 func (p *acpProcess) read(stdout io.Reader) {
 	defer close(p.readerDone)
 	defer p.closePending()
@@ -670,7 +707,30 @@ func (p *acpProcess) read(stdout io.Reader) {
 					"id":      json.RawMessage(message.ID),
 				}
 				if message.Method == "session/request_permission" || message.Method == "requestPermission" {
-					response["result"] = map[string]any{"outcome": map[string]string{"outcome": "cancelled"}}
+					outcome := map[string]string{"outcome": "cancelled"}
+					var permissionParams struct {
+						Options []struct {
+							OptionID string `json:"optionId"`
+							Kind string `json:"kind"`
+						} `json:"options"`
+					}
+					allowed := false
+					if json.Unmarshal(message.Params, &permissionParams) == nil {
+						if handler := p.currentPermissionHandler(); handler != nil {
+							ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+							allowed = handler(ctx, message.Params)
+							cancel()
+						}
+					}
+					if allowed {
+						for _, option := range permissionParams.Options {
+							if option.Kind == "allow_once" && option.OptionID != "" {
+								outcome = map[string]string{"outcome": "selected", "optionId": option.OptionID}
+								break
+							}
+						}
+					}
+					response["result"] = map[string]any{"outcome": outcome}
 				} else {
 					response["error"] = map[string]any{"code": -32601, "message": "Method not found"}
 				}
