@@ -80,7 +80,7 @@ func NewJobMessage(job Job, commandID string, request JobMessageRequest, now tim
 		}
 	}
 
-	message: = JobMessage{
+	message:= JobMessage{
 		ID:               JobMessageID(commandID), CommandID: commandID, JobID: job.ID,
 		Sender:           request.Sender, Recipient: request.Recipient,
 		ReplyToMessageID: request.ReplyToMessageID, Body: request.Body,
@@ -158,8 +158,8 @@ func (a ActorRef) Validate(job Job) error {
 }
 
 func validateJobMessageFacts(job Job) error {
-	seenIDs:      = make(map[string]struct{}, len(job.JobMessages))
-	seenCommands: = make(map[string]struct{}, len(job.JobMessages))
+	seenIDs:= make(map[string]struct{}, len(job.JobMessages))
+	seenCommands:= make(map[string]struct{}, len(job.JobMessages))
 	var previousRevision uint64
 	var previousCreatedAt time.Time
 	for _, message := range job.JobMessages {

@@ -156,7 +156,7 @@ func findMessageByCommand(job domain.Job, commandID string) (domain.JobMessage, 
 func hasAcceptedRoleSession(job domain.Job, execution domain.RoleExecution, sessionID string) bool {
 	var latest *domain.ProviderStartObservation
 	for i := range job.ProviderStartObservations {
-		observation: = &job.ProviderStartObservations[i]
+		observation:= &job.ProviderStartObservations[i]
 		if observation.OperationID == execution.ProviderStartOperationID &&
 			(latest == nil || observation.CreatedRevision > latest.CreatedRevision) {
 			latest = observation

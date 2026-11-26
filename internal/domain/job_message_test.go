@@ -8,9 +8,9 @@ import (
 
 func jobWithPlannerForMessageTest(t *testing.T) (Job, RoleExecution) {
 	t.Helper()
-	job:      = newPlanningTestJob(t)
-	issuedAt: = job.CreatedAt.Add(time.Minute)
-	grant:    = newValidPlanningAuthorization(t, job, issuedAt)
+	job:= newPlanningTestJob(t)
+	issuedAt:= job.CreatedAt.Add(time.Minute)
+	grant:= newValidPlanningAuthorization(t, job, issuedAt)
 	job.PlanningAuthorizations = append(job.PlanningAuthorizations, grant)
 	job.Revision++
 	job.UpdatedAt = issuedAt
@@ -34,7 +34,7 @@ func jobWithPlannerForMessageTest(t *testing.T) (Job, RoleExecution) {
 
 func TestJobMessagePreservesNaturalLanguageAndReplyCorrelation(t *testing.T) {
 	job, planner := jobWithPlannerForMessageTest(t)
-	principalID: = job.IntakeProvenance.PrincipalID
+	principalID:= job.IntakeProvenance.PrincipalID
 	question, err := NewJobMessage(job, "cmd_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", JobMessageRequest{
 		Sender:    ActorRef{Kind: ActorPlanner, ID: planner.ID},
 		Recipient: ActorRef{Kind: ActorHuman, ID: principalID},
@@ -69,7 +69,7 @@ func TestJobMessagePreservesNaturalLanguageAndReplyCorrelation(t *testing.T) {
 
 func TestJobMessageRejectsForgedActorsAndInvalidReplies(t *testing.T) {
 	job, planner := jobWithPlannerForMessageTest(t)
-	recipient: = ActorRef{Kind: ActorHuman, ID: job.IntakeProvenance.PrincipalID}
+	recipient:= ActorRef{Kind: ActorHuman, ID: job.IntakeProvenance.PrincipalID}
 	if _, err := NewJobMessage(job, "cmd_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", JobMessageRequest{
 		Sender:    ActorRef{Kind: ActorHuman, ID: "human_forged"},
 		Recipient: recipient, Body: "forged",
