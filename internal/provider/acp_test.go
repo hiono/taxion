@@ -162,3 +162,85 @@ func TestACPStartPromptIncludesValidatedContextDocuments(t *testing.T) {
 		}
 	}
 }
+
+type syntheticACPTestAdapter struct {
+	*ACPAdapter
+}
+
+func (a *syntheticACPTestAdapter) Capabilities(ctx context.Context) (Capabilities, error) {
+	identity := a.Identity()
+	evidence := func(capability Capability) CapabilityEvidence {
+		return CapabilityEvidence{
+			Capability: capability,
+			Identity: identity,
+			TestID: "runtime-test",
+			EvidenceSHA256: sha256Hex("synthetic ACP fake-peer evidence"),
+			EvidenceLevel: EvidenceSynthetic,
+			VerifiedAt: time.Now().UTC(),
+		}
+	}
+	return Capabilities{
+		Identity: identity,
+		StartIdempotency: true,
+		SendIdempotency: true,
+		Evidence: []CapabilityEvidence{
+			evidence(CapabilityStartIdempotency),
+			evidence(CapabilitySendIdempotency),
+		},
+	}, nil
+}
+
+func TestACPFakePeerThroughProviderRuntime(t *testing.T) {
+	t.Setenv("TAXION_ACP_HELPER", "1")
+	identity := testIdentity()
+	adapter, err := NewACPAdapter(ACPConfig{
+		Command: os.Args[0],
+		Args: []string{"-test.run=TestACPHelperProcess"},
+		WorkingDirectory: t.TempDir(),
+		Identity: identity,
+	})
+	if err != nil {
+		t.Fatalf("NewACPAdapter: %v", err)
+	}
+	defer adapter.Close()
+
+	runtime, err := newTestRuntime(&syntheticACPTestAdapter{ACPAdapter: adapter},
+		&testBroker{secret: []byte("runtime-test-secret")})
+	if err != nil {
+		t.Fatalf("newTestRuntime: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	startPrompt := "start the approved task"
+	startRequest := StartRequest{
+		OperationID: "runtime_start_1",
+		JobID: "job_1",
+		RoleExecutionID: "role_execution_1",
+		RequestSHA256: sha256Hex("immutable request"),
+		PromptSHA256: sha256Hex(startPrompt),
+		Prompt: startPrompt,
+		MaxTurns: 2,
+		MaxTokens: 1000,
+		Deadline: time.Now().Add(8 * time.Second),
+	}
+	startResult, err := runtime.Start(ctx, startRequest)
+	if err != nil {
+		t.Fatalf("Runtime.Start with fake ACP peer: %v", err)
+	}
+	prompt := "continue the same task"
+	turnResult, err := runtime.Send(ctx, TurnRequest{
+		OperationID: "runtime_turn_1",
+		TurnID: "turn_1",
+		SessionID: startResult.SessionID,
+		PromptSHA256: sha256Hex(prompt),
+		Prompt: prompt,
+		MaxTokens: 1000,
+		Deadline: time.Now().Add(8 * time.Second),
+	})
+	if err != nil {
+		t.Fatalf("Runtime.Send with fake ACP peer: %v", err)
+	}
+	if turnResult.Output != "fixed ACP response" {
+		t.Fatalf("unexpected Runtime.Send output: %q", turnResult.Output)
+	}
+}
