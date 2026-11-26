@@ -316,3 +316,26 @@ func TestTurnRequestValidatesReadOnlyContextBoundary(t *testing.T) {
 		t.Fatal("Turn request accepted a non-read-only boundary mode")
 	}
 }
+
+func TestLookupResultDigestRequirementIsExplicitAndScoped(t *testing.T) {
+	request := LookupRequest{OperationID: "operation_1", SessionID: "session_1", TurnID: "turn_1"}
+	result := LookupResult{
+		Found: true, OperationID: request.OperationID, Status: "COMPLETED",
+		ReceiptID: "receipt_1", SessionID: request.SessionID, TurnID: request.TurnID,
+		EvidenceSHA256: strings.Repeat("a", 64),
+	}
+	if err := result.Validate(request); err != nil {
+		t.Fatalf("legacy completed lookup without digest was rejected: %v", err)
+	}
+	request.RequireResultDigest = true
+	if err := result.Validate(request); err == nil {
+		t.Fatal("question-turn completed lookup without digest was accepted")
+	}
+	result.ResultSHA256 = strings.Repeat("b", 64)
+	if err := result.Validate(request); err != nil {
+		t.Fatalf("question-turn completed lookup with digest was rejected: %v", err)
+	}
+	if err := (LookupRequest{OperationID: "operation_1", RequireResultDigest: true}).Validate(); err == nil {
+		t.Fatal("digest requirement without a TurnID was accepted")
+	}
+}

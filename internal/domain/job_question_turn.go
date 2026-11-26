@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 )
 
@@ -238,7 +239,7 @@ func NewJobQuestionTurnObservation(job Job, request JobQuestionTurnObservationRe
 		if !utf8.ValidString(request.Content) || len([]byte(request.Content)) > MaxJobMessageBodyBytes ||
 			(request.Status == JobQuestionTurnCompleted && strings.TrimSpace(request.Content) == "") ||
 			request.TokensUsed > intent.ReservedTokens ||
-			!validPlanningIdentity(request.ReceiptID) || !validSHA256(request.EvidenceSHA256) {
+			!validProviderReceiptID(request.ReceiptID) || !validSHA256(request.EvidenceSHA256) {
 			return JobQuestionTurnObservation{}, errors.New("terminal question turn observation output, usage, receipt, or evidence is invalid")
 		}
 		contentSHA256 = sha256HexDomain(request.Content)
@@ -303,7 +304,7 @@ func (o JobQuestionTurnObservation) Validate(job Job, intent JobQuestionTurnInte
 	}
 	if !utf8.ValidString(o.Content) || len([]byte(o.Content)) > MaxJobMessageBodyBytes ||
 		(o.Status == JobQuestionTurnCompleted && strings.TrimSpace(o.Content) == "") ||
-		o.TokensUsed > intent.ReservedTokens || !validPlanningIdentity(o.ReceiptID) ||
+		o.TokensUsed > intent.ReservedTokens || !validProviderReceiptID(o.ReceiptID) ||
 		!validSHA256(o.ContentSHA256) || sha256HexDomain(o.Content) != o.ContentSHA256 ||
 		!validSHA256(o.EvidenceSHA256) {
 		return errors.New("terminal JobQuestionTurnObservation output, usage, receipt, or evidence is invalid")
@@ -499,4 +500,16 @@ func jobQuestionTurnRequestSHA256(intent JobQuestionTurnIntent) string {
 		intent.Deadline.UTC().Format(time.RFC3339Nano),
 	)
 	return sha256HexDomain(material)
+}
+
+func validProviderReceiptID(value string) bool {
+	if !utf8.ValidString(value) || value == "" || len(value) > 256 || strings.TrimSpace(value) != value {
+		return false
+	}
+	for _, r := range value {
+		if unicode.IsControl(r) {
+			return false
+		}
+	}
+	return true
 }

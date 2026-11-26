@@ -775,3 +775,238 @@ func TestOrchestratorReplaysCompletedTurnAfterReplyPersistenceFailure(t *testing
 			second, fixture.runtime.sendCalls, err)
 	}
 }
+
+func TestJobQuestionTurnControllerRecoversExistingIntentAfterGrantDeadline(t *testing.T) {
+	f := newJobQuestionTurnFixture(t)
+	job, err := f.database.GetJob(context.Background(), f.jobID)
+	if err != nil { t.Fatalf("GetJob: %v", err) }
+	grant, found := findJobQuestionAuthorization(job, f.authorizationID)
+	if !found { t.Fatal("JobQuestionAuthorization not found") }
+	const commandID = "cmd_b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1"
+	f.runtime.sendErr = errors.New("simulated failure before Provider acceptance")
+	if _, err := f.controller.Send(context.Background(), f.jobID, f.authorizationID, commandID, 100); err == nil {
+		t.Fatal("initial Provider failure was not returned")
+	}
+	job, err = f.database.GetJob(context.Background(), f.jobID)
+	if err != nil { t.Fatalf("GetJob after initial failure: %v", err) }
+	intent, found := findJobQuestionTurnIntentByCommand(job, commandID)
+	if !found || len(job.JobQuestionTurnObservations) != 0 {
+		t.Fatalf("expected persisted intent without observation: intent=%#v observations=%d", intent, len(job.JobQuestionTurnObservations))
+	}
+	now := time.Now().UTC()
+	capabilities := f.runtime.capabilities
+	capabilities.SendLookup, capabilities.UsageIdentity = true, true
+	capabilities.UsageCompleteness, capabilities.FinalOutputRetrieval = true, true
+	capabilities.Evidence = append(capabilities.Evidence,
+		provider.CapabilityEvidence{Capability: provider.CapabilitySendLookup, Identity: f.runtime.identity, TestID: "question-lookup", EvidenceSHA256: strings.Repeat("c", 64), EvidenceLevel: provider.EvidenceSynthetic, VerifiedAt: now},
+		provider.CapabilityEvidence{Capability: provider.CapabilityUsageIdentity, Identity: f.runtime.identity, TestID: "question-usage-id", EvidenceSHA256: strings.Repeat("d", 64), EvidenceLevel: provider.EvidenceSynthetic, VerifiedAt: now},
+		provider.CapabilityEvidence{Capability: provider.CapabilityUsageCompleteness, Identity: f.runtime.identity, TestID: "question-usage-complete", EvidenceSHA256: strings.Repeat("e", 64), EvidenceLevel: provider.EvidenceSynthetic, VerifiedAt: now},
+		provider.CapabilityEvidence{Capability: provider.CapabilityFinalOutput, Identity: f.runtime.identity, TestID: "question-result", EvidenceSHA256: strings.Repeat("f", 64), EvidenceLevel: provider.EvidenceSynthetic, VerifiedAt: now},
+	)
+	f.runtime.capabilities = capabilities
+	content := "recovered answer after the authorization deadline"
+	f.runtime.lookupResult = provider.LookupResult{
+		Found: true, OperationID: intent.OperationID, Status: domain.JobQuestionTurnCompleted,
+		ReceiptID: "receipt with spaces", SessionID: f.sessionID, TurnID: intent.ID,
+		ResultSHA256: sha256String(content), UsageID: "usage_question_recovered", EvidenceSHA256: strings.Repeat("a", 64),
+	}
+	f.runtime.usageResult = provider.Usage{
+		OperationID: intent.OperationID, SessionID: f.sessionID, TurnID: intent.ID,
+		UsageID: "usage_question_recovered", Tokens: 12, Complete: true, EvidenceSHA256: strings.Repeat("b", 64),
+	}
+	f.runtime.resultResult = provider.Result{
+		OperationID: intent.OperationID, SessionID: f.sessionID, TurnID: intent.ID,
+		Content: content, ResultSHA256: sha256String(content), Final: true, EvidenceSHA256: strings.Repeat("c", 64),
+	}
+	f.runtime.sendErr = nil
+	f.controller.now = func() time.Time { return grant.Deadline.Add(time.Second) }
+	outcome, err := f.controller.Send(context.Background(), f.jobID, f.authorizationID, commandID, 100)
+	if err != nil { t.Fatalf("recover existing Provider result after grant deadline: %v", err) }
+	if outcome.Observation.Status != domain.JobQuestionTurnCompleted || outcome.Observation.Content != content ||
+		outcome.Reply.Message.ReplyToMessageID != f.questionID || f.runtime.sendCalls != 1 ||
+		f.runtime.lookupCalls != 1 || f.runtime.resultCalls != 1 || f.runtime.usageCalls != 1 {
+		t.Fatalf("expired intent was not recovered exclusively through Lookup: outcome=%#v calls(send=%d lookup=%d result=%d usage=%d)",
+			outcome, f.runtime.sendCalls, f.runtime.lookupCalls, f.runtime.resultCalls, f.runtime.usageCalls)
+	}
+}
+
+func TestJobQuestionTurnControllerDoesNotDispatchAfterDeadlineWhenLookupReportsNotFound(t *testing.T) {
+	f := newJobQuestionTurnFixture(t)
+	job, err := f.database.GetJob(context.Background(), f.jobID)
+	if err != nil { t.Fatalf("GetJob: %v", err) }
+	grant, found := findJobQuestionAuthorization(job, f.authorizationID)
+	if !found { t.Fatal("JobQuestionAuthorization not found") }
+	const commandID = "cmd_b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+	f.runtime.sendErr = errors.New("simulated failure before Provider acceptance")
+	if _, err := f.controller.Send(context.Background(), f.jobID, f.authorizationID, commandID, 100); err == nil {
+		t.Fatal("initial Provider failure was not returned")
+	}
+	job, err = f.database.GetJob(context.Background(), f.jobID)
+	if err != nil { t.Fatalf("GetJob after initial failure: %v", err) }
+	intent, found := findJobQuestionTurnIntentByCommand(job, commandID)
+	if !found { t.Fatal("persisted intent not found") }
+	now := time.Now().UTC()
+	capabilities := f.runtime.capabilities
+	capabilities.SendLookup, capabilities.UsageIdentity = true, true
+	capabilities.UsageCompleteness, capabilities.FinalOutputRetrieval = true, true
+	capabilities.Evidence = append(capabilities.Evidence,
+		provider.CapabilityEvidence{Capability: provider.CapabilitySendLookup, Identity: f.runtime.identity, TestID: "question-lookup", EvidenceSHA256: strings.Repeat("c", 64), EvidenceLevel: provider.EvidenceSynthetic, VerifiedAt: now},
+		provider.CapabilityEvidence{Capability: provider.CapabilityUsageIdentity, Identity: f.runtime.identity, TestID: "question-usage-id", EvidenceSHA256: strings.Repeat("d", 64), EvidenceLevel: provider.EvidenceSynthetic, VerifiedAt: now},
+		provider.CapabilityEvidence{Capability: provider.CapabilityUsageCompleteness, Identity: f.runtime.identity, TestID: "question-usage-complete", EvidenceSHA256: strings.Repeat("e", 64), EvidenceLevel: provider.EvidenceSynthetic, VerifiedAt: now},
+		provider.CapabilityEvidence{Capability: provider.CapabilityFinalOutput, Identity: f.runtime.identity, TestID: "question-result", EvidenceSHA256: strings.Repeat("f", 64), EvidenceLevel: provider.EvidenceSynthetic, VerifiedAt: now},
+	)
+	f.runtime.capabilities = capabilities
+	f.runtime.lookupResult = provider.LookupResult{
+		Found: false, OperationID: intent.OperationID, Status: provider.LookupStatusNotFound,
+		SessionID: f.sessionID, TurnID: intent.ID, EvidenceSHA256: strings.Repeat("a", 64),
+	}
+	f.controller.now = func() time.Time { return grant.Deadline.Add(time.Second) }
+	f.runtime.sendErr = nil
+	if _, err := f.controller.Send(context.Background(), f.jobID, f.authorizationID, commandID, 100); err == nil {
+		t.Fatal("expired intent with NOT_FOUND lookup was allowed to start a new Provider turn")
+	}
+	if f.runtime.sendCalls != 1 || f.runtime.lookupCalls != 1 {
+		t.Fatalf("expired recovery dispatched a new Provider turn: send=%d lookup=%d", f.runtime.sendCalls, f.runtime.lookupCalls)
+	}
+}
+
+func TestJobQuestionTurnControllerUsesIdempotentSendWhenLookupRecoveryEvidenceIsIncomplete(t *testing.T) {
+	f := newJobQuestionTurnFixture(t)
+	const commandID = "cmd_b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3"
+	f.runtime.sendErr = errors.New("simulated failure before Provider acceptance")
+	if _, err := f.controller.Send(context.Background(), f.jobID, f.authorizationID, commandID, 100); err == nil {
+		t.Fatal("initial Provider failure was not returned")
+	}
+	capabilities := f.runtime.capabilities
+	capabilities.SendLookup = true
+	capabilities.Evidence = append(capabilities.Evidence,
+		provider.CapabilityEvidence{Capability: provider.CapabilitySendLookup, Identity: f.runtime.identity, TestID: "question-lookup-only", EvidenceSHA256: strings.Repeat("c", 64), EvidenceLevel: provider.EvidenceSynthetic, VerifiedAt: time.Now().UTC()},
+	)
+	f.runtime.capabilities = capabilities
+	f.runtime.sendErr = nil
+	f.controller.now = func() time.Time { return time.Now().UTC() }
+	outcome, err := f.controller.Send(context.Background(), f.jobID, f.authorizationID, commandID, 100)
+	if err != nil { t.Fatalf("idempotent Send fallback: %v", err) }
+	if outcome.Observation.Status != domain.JobQuestionTurnCompleted || f.runtime.sendCalls != 2 || f.runtime.lookupCalls != 0 {
+		t.Fatalf("Lookup-only capabilities blocked idempotent Send recovery: outcome=%#v sends=%d lookups=%d",
+			outcome, f.runtime.sendCalls, f.runtime.lookupCalls)
+	}
+}
+
+func TestJobQuestionTurnControllerKeepsExistingTerminalObservationEvidenceOnMatchingReplay(t *testing.T) {
+	f := newJobQuestionTurnFixture(t)
+	const commandID = "cmd_b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4"
+	outcome, err := f.controller.Send(context.Background(), f.jobID, f.authorizationID, commandID, 100)
+	if err != nil { t.Fatalf("Send: %v", err) }
+	originalEvidence := outcome.Observation.EvidenceSHA256
+	_, replayed, err := f.controller.persistObservation(
+		context.Background(), f.jobID, outcome.Intent.ID, domain.JobQuestionTurnCompleted,
+		outcome.Observation.TokensUsed, outcome.Observation.Content, outcome.Observation.ReceiptID, strings.Repeat("9", 64),
+	)
+	if err != nil { t.Fatalf("matching terminal observation replay: %v", err) }
+	if replayed.ID != outcome.Observation.ID || replayed.EvidenceSHA256 != originalEvidence {
+		t.Fatalf("matching terminal observation replaced its original evidence: first=%#v replay=%#v", outcome.Observation, replayed)
+	}
+}
+
+type selectiveQuestionTurnContextResolver struct {
+	failQuestionID string
+	context        QuestionReadOnlyContext
+}
+
+func (r selectiveQuestionTurnContextResolver) ResolveReadOnlyBoundary(
+	_ context.Context, _ domain.Job, question domain.JobMessage, _ domain.RoleExecution,
+) (QuestionReadOnlyContext, error) {
+	if question.ID == r.failQuestionID {
+		return QuestionReadOnlyContext{}, errors.New("injected question-specific context resolution failure")
+	}
+	return r.context, nil
+}
+
+func TestOrchestratorContinuesAfterQuestionAuthorizationFailure(t *testing.T) {
+	f := newJobQuestionTurnFixture(t)
+	job, err := f.database.GetJob(context.Background(), f.jobID)
+	if err != nil { t.Fatalf("GetJob: %v", err) }
+	_, secondQuestion, err := f.database.AddJobMessage(context.Background(), f.jobID, job.Revision,
+		"cmd_b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5", domain.JobMessageRequest{
+			Sender: domain.ActorRef{Kind: domain.ActorCoder, ID: f.coderID},
+			Recipient: domain.ActorRef{Kind: domain.ActorPlanner, ID: f.plannerID},
+			Body: "Second question remains independently processable",
+		})
+	if err != nil { t.Fatalf("Add second question: %v", err) }
+	communication, err := NewCommunicationController(f.database)
+	if err != nil { t.Fatalf("NewCommunicationController: %v", err) }
+	resolver := selectiveQuestionTurnContextResolver{
+		failQuestionID: f.questionID,
+		context: QuestionReadOnlyContext{
+			RepositoryID: "https://github.com/example/project",
+			Boundary: domain.PlanningReadOnlyBoundary{
+				Mode: domain.PlanningReadOnlyBoundarySnapshot, Reference: "question_snapshot_1",
+				SHA256: sha256String("immutable question snapshot"),
+			},
+		},
+	}
+	authorization, err := NewJobQuestionAuthorizationController(f.database, resolver)
+	if err != nil { t.Fatalf("NewJobQuestionAuthorizationController: %v", err) }
+	orchestrator, err := NewOrchestratorController(
+		f.database, communication, authorization, f.controller, domain.PlanningBudget{MaxTurns: 1, MaxTokens: 100},
+	)
+	if err != nil { t.Fatalf("NewOrchestratorController: %v", err) }
+	outcomes, err := orchestrator.ProcessPlannerInbox(context.Background(), f.jobID, f.plannerID)
+	if err == nil || !strings.Contains(err.Error(), f.questionID) {
+		t.Fatalf("ProcessPlannerInbox error = %v, want first question authorization failure", err)
+	}
+	if len(outcomes) != 1 || outcomes[0].Reply.Message.ReplyToMessageID != secondQuestion.ID || f.runtime.sendCalls != 1 {
+		t.Fatalf("question authorization failure blocked the next valid question: outcomes=%#v sends=%d err=%v",
+			outcomes, f.runtime.sendCalls, err)
+	}
+}
+
+func TestOrchestratorContinuesAfterPerTurnDeadlineWhileCallerContextIsActive(t *testing.T) {
+	f := newJobQuestionTurnFixture(t)
+	job, err := f.database.GetJob(context.Background(), f.jobID)
+	if err != nil { t.Fatalf("GetJob: %v", err) }
+	_, secondQuestion, err := f.database.AddJobMessage(context.Background(), f.jobID, job.Revision,
+		"cmd_b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6", domain.JobMessageRequest{
+			Sender: domain.ActorRef{Kind: domain.ActorCoder, ID: f.coderID},
+			Recipient: domain.ActorRef{Kind: domain.ActorPlanner, ID: f.plannerID},
+			Body: "Second question should proceed after the first request deadline",
+		})
+	if err != nil { t.Fatalf("Add second question: %v", err) }
+	communication, err := NewCommunicationController(f.database)
+	if err != nil { t.Fatalf("NewCommunicationController: %v", err) }
+	authorization, err := NewJobQuestionAuthorizationController(f.database, fixedQuestionTurnContextResolver{
+		context: QuestionReadOnlyContext{
+			RepositoryID: "https://github.com/example/project",
+			Boundary: domain.PlanningReadOnlyBoundary{
+				Mode: domain.PlanningReadOnlyBoundarySnapshot, Reference: "question_snapshot_1",
+				SHA256: sha256String("immutable question snapshot"),
+			},
+		},
+	})
+	if err != nil { t.Fatalf("NewJobQuestionAuthorizationController: %v", err) }
+	orchestrator, err := NewOrchestratorController(
+		f.database, communication, authorization, f.controller, domain.PlanningBudget{MaxTurns: 1, MaxTokens: 100},
+	)
+	if err != nil { t.Fatalf("NewOrchestratorController: %v", err) }
+	f.runtime.sendHook = func(ctx context.Context, request provider.TurnRequest) error {
+		job, err := f.database.GetJob(ctx, f.jobID)
+		if err != nil { return err }
+		for _, intent := range job.JobQuestionTurnIntents {
+			if intent.ID == request.TurnID && intent.QuestionMessageID == f.questionID {
+				return context.DeadlineExceeded
+			}
+		}
+		return nil
+	}
+	outcomes, err := orchestrator.ProcessPlannerInbox(context.Background(), f.jobID, f.plannerID)
+	if err == nil || !strings.Contains(err.Error(), f.questionID) {
+		t.Fatalf("ProcessPlannerInbox error = %v, want first request deadline error", err)
+	}
+	if len(outcomes) != 2 || outcomes[0].Observation.ID != "" ||
+		outcomes[1].Observation.Status != domain.JobQuestionTurnCompleted ||
+		outcomes[1].Reply.Message.ReplyToMessageID != secondQuestion.ID || f.runtime.sendCalls != 2 {
+		t.Fatalf("per-turn deadline stopped the inbox pass: outcomes=%#v sends=%d err=%v",
+			outcomes, f.runtime.sendCalls, err)
+	}
+}

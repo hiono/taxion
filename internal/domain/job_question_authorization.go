@@ -179,7 +179,8 @@ func (a JobQuestionAuthorization) Validate(job Job) error {
 			break
 		}
 	}
-	if revision == nil || revision.Contract.ConfigurationSHA256 != a.ConfigurationSHA256 ||
+	if revision == nil || jobQuestionAuthorizationWasIssuedAfterSupersession(job, a) ||
+		revision.Contract.ConfigurationSHA256 != a.ConfigurationSHA256 ||
 		!repositoryInJobContract(revision.Contract, a.RepositoryID) ||
 		a.Deadline.After(revision.Contract.Deadline) ||
 		a.Budget.MaxTurns > revision.Contract.Budget.MaxTurns ||
@@ -326,6 +327,16 @@ func planningAuthorizationByID(job Job, authorizationID string) (PlanningAuthori
 func repositoryInJobContract(contract JobContract, repositoryID string) bool {
 	for _, candidate := range contract.TargetRepositories {
 		if candidate == repositoryID {
+			return true
+		}
+	}
+	return false
+}
+
+func jobQuestionAuthorizationWasIssuedAfterSupersession(job Job, authorization JobQuestionAuthorization) bool {
+	for _, revision := range job.JobContractRevisions {
+		if revision.Revision > authorization.ContractRevision &&
+			revision.CreatedRevision <= authorization.CreatedRevision {
 			return true
 		}
 	}

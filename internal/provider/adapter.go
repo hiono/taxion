@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
 )
 
 type Identity struct {
@@ -446,15 +447,17 @@ type ResumeResult struct {
 }
 
 type LookupRequest struct {
-	OperationID string
-	SessionID   string
-	TurnID      string
+	OperationID         string
+	SessionID           string
+	TurnID              string
+	RequireResultDigest bool
 }
 
 func (r LookupRequest) Validate() error {
 	if !validIdentifier(r.OperationID) ||
 		(r.SessionID != "" && !validIdentifier(r.SessionID)) ||
-		(r.TurnID != "" && (!validIdentifier(r.TurnID) || !validIdentifier(r.SessionID))) {
+		(r.TurnID != "" && (!validIdentifier(r.TurnID) || !validIdentifier(r.SessionID))) ||
+		(r.RequireResultDigest && r.TurnID == "") {
 		return errors.New("Provider Lookup request identity is invalid")
 	}
 	return nil
@@ -499,7 +502,7 @@ func (r LookupResult) Validate(request LookupRequest) error {
 		r.TurnID != request.TurnID {
 		return errors.New("Provider Lookup found result does not match the requested operation")
 	}
-	if request.TurnID != "" && r.Status == "COMPLETED" && r.ResultSHA256 == "" {
+	if request.RequireResultDigest && r.Status == "COMPLETED" && r.ResultSHA256 == "" {
 		return errors.New("completed Provider Turn Lookup is missing its result digest")
 	}
 	return nil
@@ -732,7 +735,7 @@ func validOperationCode(code string) bool {
 }
 
 func validIdentifier(value string) bool {
-	if value == "" || len(value) > 256 || strings.TrimSpace(value) != value {
+	if !utf8.ValidString(value) || value == "" || len(value) > 256 || strings.TrimSpace(value) != value {
 		return false
 	}
 	for _, r := range value {

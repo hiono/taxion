@@ -150,6 +150,9 @@ func (c *JobQuestionTurnController) Send(
 		}
 		return c.reconcileUnknown(ctx, outcome, job, grant, question, intent)
 	}
+	if existing {
+		return c.reconcileUnknown(ctx, outcome, job, grant, question, intent)
+	}
 
 	now := c.now().UTC().Round(0)
 	if err := grant.ValidateFor(job, question.ID, grant.PlannerRoleExecutionID, grant.ProviderSessionID, now); err != nil {
@@ -177,9 +180,14 @@ func (c *JobQuestionTurnController) reconcileUnknown(
 	if err != nil {
 		return outcome, err
 	}
-	if capabilities.SendLookup && capabilities.HasEvidenceAtLeast(provider.CapabilitySendLookup, c.minimumEvidence) {
+	if capabilities.SendLookup &&
+		capabilities.HasEvidenceAtLeast(provider.CapabilitySendLookup, c.minimumEvidence) &&
+		capabilities.HasEvidenceAtLeast(provider.CapabilityUsageIdentity, c.minimumEvidence) &&
+		capabilities.HasEvidenceAtLeast(provider.CapabilityUsageCompleteness, c.minimumEvidence) &&
+		capabilities.HasEvidenceAtLeast(provider.CapabilityFinalOutput, c.minimumEvidence) {
 		request := provider.LookupRequest{
 			OperationID: intent.OperationID, SessionID: intent.ProviderSessionID, TurnID: intent.ID,
+			RequireResultDigest: true,
 		}
 		lookup, lookupErr := c.runtime.Lookup(ctx, request)
 		if lookupErr != nil {
@@ -191,10 +199,6 @@ func (c *JobQuestionTurnController) reconcileUnknown(
 		if lookup.Found {
 			if lookup.Status != domain.JobQuestionTurnCompleted && lookup.Status != domain.JobQuestionTurnFailed {
 				return outcome, errors.New("Planner question Provider operation remains unresolved")
-			}
-			if !capabilities.HasEvidenceAtLeast(provider.CapabilityUsageIdentity, c.minimumEvidence) ||
-				!capabilities.HasEvidenceAtLeast(provider.CapabilityUsageCompleteness, c.minimumEvidence) {
-				return outcome, provider.ErrUnsupportedCapability
 			}
 			usage, err := c.runtime.Usage(ctx, provider.UsageRequest{
 				OperationID: intent.OperationID, SessionID: intent.ProviderSessionID, TurnID: intent.ID,
@@ -219,9 +223,6 @@ func (c *JobQuestionTurnController) reconcileUnknown(
 				}
 				outcome.ObservationReceipt, outcome.Observation = receipt, observation
 				return outcome, errors.New("Planner question Provider operation failed")
-			}
-			if !capabilities.HasEvidenceAtLeast(provider.CapabilityFinalOutput, c.minimumEvidence) {
-				return outcome, provider.ErrUnsupportedCapability
 			}
 			if lookup.ResultSHA256 == "" {
 				return outcome, provider.ErrProviderInvalidResult
@@ -423,8 +424,7 @@ func (c *JobQuestionTurnController) persistObservation(
 			}
 			if previous.Status != domain.JobQuestionTurnUnknown {
 				if previous.Status == status && previous.TokensUsed == tokens &&
-					previous.Content == content && previous.ReceiptID == receiptID &&
-					previous.EvidenceSHA256 == evidenceSHA256 {
+					previous.Content == content && previous.ReceiptID == receiptID {
 					return store.CommandReceipt{}, previous, nil
 				}
 				return store.CommandReceipt{}, empty, errors.New("terminal Planner question observation cannot be replaced")

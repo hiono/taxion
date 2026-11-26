@@ -78,7 +78,11 @@ func (c *OrchestratorController) ProcessPlannerInbox(
 				c.questionBudget, deadline,
 			)
 			if err != nil {
-				return outcomes, fmt.Errorf("authorize Planner question %s: %w", question.ID, err)
+				if ctx.Err() != nil {
+					return outcomes, ctx.Err()
+				}
+				processingErrors = append(processingErrors, fmt.Errorf("authorize Planner question %s: %w", question.ID, err))
+				continue
 			}
 		}
 		commandID := orchestratorQuestionTurnCommandID(grant.ID)
@@ -90,8 +94,8 @@ func (c *OrchestratorController) ProcessPlannerInbox(
 		outcome, err := c.questionTurn.Send(ctx, jobID, grant.ID, commandID, reservedTokens)
 		outcomes = append(outcomes, outcome)
 		if err != nil {
-			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-				return outcomes, err
+			if ctx.Err() != nil {
+				return outcomes, ctx.Err()
 			}
 			processingErrors = append(processingErrors, fmt.Errorf("process Planner question %s: %w", question.ID, err))
 			continue

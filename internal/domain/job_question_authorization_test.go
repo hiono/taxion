@@ -421,3 +421,30 @@ func TestJobQuestionAuthorizationReservesBudgetAcrossQuestions(t *testing.T) {
 		t.Fatal("Job.Validate accepted aggregate question grants beyond the approved Job budget")
 	}
 }
+
+func TestJobQuestionAuthorizationRejectsGrantCreatedAfterContractSupersession(t *testing.T) {
+	job := Job{JobContractRevisions: []JobContractRevision{
+		{Revision: 1, CreatedRevision: 4},
+		{Revision: 2, CreatedRevision: 9},
+	}}
+	authorization := JobQuestionAuthorization{ContractRevision: 1, CreatedRevision: 10}
+	if !jobQuestionAuthorizationWasIssuedAfterSupersession(job, authorization) {
+		t.Fatal("grant created after revision 2 existed was not identified as superseded")
+	}
+	authorization.CreatedRevision = 8
+	if jobQuestionAuthorizationWasIssuedAfterSupersession(job, authorization) {
+		t.Fatal("grant created before revision 2 existed was incorrectly identified as superseded")
+	}
+}
+
+func TestProviderReceiptIdentifierAcceptsTheProviderIdentifierContract(t *testing.T) {
+	if !validProviderReceiptID("receipt 123") {
+		t.Fatal("printable Provider receipt identifier containing a space was rejected")
+	}
+	if validProviderReceiptID("receipt\n123") {
+		t.Fatal("Provider receipt identifier containing a control character was accepted")
+	}
+	if validProviderReceiptID(strings.Repeat("x", 257)) {
+		t.Fatal("Provider receipt identifier exceeding the Provider limit was accepted")
+	}
+}
