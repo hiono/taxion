@@ -3,6 +3,7 @@ package domain
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 	"unicode/utf8"
 )
@@ -234,7 +235,8 @@ func NewJobQuestionTurnObservation(job Job, request JobQuestionTurnObservationRe
 			return JobQuestionTurnObservation{}, errors.New("UNKNOWN question turn observation cannot claim output, usage, receipt, or evidence")
 		}
 	} else {
-		if !utf8.ValidString(request.Content) || len([]byte(request.Content)) > MaxProviderResultContentBytes ||
+		if !utf8.ValidString(request.Content) || len([]byte(request.Content)) > MaxJobMessageBodyBytes ||
+			(request.Status == JobQuestionTurnCompleted && strings.TrimSpace(request.Content) == "") ||
 			request.TokensUsed > intent.ReservedTokens ||
 			!validPlanningIdentity(request.ReceiptID) || !validSHA256(request.EvidenceSHA256) {
 			return JobQuestionTurnObservation{}, errors.New("terminal question turn observation output, usage, receipt, or evidence is invalid")
@@ -299,7 +301,8 @@ func (o JobQuestionTurnObservation) Validate(job Job, intent JobQuestionTurnInte
 	if o.Status != JobQuestionTurnCompleted && o.Status != JobQuestionTurnFailed {
 		return errors.New("JobQuestionTurnObservation status is invalid")
 	}
-	if !utf8.ValidString(o.Content) || len([]byte(o.Content)) > MaxProviderResultContentBytes ||
+	if !utf8.ValidString(o.Content) || len([]byte(o.Content)) > MaxJobMessageBodyBytes ||
+		(o.Status == JobQuestionTurnCompleted && strings.TrimSpace(o.Content) == "") ||
 		o.TokensUsed > intent.ReservedTokens || !validPlanningIdentity(o.ReceiptID) ||
 		!validSHA256(o.ContentSHA256) || sha256HexDomain(o.Content) != o.ContentSHA256 ||
 		!validSHA256(o.EvidenceSHA256) {
