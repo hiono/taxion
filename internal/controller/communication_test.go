@@ -210,7 +210,7 @@ func TestCommunicationControllerPersistsCoderPlannerQuestionAndAnswer(t *testing
 		t.Run(test.name, func(t *testing.T) {
 			lateStore := &lateQuestionAuthorizationCommitStore{
 				JobQuestionAuthorizationStore: database,
-				receipt: questionReceipt, authorization: questionGrant, addErr: test.addErr,
+				receipt:                       questionReceipt, authorization: questionGrant, addErr: test.addErr,
 			}
 			lateResolver := &fakeQuestionReadOnlyContextResolver{
 				result: resolver.result, err: test.resolverErr,
