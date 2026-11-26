@@ -52,10 +52,10 @@ type acpSession struct {
 }
 
 type acpProcess struct {
-	cmd     *exec.Cmd
-	stdin   io.WriteCloser
-	pending sync.Map
-	updates chan json.RawMessage
+	cmd      *exec.Cmd
+	stdin    io.WriteCloser
+	pending  sync.Map
+	updates  chan json.RawMessage
 	done     chan struct{}
 	failed   chan struct{}
 	failMu   sync.Mutex
