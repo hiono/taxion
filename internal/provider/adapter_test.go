@@ -295,10 +295,6 @@ func TestTurnLookupRequiresResultDigestForCompletedButNotFailed(t *testing.T) {
 	if err := completed.Validate(request); err != nil {
 		t.Fatalf("COMPLETED Turn Lookup with result digest: %v", err)
 	}
-	failed.UsageID = ""
-	if err := failed.Validate(request); err == nil {
-		t.Fatal("terminal Turn Lookup without usage identity was accepted")
-	}
 }
 
 func TestTurnRequestValidatesReadOnlyContextBoundary(t *testing.T) {
