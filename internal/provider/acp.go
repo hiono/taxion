@@ -111,14 +111,16 @@ func (a *ACPAdapter) Start(ctx context.Context, request StartRequest, _ Credenti
 		return StartResult{}, ErrProviderInvalidRequest
 	}
 	a.mu.Lock()
-	defer a.mu.Unlock()
 	if existing, ok := a.byOp[request.OperationID]; ok {
+		a.mu.Unlock()
 		return existing, nil
 	}
 	if existing := a.byRole[request.RoleExecutionID]; existing != nil {
+		a.mu.Unlock()
 		return StartResult{}, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown}
 	}
 	if err := ctx.Err(); err != nil {
+		a.mu.Unlock()
 		return StartResult{}, err
 	}
 
@@ -163,7 +165,22 @@ func (a *ACPAdapter) Start(ctx context.Context, request StartRequest, _ Credenti
 	}
 	a.byRole[request.RoleExecutionID] = session
 	a.byID[session.sessionID] = session
+	a.mu.Unlock()
+	initialTurn := TurnRequest{
+		OperationID: request.OperationID,
+		TurnID: "start_" + request.RoleExecutionID,
+		SessionID: session.sessionID,
+		PromptSHA256: request.PromptSHA256,
+		Prompt: request.Prompt,
+		MaxTokens: request.MaxTokens,
+		Deadline: request.Deadline,
+	}
+	if _, err := a.Send(ctx, initialTurn, nil); err != nil {
+		return StartResult{}, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown}
+	}
+	a.mu.Lock()
 	a.byOp[request.OperationID] = result
+	a.mu.Unlock()
 	return result, nil
 }
 
