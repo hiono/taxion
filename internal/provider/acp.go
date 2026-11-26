@@ -125,12 +125,12 @@ func NewACPAdapter(config ACPConfig) (*ACPAdapter, error) {
 	}
 	config.WorkingDirectory = absolute
 	return &ACPAdapter{
-		config: config,
-		byRole: make(map[string]*acpSession),
-		byID: make(map[string]*acpSession),
-		byOp: make(map[string]StartResult),
+		config:       config,
+		byRole:       make(map[string]*acpSession),
+		byID:         make(map[string]*acpSession),
+		byOp:         make(map[string]StartResult),
 		startingRole: make(map[string]*acpStartReservation),
-		startingOp: make(map[string]*acpStartReservation),
+		startingOp:   make(map[string]*acpStartReservation),
 	}, nil
 }
 
@@ -209,8 +209,8 @@ func (a *ACPAdapter) Start(ctx context.Context, request StartRequest, _ Credenti
 	}
 	closeOnFailure := func() { _ = process.close(operationCtx) }
 	initialized, err := process.call(operationCtx, "initialize", map[string]any{
-		"protocolVersion": 1,
-		"clientInfo": map[string]string{"name": "taxion", "version": "0.1"},
+		"protocolVersion":    1,
+		"clientInfo":         map[string]string{"name": "taxion", "version": "0.1"},
 		"clientCapabilities": map[string]any{},
 	}, nil)
 	if err != nil {
@@ -229,7 +229,7 @@ func (a *ACPAdapter) Start(ctx context.Context, request StartRequest, _ Credenti
 		return StartResult{}, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown}
 	}
 	created, err := process.call(operationCtx, "session/new", map[string]any{
-		"cwd": a.config.WorkingDirectory,
+		"cwd":        a.config.WorkingDirectory,
 		"mcpServers": []any{},
 	}, nil)
 	if err != nil {
@@ -247,15 +247,15 @@ func (a *ACPAdapter) Start(ctx context.Context, request StartRequest, _ Credenti
 	turnGate <- struct{}{}
 	session := &acpSession{
 		roleExecutionID: request.RoleExecutionID,
-		sessionID: sessionID,
-		process: process,
-		turnGate: turnGate,
-		turns: make(map[string]TurnResult),
+		sessionID:       sessionID,
+		process:         process,
+		turnGate:        turnGate,
+		turns:           make(map[string]TurnResult),
 	}
 	result := StartResult{
-		OperationID: request.OperationID,
-		SessionID: session.sessionID,
-		ReceiptID: acpReceiptID("acp-session-", request.RoleExecutionID),
+		OperationID:    request.OperationID,
+		SessionID:      session.sessionID,
+		ReceiptID:      acpReceiptID("acp-session-", request.RoleExecutionID),
 		EvidenceSHA256: sha256Hex(string(created)),
 	}
 	a.mu.Lock()
@@ -277,13 +277,13 @@ func (a *ACPAdapter) Start(ctx context.Context, request StartRequest, _ Credenti
 	a.byID[session.sessionID] = session
 	a.mu.Unlock()
 	initialTurn := TurnRequest{
-		OperationID: request.OperationID,
-		TurnID: initialTurnID,
-		SessionID: session.sessionID,
+		OperationID:  request.OperationID,
+		TurnID:       initialTurnID,
+		SessionID:    session.sessionID,
 		PromptSHA256: sha256Hex(initialPrompt),
-		Prompt: initialPrompt,
-		MaxTokens: request.MaxTokens,
-		Deadline: request.Deadline,
+		Prompt:       initialPrompt,
+		MaxTokens:    request.MaxTokens,
+		Deadline:     request.Deadline,
 	}
 	if _, err := a.Send(operationCtx, initialTurn, nil); err != nil {
 		a.detachSession(session)
@@ -370,7 +370,7 @@ func (a *ACPAdapter) Send(ctx context.Context, request TurnRequest, _ Credential
 			Method string `json:"method"`
 			Params struct {
 				SessionID string `json:"sessionId"`
-				Update struct {
+				Update    struct {
 					SessionUpdate string `json:"sessionUpdate"`
 					Content       struct {
 						Type string `json:"type"`
