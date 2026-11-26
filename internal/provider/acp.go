@@ -727,22 +727,46 @@ func (p *acpProcess) terminate() {
 	})
 }
 
-func acpResponse(waiter <-chan acpMessage, ctx context.Context) (json.RawMessage, error, bool) {
+func (p *acpProcess) drainUpdates(onUpdate func(json.RawMessage) error) error {
+	for {
+		select {
+		case update := <-p.updates:
+			if onUpdate != nil {
+				if err := onUpdate(update); err != nil {
+					p.fail(errors.New("ACP update processing failed"))
+					return err
+				}
+			}
+		default:
+			return nil
+		}
+	}
+}
+
+func (p *acpProcess) handleResponse(response acpMessage, ok bool, ctx context.Context, onUpdate func(json.RawMessage) error) (json.RawMessage, error) {
+	if err := p.drainUpdates(onUpdate); err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, errors.New("ACP process exited")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if len(bytes.TrimSpace(response.Error)) > 0 && !bytes.Equal(bytes.TrimSpace(response.Error), []byte("null")) {
+		return nil, errors.New("ACP request failed")
+	}
+	if len(bytes.TrimSpace(response.Result)) == 0 {
+		return nil, errors.New("ACP response result is missing")
+	}
+	return response.Result, nil
+}
+
+func (p *acpProcess) receiveResponse(waiter <-chan acpMessage, ctx context.Context, onUpdate func(json.RawMessage) error) (json.RawMessage, error, bool) {
 	select {
 	case response, ok := <-waiter:
-		if !ok {
-			return nil, errors.New("ACP process exited"), true
-		}
-		if err := ctx.Err(); err != nil {
-			return nil, err, true
-		}
-		if len(bytes.TrimSpace(response.Error)) > 0 && !bytes.Equal(bytes.TrimSpace(response.Error), []byte("null")) {
-			return nil, errors.New("ACP request failed"), true
-		}
-		if len(bytes.TrimSpace(response.Result)) == 0 {
-			return nil, errors.New("ACP response result is missing"), true
-		}
-		return response.Result, nil, true
+		result, err := p.handleResponse(response, ok, ctx, onUpdate)
+		return result, err, true
 	default:
 		return nil, nil, false
 	}
@@ -765,24 +789,12 @@ func (p *acpProcess) call(ctx context.Context, method string, params any, onUpda
 		return nil, err
 	}
 	for {
-		if response, err, ok := acpResponse(waiter, ctx); ok {
+		if response, err, ok := p.receiveResponse(waiter, ctx, onUpdate); ok {
 			return response, err
 		}
 		select {
 		case response, ok := <-waiter:
-			if !ok {
-				return nil, errors.New("ACP process exited")
-			}
-			if err := ctx.Err(); err != nil {
-				return nil, err
-			}
-			if len(bytes.TrimSpace(response.Error)) > 0 && !bytes.Equal(bytes.TrimSpace(response.Error), []byte("null")) {
-				return nil, errors.New("ACP request failed")
-			}
-			if len(bytes.TrimSpace(response.Result)) == 0 {
-				return nil, errors.New("ACP response result is missing")
-			}
-			return response.Result, nil
+			return p.handleResponse(response, ok, ctx, onUpdate)
 		case update := <-p.updates:
 			if onUpdate != nil {
 				if err := onUpdate(update); err != nil {
@@ -795,19 +807,19 @@ func (p *acpProcess) call(ctx context.Context, method string, params any, onUpda
 			p.pending.Delete(id)
 			return nil, ctx.Err()
 		case <-p.failed:
-			if response, err, ok := acpResponse(waiter, ctx); ok {
+			if response, err, ok := p.receiveResponse(waiter, ctx, onUpdate); ok {
 				return response, err
 			}
 			p.pending.Delete(id)
 			return nil, errors.New("ACP transport failed")
 		case <-p.stop:
-			if response, err, ok := acpResponse(waiter, ctx); ok {
+			if response, err, ok := p.receiveResponse(waiter, ctx, onUpdate); ok {
 				return response, err
 			}
 			p.pending.Delete(id)
 			return nil, errors.New("ACP transport closed")
 		case <-p.done:
-			if response, err, ok := acpResponse(waiter, ctx); ok {
+			if response, err, ok := p.receiveResponse(waiter, ctx, onUpdate); ok {
 				return response, err
 			}
 			p.pending.Delete(id)
