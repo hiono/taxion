@@ -384,5 +384,23 @@ func TestJobQuestionAuthorizationReservesBudgetAcrossQuestions(t *testing.T) {
 	if _, err := NewJobQuestionAuthorization(job, secondRequest, now.Add(5*time.Minute)); err == nil {
 		t.Fatal("second JobQuestionAuthorization reused budget already reserved by the first question")
 	}
+
+	// The exact remaining budget is accepted, while a later aggregate mutation
+	// that exceeds the same reservation is rejected during Job restoration.
+	secondRequest.Budget.MaxTokens -= first.Budget.MaxTokens
+	second, err := NewJobQuestionAuthorization(job, secondRequest, now.Add(5*time.Minute))
+	if err != nil {
+		t.Fatalf("second JobQuestionAuthorization within remaining budget: %v", err)
+	}
+	job.JobQuestionAuthorizations = append(job.JobQuestionAuthorizations, second)
+	job.Revision++
+	job.UpdatedAt = second.CreatedAt
+	if err := job.Validate(); err != nil {
+		t.Fatalf("Job.Validate with fully reserved question budgets: %v", err)
+	}
+	job.JobQuestionAuthorizations[len(job.JobQuestionAuthorizations)-1].Budget.MaxTokens++
+	if err := job.Validate(); err == nil {
+		t.Fatal("Job.Validate accepted aggregate question grants beyond the approved Job budget")
+	}
 }
 

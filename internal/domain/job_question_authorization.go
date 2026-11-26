@@ -85,22 +85,9 @@ func NewJobQuestionAuthorization(job Job, request JobQuestionAuthorizationReques
 		request.Budget.MaxTokens > latest.Contract.Budget.MaxTokens {
 		return JobQuestionAuthorization{}, errors.New("JobQuestionAuthorization exceeds the approved JobContract budget or deadline")
 	}
-	usedTurns, usedTokens, err := executionPermissionBudgetUsed(job, latest.Revision)
+	usedTurns, usedTokens, err := jobQuestionAuthorizationBudgetUsed(job, latest.Revision)
 	if err != nil {
 		return JobQuestionAuthorization{}, err
-	}
-	// Each question grant reserves its full bounded budget when issued. Count
-	// earlier grants for this contract revision before issuing another one.
-	for _, existing := range job.JobQuestionAuthorizations {
-		if existing.ContractRevision != latest.Revision {
-			continue
-		}
-		if ^uint64(0)-usedTurns < uint64(existing.Budget.MaxTurns) ||
-			^uint64(0)-usedTokens < existing.Budget.MaxTokens {
-			return JobQuestionAuthorization{}, fmt.Errorf("%w: JobQuestionAuthorization budget overflow", ErrInvalidJob)
-		}
-		usedTurns += uint64(existing.Budget.MaxTurns)
-		usedTokens += existing.Budget.MaxTokens
 	}
 	if usedTurns > uint64(latest.Contract.Budget.MaxTurns) ||
 		uint64(request.Budget.MaxTurns) > uint64(latest.Contract.Budget.MaxTurns)-usedTurns ||
@@ -296,7 +283,36 @@ func validateJobQuestionAuthorizationFacts(job Job) error {
 		seenQuestions[authorization.QuestionMessageID] = struct{}{}
 		previousRevision, previousAt = authorization.CreatedRevision, authorization.CreatedAt
 	}
+	if len(job.JobContractRevisions) > 0 {
+		latest := job.JobContractRevisions[len(job.JobContractRevisions)-1]
+		turns, tokens, err := jobQuestionAuthorizationBudgetUsed(job, latest.Revision)
+		if err != nil {
+			return err
+		}
+		if turns > uint64(latest.Contract.Budget.MaxTurns) || tokens > latest.Contract.Budget.MaxTokens {
+			return errors.New("JobQuestionAuthorizations and ExecutionPermissions exceed the approved Job budget")
+		}
+	}
 	return nil
+}
+
+func jobQuestionAuthorizationBudgetUsed(job Job, revision uint64) (uint64, uint64, error) {
+	turns, tokens, err := executionPermissionBudgetUsed(job, revision)
+	if err != nil {
+		return 0, 0, err
+	}
+	for _, authorization := range job.JobQuestionAuthorizations {
+		if authorization.ContractRevision != revision {
+			continue
+		}
+		if ^uint64(0)-turns < uint64(authorization.Budget.MaxTurns) ||
+			^uint64(0)-tokens < authorization.Budget.MaxTokens {
+			return 0, 0, fmt.Errorf("%w: JobQuestionAuthorization budget overflow", ErrInvalidJob)
+		}
+		turns += uint64(authorization.Budget.MaxTurns)
+		tokens += authorization.Budget.MaxTokens
+	}
+	return turns, tokens, nil
 }
 
 func planningAuthorizationByID(job Job, authorizationID string) (PlanningAuthorization, bool) {
