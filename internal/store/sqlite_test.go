@@ -223,6 +223,54 @@ func TestPreUpgradeProcessCannotOverwriteV2AggregateFacts(t *testing.T) {
 	}
 }
 
+func TestAggregateUpdateCannotRemoveAppendOnlyFacts(t *testing.T) {
+	database, _ := newTestStore(t)
+	ctx := context.Background()
+	job := newTestJob(t, "job_append_only_trigger", "Preserve append-only facts against older writers.")
+	if _, err := database.createJob(ctx, job, "cmd_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", createLocalDraftJobCommandType); err != nil {
+		t.Fatalf("create Job: %v", err)
+	}
+	if _, err := database.db.ExecContext(ctx, `UPDATE job_aggregates
+		SET payload_json = json_set(
+			payload_json,
+			'$.job_messages', json('[{"id":"message-1"}]'),
+			'$.delivery_observations', json('[{"id":"delivery-1"}]'),
+			'$.job_question_authorizations', json('[{"id":"grant-1"}]')
+		)
+		WHERE job_id = ?`, job.ID); err != nil {
+		t.Fatalf("seed append-only facts: %v", err)
+	}
+	if _, err := database.db.ExecContext(ctx, `UPDATE job_aggregates
+		SET payload_json = json_set(
+			payload_json,
+			'$.job_messages', json('[{"id":"message-1"},{"id":"message-2"}]'),
+			'$.delivery_observations', json('[{"id":"delivery-1"},{"id":"delivery-2"}]'),
+			'$.job_question_authorizations', json('[{"id":"grant-1"},{"id":"grant-2"}]')
+		)
+		WHERE job_id = ?`, job.ID); err != nil {
+		t.Fatalf("append facts while preserving existing entries: %v", err)
+	}
+	if _, err := database.db.ExecContext(ctx, `UPDATE job_aggregates
+		SET payload_json = json_remove(
+			payload_json,
+			'$.job_messages',
+			'$.delivery_observations',
+			'$.job_question_authorizations'
+		)
+		WHERE job_id = ?`, job.ID); err == nil {
+		t.Fatal("aggregate update removed append-only facts without being rejected")
+	}
+	var payload string
+	if err := database.db.QueryRowContext(ctx, "SELECT payload_json FROM job_aggregates WHERE job_id = ?", job.ID).Scan(&payload); err != nil {
+		t.Fatalf("read aggregate payload after rejected downgrade: %v", err)
+	}
+	for _, factID := range []string{"message-1", "message-2", "delivery-1", "delivery-2", "grant-1", "grant-2"} {
+		if !strings.Contains(payload, factID) {
+			t.Fatalf("aggregate payload lost append-only fact %q: %s", factID, payload)
+		}
+	}
+}
+
 func TestOpenRejectsFutureSchemaVersion(t *testing.T) {
 	database, path := newTestStore(t)
 	if _, err := database.db.ExecContext(context.Background(), "PRAGMA user_version = 99"); err != nil {
