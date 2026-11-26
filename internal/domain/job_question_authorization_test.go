@@ -210,7 +210,6 @@ func TestJobQuestionAuthorizationRejectsScopeAndBudgetExpansion(t *testing.T) {
 		}},
 		{name: "foreign Provider", mutate: func(r *JobQuestionAuthorizationRequest) { r.ProviderID = "provider.foreign" }},
 		{name: "foreign session", mutate: func(r *JobQuestionAuthorizationRequest) { r.ProviderSessionID = "session_foreign" }},
-		{name: "configuration differs from approved contract", mutate: func(r *JobQuestionAuthorizationRequest) { r.ConfigurationSHA256 = strings.Repeat("0", 64) }},
 		{name: "budget exceeds contract", mutate: func(r *JobQuestionAuthorizationRequest) { r.Budget.MaxTokens = contract.Budget.MaxTokens + 1 }},
 		{name: "deadline exceeds contract", mutate: func(r *JobQuestionAuthorizationRequest) { r.Deadline = contract.Deadline.Add(time.Minute) }},
 		{name: "mutable context", mutate: func(r *JobQuestionAuthorizationRequest) { r.ReadOnlyBoundary.Mode = "mutable" }},
@@ -227,4 +226,48 @@ func TestJobQuestionAuthorizationRejectsScopeAndBudgetExpansion(t *testing.T) {
 			}
 		})
 	}
+	contractMismatchJob := job
+	contractMismatchJob.JobContractRevisions = append([]JobContractRevision(nil), job.JobContractRevisions...)
+	contractMismatchJob.JobApprovals = append([]JobApproval(nil), job.JobApprovals...)
+	contractMismatchJob.Tasks = append([]Task(nil), job.Tasks...)
+	latestIndex := len(contractMismatchJob.JobContractRevisions) - 1
+	latestRevision := contractMismatchJob.JobContractRevisions[latestIndex]
+	previousHash := latestRevision.CanonicalHash
+	latestRevision.Contract.ConfigurationSHA256 = strings.Repeat("0", 64)
+	mismatchedContract, mismatchedHash, err := CanonicalizeJobContract(
+		latestRevision.Contract, latestRevision.CanonicalizationVersion,
+	)
+	if err != nil {
+		t.Fatalf("CanonicalizeJobContract with mismatched approved configuration: %v", err)
+	}
+	latestRevision.Contract = mismatchedContract
+	latestRevision.CanonicalHash = mismatchedHash
+	contractMismatchJob.JobContractRevisions[latestIndex] = latestRevision
+	for i := range contractMismatchJob.JobApprovals {
+		if contractMismatchJob.JobApprovals[i].ContractRevision == latestRevision.Revision {
+			contractMismatchJob.JobApprovals[i].CanonicalHash = mismatchedHash
+		}
+	}
+	for i := range contractMismatchJob.Tasks {
+		if contractMismatchJob.Tasks[i].CanonicalHash == previousHash {
+			contractMismatchJob.Tasks[i].CanonicalHash = mismatchedHash
+		}
+	}
+	if err := contractMismatchJob.Validate(); err != nil {
+		t.Fatalf("Job.Validate with a separately approved configuration digest: %v", err)
+	}
+	plannerStartMatchesRequest := false
+	for _, candidate := range contractMismatchJob.ProviderStartIntents {
+		if candidate.RoleExecutionID == planner.ID {
+			plannerStartMatchesRequest = candidate.ConfigurationSHA256 == base.ConfigurationSHA256
+			break
+		}
+	}
+	if !plannerStartMatchesRequest {
+		t.Fatal("test setup does not preserve the accepted Planner Start configuration")
+	}
+	if _, err := NewJobQuestionAuthorization(contractMismatchJob, base, now.Add(3*time.Minute)); err == nil {
+		t.Fatal("JobQuestionAuthorization accepted a Planner configuration that differs from the approved JobContract")
+	}
+
 }

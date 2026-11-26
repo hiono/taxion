@@ -127,6 +127,63 @@ func (s *Store) AddPlanningResumeIntent(ctx context.Context, jobID string, expec
 		})
 }
 
+type planningFactTransaction interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+	Commit() error
+	Rollback() error
+}
+
+type immediateSQLiteTransaction struct {
+	connection *sql.Conn
+}
+
+func beginImmediateSQLiteTransaction(ctx context.Context, database *sql.DB) (*immediateSQLiteTransaction, error) {
+	connection, err := database.Conn(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("acquire SQLite planning-fact connection: %w", err)
+	}
+	if _, err := connection.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
+		_ = connection.Close()
+		return nil, fmt.Errorf("begin immediate planning-fact transaction: %w", err)
+	}
+	return &immediateSQLiteTransaction{connection: connection}, nil
+}
+
+func (tx *immediateSQLiteTransaction) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
+	return tx.connection.ExecContext(ctx, query, args...)
+}
+
+func (tx *immediateSQLiteTransaction) QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row {
+	return tx.connection.QueryRowContext(ctx, query, args...)
+}
+
+func (tx *immediateSQLiteTransaction) Commit() error {
+	if tx.connection == nil {
+		return sql.ErrTxDone
+	}
+	if _, err := tx.connection.ExecContext(context.Background(), "COMMIT"); err != nil {
+		return err
+	}
+	connection := tx.connection
+	tx.connection = nil
+	return connection.Close()
+}
+
+func (tx *immediateSQLiteTransaction) Rollback() error {
+	if tx.connection == nil {
+		return nil
+	}
+	connection := tx.connection
+	tx.connection = nil
+	_, rollbackErr := connection.ExecContext(context.Background(), "ROLLBACK")
+	closeErr := connection.Close()
+	if rollbackErr != nil {
+		return rollbackErr
+	}
+	return closeErr
+}
+
 func persistPlanningFact[T any](ctx context.Context, s *Store, jobID string, expectedRevision uint64, commandID, commandType string, request any,
 	create func(domain.Job, time.Time) (T, error), appendFact func(*domain.Job, T), findFact func(domain.Job) (T, bool)) (CommandReceipt, T, error) {
 	var zero T
@@ -138,9 +195,9 @@ func persistPlanningFact[T any](ctx context.Context, s *Store, jobID string, exp
 		return CommandReceipt{}, zero, fmt.Errorf("encode planning lifecycle command: %w", err)
 	}
 	requestHash := digest(requestJSON)
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := beginImmediateSQLiteTransaction(ctx, s.db)
 	if err != nil {
-		return CommandReceipt{}, zero, fmt.Errorf("begin planning lifecycle command: %w", err)
+		return CommandReceipt{}, zero, err
 	}
 	defer tx.Rollback()
 
@@ -235,7 +292,7 @@ func persistPlanningFact[T any](ctx context.Context, s *Store, jobID string, exp
 	return receipt, fact, nil
 }
 
-func readJobAggregateTx(ctx context.Context, tx *sql.Tx, jobID string) (domain.Job, error) {
+func readJobAggregateTx(ctx context.Context, tx planningFactTransaction, jobID string) (domain.Job, error) {
 	var revision int64
 	var payload, expectedHash, createdAt, updatedAt string
 	err := tx.QueryRowContext(ctx, "SELECT revision, payload_json, integrity_sha256, created_at, updated_at FROM job_aggregates WHERE job_id = ?", jobID).

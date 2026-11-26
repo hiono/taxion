@@ -92,6 +92,7 @@ func (s *Store) AddJobQuestionAuthorization(
 	expectedRevision uint64,
 	request domain.JobQuestionAuthorizationRequest,
 ) (CommandReceipt, domain.JobQuestionAuthorization, error) {
+	request.Deadline = request.Deadline.UTC().Round(0)
 	receipt, authorization, err := persistPlanningFact(
 		ctx, s, jobID, expectedRevision, request.CommandID, addJobQuestionAuthorizationCommandType, request,
 		func(job domain.Job, now time.Time) (domain.JobQuestionAuthorization, error) {

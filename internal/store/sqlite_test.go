@@ -82,6 +82,51 @@ func TestOpenUpgradesOlderSchemaVersionAndPreservesJob(t *testing.T) {
 	}
 }
 
+func TestPlanningFactTransactionAcquiresWriterLockBeforeReading(t *testing.T) {
+	ctx := context.Background()
+	first, path := newTestStore(t)
+	second, err := Open(ctx, path)
+	if err != nil {
+		t.Fatalf("open second Store: %v", err)
+	}
+	defer second.Close()
+
+	firstTransaction, err := beginImmediateSQLiteTransaction(ctx, first.db)
+	if err != nil {
+		t.Fatalf("begin first immediate transaction: %v", err)
+	}
+	secondStarted := make(chan error, 1)
+	go func() {
+		secondTransaction, err := beginImmediateSQLiteTransaction(ctx, second.db)
+		if err == nil {
+			err = secondTransaction.Rollback()
+		}
+		secondStarted <- err
+	}()
+
+	select {
+	case err := <-secondStarted:
+		_ = firstTransaction.Rollback()
+		if err == nil {
+			t.Fatal("second writer acquired the lock before the first transaction completed")
+		}
+		t.Fatalf("second writer failed while waiting for the lock: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	if err := firstTransaction.Commit(); err != nil {
+		t.Fatalf("commit first immediate transaction: %v", err)
+	}
+	select {
+	case err := <-secondStarted:
+		if err != nil {
+			t.Fatalf("second writer did not proceed after the first transaction committed: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("second writer did not acquire the lock after the first transaction committed")
+	}
+}
+
 func TestPreUpgradeProcessCannotOverwriteV2AggregateFacts(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "legacy-writer.sqlite")

@@ -239,6 +239,16 @@ func (a JobQuestionAuthorization) ValidateFor(
 	if err := a.Validate(job); err != nil {
 		return err
 	}
+	persisted := false
+	for _, candidate := range job.JobQuestionAuthorizations {
+		if candidate == a {
+			persisted = true
+			break
+		}
+	}
+	if !persisted {
+		return errors.New("JobQuestionAuthorization is not persisted in the Job")
+	}
 	if job.State != JobActive || len(job.JobContractRevisions) == 0 {
 		return errors.New("JobQuestionAuthorization is not valid for an inactive Job")
 	}

@@ -151,6 +151,16 @@ func TestJobQuestionAuthorizationStorePersistsAndReplays(t *testing.T) {
 		authorization.JobApprovalID != job.JobApprovals[len(job.JobApprovals)-1].ID {
 		t.Fatalf("JobQuestionAuthorization receipt or bindings mismatch: %#v %#v", receipt, authorization)
 	}
+	equivalentDeadlineRequest := request
+	equivalentDeadlineRequest.Deadline = request.Deadline.In(time.FixedZone("UTC+02", 2*60*60))
+	equivalentReceipt, equivalentAuthorization, err := database.AddJobQuestionAuthorization(
+		ctx, job.ID, job.Revision, equivalentDeadlineRequest,
+	)
+	if err != nil || equivalentReceipt != receipt || !reflect.DeepEqual(equivalentAuthorization, authorization) {
+		t.Fatalf("equivalent deadline did not replay the original authorization: receipt=%#v authorization=%#v err=%v",
+			equivalentReceipt, equivalentAuthorization, err)
+	}
+
 	restored, err := database.GetJob(ctx, job.ID)
 	if err != nil || len(restored.JobQuestionAuthorizations) != 1 {
 		t.Fatalf("GetJob after JobQuestionAuthorization: count=%d err=%v", len(restored.JobQuestionAuthorizations), err)

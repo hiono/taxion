@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -227,7 +228,7 @@ func TestCommunicationControllerPersistsCoderPlannerQuestionAndAnswer(t *testing
 			if test.resolverErr == nil {
 				expectedAddCalls = 1
 			}
-			if err != nil || replayedReceipt != questionReceipt || replayedGrant.ID != questionGrant.ID ||
+			if err != nil || replayedReceipt != questionReceipt || !reflect.DeepEqual(replayedGrant, questionGrant) ||
 				lateStore.lookupCalls != 2 || lateStore.addCalls != expectedAddCalls {
 				t.Fatalf("concurrent committed command was not replayed: receipt=%#v grant=%#v lookups=%d adds=%d err=%v",
 					replayedReceipt, replayedGrant, lateStore.lookupCalls, lateStore.addCalls, err)
@@ -239,7 +240,7 @@ func TestCommunicationControllerPersistsCoderPlannerQuestionAndAnswer(t *testing
 		context.Background(), jobID, question.Message.ID, questionCommandID,
 		questionBudget, questionDeadline,
 	)
-	if err != nil || retryReceipt != questionReceipt || retryGrant.ID != questionGrant.ID || resolver.calls != 1 {
+	if err != nil || retryReceipt != questionReceipt || !reflect.DeepEqual(retryGrant, questionGrant) || resolver.calls != 1 {
 		t.Fatalf("JobQuestionAuthorization retry did not replay without resolving context: receipt=%#v grant=%#v calls=%d err=%v",
 			retryReceipt, retryGrant, resolver.calls, err)
 	}
