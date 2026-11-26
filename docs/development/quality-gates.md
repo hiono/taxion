@@ -38,3 +38,16 @@ macOS固有の問題は記録して保留し、まとまったタイミングで
 - 既存の意味的変更に対する修正・リカバリは、原則として対象Commitを指定したfixup! Commitとします。
 - フォーマットのみの変更は意味的変更と分離します。
 - Commit前に差分レビューとSecret scanを完了します。
+
+## 5. Push前のローカルゲート
+
+- Push前に .githooks/pre-push が scripts/check-gofmt.sh を実行し、cmd / internal 配下のGoファイルを検査します。
+- 書式不備またはGo toolchain不在の場合はPushを拒否し、対象ファイルと差分を表示します。修正後にPushを再実行します。
+- go.modに指定されたGoのmajor.minorとローカルGo toolchainが一致しない場合もPushを拒否します。CIと異なるgofmtで書式を誤判定しないための制約です。
+- CIも同じ scripts/check-gofmt.sh を実行します。ローカルとCIで書式判定の実装を分岐させません。
+- Git hookと core.hooksPath の設定はcloneごとのローカル設定であり、Gitのclone / fetchでは自動的に有効になりません。各cloneで初回に次を実行します。
+
+    ./scripts/install-git-hooks.sh
+
+- InstallerはRepositoryローカルの core.hooksPath を .githooks に設定します。別のローカルhook pathが既に設定されている場合は上書きせず、エラーで停止します。
+- このゲートは書式検査専用です。vet / test / race / build / Secret scanは既存のCommit前運用・CIゲートで検証します。

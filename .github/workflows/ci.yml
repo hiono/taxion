@@ -59,16 +59,7 @@ jobs:
           go-version-file: go.mod
           cache: true
       - name: Verify formatting
-        shell: bash
-        run: |
-          unformatted="$(gofmt -l cmd internal)"
-          if [ -n "$unformatted" ]; then
-            printf 'Files require gofmt:\n%s\n' "$unformatted"
-            while IFS= read -r file; do
-              gofmt -d "$file"
-            done <<< "$unformatted"
-            exit 1
-          fi
+        run: ./scripts/check-gofmt.sh
       - name: Vet
         run: go vet ./...
       - name: Test
