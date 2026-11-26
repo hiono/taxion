@@ -32,8 +32,8 @@ func createMessageTestPlanner(t *testing.T, database *Store, jobID string) (doma
 		ReadOnlyBoundary:    domain.PlanningReadOnlyBoundary{
 			Mode: domain.PlanningReadOnlyBoundarySnapshot, Reference: "snapshot_1", SHA256: strings.Repeat("c", 64),
 		},
-		Budget:              domain.PlanningBudget{MaxTurns: 3, MaxTokens: 1000},
-		Deadline:            now.Add(2 * time.Hour),
+		Budget:   domain.PlanningBudget{MaxTurns: 3, MaxTokens: 1000},
+		Deadline: now.Add(2 * time.Hour),
 	}
 	grant, err := domain.NewPlanningAuthorization(job, principal.PrincipalID(), grantCommand, request, now)
 	if err != nil {
