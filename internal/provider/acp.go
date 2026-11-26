@@ -19,6 +19,7 @@ import (
 )
 
 const maxACPOutputBytes = 4 * 1024 * 1024
+const maxACPQueuedUpdateBytes = 8 * 1024 * 1024
 
 // ACPConfig selects one Copilot CLI ACP process for each RoleExecution.
 // Tool permission requests are denied by default; this adapter does not infer
