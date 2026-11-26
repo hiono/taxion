@@ -125,20 +125,36 @@ func TestJobQuestionAuthorizationBindsOneApprovedQuestionAndPlannerSession(t *te
 		authorization.ProviderSessionID != startObservation.ProviderSessionID {
 		t.Fatalf("authorization lost its exact authority or question binding: %#v", authorization)
 	}
+	unpersistedRequest := request
+	unpersistedRequest.CommandID = "cmd_74747474747474747474747474747474"
+	unpersistedGrant, err := NewJobQuestionAuthorization(job, unpersistedRequest, authorizationTime)
+	if err != nil {
+		t.Fatalf("NewJobQuestionAuthorization for unpersisted grant: %v", err)
+	}
+	if err := unpersistedGrant.ValidateFor(
+		job, message.ID, planner.ID, startObservation.ProviderSessionID, authorizationTime.Add(time.Second),
+	); err == nil {
+		t.Fatal("ValidateFor accepted a grant that was not persisted in the Job")
+	}
+
+	job.JobQuestionAuthorizations = append(job.JobQuestionAuthorizations, authorization)
+	job.Revision++
+	job.UpdatedAt = authorization.CreatedAt
 	if err := authorization.ValidateFor(
 		job, message.ID, planner.ID, startObservation.ProviderSessionID, authorizationTime.Add(time.Second),
 	); err != nil {
-		t.Fatalf("ValidateFor exact question and Session: %v", err)
+		t.Fatalf("ValidateFor exact persisted question and Session: %v", err)
+	}
+	if err := unpersistedGrant.ValidateFor(
+		job, message.ID, planner.ID, startObservation.ProviderSessionID, authorizationTime.Add(time.Second),
+	); err == nil {
+		t.Fatal("ValidateFor accepted a different grant for the same persisted question")
 	}
 	if err := authorization.ValidateFor(
 		job, message.ID, planner.ID, "session_foreign", authorizationTime.Add(time.Second),
 	); err == nil {
 		t.Fatal("JobQuestionAuthorization authorized a different Provider Session")
 	}
-
-	job.JobQuestionAuthorizations = append(job.JobQuestionAuthorizations, authorization)
-	job.Revision++
-	job.UpdatedAt = authorization.CreatedAt
 	if err := job.Validate(); err != nil {
 		t.Fatalf("Job.Validate with JobQuestionAuthorization: %v", err)
 	}
