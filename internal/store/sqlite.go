@@ -140,19 +140,19 @@ func (s *Store) initialize(ctx context.Context) error {
 		}
 	}
 
-	var version int
-	if err := s.db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil {
-		return fmt.Errorf("read schema version: %w", err)
-	}
-	if version > schemaVersion {
-		return fmt.Errorf("%w: database=%d supported=%d", ErrUnsupportedSchema, version, schemaVersion)
-	}
-
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin schema transaction: %w", err)
 	}
 	defer tx.Rollback()
+
+	var version int
+	if err := tx.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil {
+		return fmt.Errorf("read schema version: %w", err)
+	}
+	if version > schemaVersion {
+		return fmt.Errorf("%w: database=%d supported=%d", ErrUnsupportedSchema, version, schemaVersion)
+	}
 
 	statements := []string{
 		`CREATE TABLE IF NOT EXISTS job_aggregates (
