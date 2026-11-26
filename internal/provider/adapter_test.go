@@ -277,7 +277,8 @@ func TestTurnLookupRequiresResultDigestForCompletedButNotFailed(t *testing.T) {
 	request := LookupRequest{
 		OperationID: "operation_turn_123",
 		SessionID:   "session_turn_123",
-		TurnID:      "turn_123",
+		TurnID:              "turn_123",
+		RequireResultDigest: true,
 	}
 	failed := LookupResult{
 		Found: true, OperationID: request.OperationID, Status: "FAILED",

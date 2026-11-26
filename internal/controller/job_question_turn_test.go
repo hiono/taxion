@@ -955,17 +955,30 @@ func TestOrchestratorContinuesAfterQuestionAuthorizationFailure(t *testing.T) {
 		"cmd_b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5", domain.JobMessageRequest{
 			Sender:    domain.ActorRef{Kind: domain.ActorCoder, ID: f.coderID},
 			Recipient: domain.ActorRef{Kind: domain.ActorPlanner, ID: f.plannerID},
-			Body:      "Second question remains independently processable",
+			Body:      "Second question intentionally fails authorization",
 		})
 	if err != nil {
 		t.Fatalf("Add second question: %v", err)
+	}
+	job, err = f.database.GetJob(context.Background(), f.jobID)
+	if err != nil {
+		t.Fatalf("GetJob before third question: %v", err)
+	}
+	_, thirdQuestion, err := f.database.AddJobMessage(context.Background(), f.jobID, job.Revision,
+		"cmd_b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7", domain.JobMessageRequest{
+			Sender:    domain.ActorRef{Kind: domain.ActorCoder, ID: f.coderID},
+			Recipient: domain.ActorRef{Kind: domain.ActorPlanner, ID: f.plannerID},
+			Body:      "Third question must still be processed",
+		})
+	if err != nil {
+		t.Fatalf("Add third question: %v", err)
 	}
 	communication, err := NewCommunicationController(f.database)
 	if err != nil {
 		t.Fatalf("NewCommunicationController: %v", err)
 	}
 	resolver := selectiveQuestionTurnContextResolver{
-		failQuestionID: f.questionID,
+		failQuestionID: secondQuestion.ID,
 		context: QuestionReadOnlyContext{
 			RepositoryID: "https://github.com/example/project",
 			Boundary: domain.PlanningReadOnlyBoundary{
@@ -985,11 +998,12 @@ func TestOrchestratorContinuesAfterQuestionAuthorizationFailure(t *testing.T) {
 		t.Fatalf("NewOrchestratorController: %v", err)
 	}
 	outcomes, err := orchestrator.ProcessPlannerInbox(context.Background(), f.jobID, f.plannerID)
-	if err == nil || !strings.Contains(err.Error(), f.questionID) {
-		t.Fatalf("ProcessPlannerInbox error = %v, want first question authorization failure", err)
+	if err == nil || !strings.Contains(err.Error(), secondQuestion.ID) {
+		t.Fatalf("ProcessPlannerInbox error = %v, want second question authorization failure", err)
 	}
-	if len(outcomes) != 1 || outcomes[0].Reply.Message.ReplyToMessageID != secondQuestion.ID || f.runtime.sendCalls != 1 {
-		t.Fatalf("question authorization failure blocked the next valid question: outcomes=%#v sends=%d err=%v",
+	if len(outcomes) != 2 || outcomes[0].Reply.Message.ReplyToMessageID != f.questionID ||
+		outcomes[1].Reply.Message.ReplyToMessageID != thirdQuestion.ID || f.runtime.sendCalls != 2 {
+		t.Fatalf("question authorization failure blocked a later valid question: outcomes=%#v sends=%d err=%v",
 			outcomes, f.runtime.sendCalls, err)
 	}
 }
@@ -1001,7 +1015,7 @@ func TestOrchestratorContinuesAfterPerTurnDeadlineWhileCallerContextIsActive(t *
 		t.Fatalf("GetJob: %v", err)
 	}
 	_, secondQuestion, err := f.database.AddJobMessage(context.Background(), f.jobID, job.Revision,
-		"cmd_b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6", domain.JobMessageRequest{
+		"cmd_b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6", domain.JobMessageRequest{
 			Sender:    domain.ActorRef{Kind: domain.ActorCoder, ID: f.coderID},
 			Recipient: domain.ActorRef{Kind: domain.ActorPlanner, ID: f.plannerID},
 			Body:      "Second question should proceed after the first request deadline",

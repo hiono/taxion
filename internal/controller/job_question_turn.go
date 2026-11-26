@@ -183,8 +183,7 @@ func (c *JobQuestionTurnController) reconcileUnknown(
 	if capabilities.SendLookup &&
 		capabilities.HasEvidenceAtLeast(provider.CapabilitySendLookup, c.minimumEvidence) &&
 		capabilities.HasEvidenceAtLeast(provider.CapabilityUsageIdentity, c.minimumEvidence) &&
-		capabilities.HasEvidenceAtLeast(provider.CapabilityUsageCompleteness, c.minimumEvidence) &&
-		capabilities.HasEvidenceAtLeast(provider.CapabilityFinalOutput, c.minimumEvidence) {
+		capabilities.HasEvidenceAtLeast(provider.CapabilityUsageCompleteness, c.minimumEvidence) {
 		request := provider.LookupRequest{
 			OperationID: intent.OperationID, SessionID: intent.ProviderSessionID, TurnID: intent.ID,
 			RequireResultDigest: true,
@@ -223,6 +222,9 @@ func (c *JobQuestionTurnController) reconcileUnknown(
 				}
 				outcome.ObservationReceipt, outcome.Observation = receipt, observation
 				return outcome, errors.New("Planner question Provider operation failed")
+			}
+			if !capabilities.HasEvidenceAtLeast(provider.CapabilityFinalOutput, c.minimumEvidence) {
+				return outcome, provider.ErrUnsupportedCapability
 			}
 			if lookup.ResultSHA256 == "" {
 				return outcome, provider.ErrProviderInvalidResult
