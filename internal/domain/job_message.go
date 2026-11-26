@@ -151,7 +151,7 @@ func (a ActorRef) Validate(job Job) error {
 		if !found || execution.Role != string(a.Kind) {
 			return errors.New("Role Actor must reference a matching RoleExecution in the same Job")
 		}
-	default:    
+	default:
 		return errors.New("Actor kind is unsupported")
 	}
 	return nil
