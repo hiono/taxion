@@ -585,12 +585,14 @@ type failOnceQuestionReplyStore struct {
 	failed bool
 }
 
-func (s *failOnceQuestionReplyStore) AddJobMessage(ctx context.Context, jobID string, message domain.JobMessage) error {
-	if message.ReplyToMessageID != "" && !s.failed {
+func (s *failOnceQuestionReplyStore) AddJobMessage(
+	ctx context.Context, jobID string, expectedRevision uint64, commandID string, request domain.JobMessageRequest,
+) (store.CommandReceipt, domain.JobMessage, error) {
+	if request.ReplyToMessageID != "" && !s.failed {
 		s.failed = true
-		return errors.New("injected reply persistence failure")
+		return store.CommandReceipt{}, domain.JobMessage{}, errors.New("injected reply persistence failure")
 	}
-	return s.Store.AddJobMessage(ctx, jobID, message)
+	return s.Store.AddJobMessage(ctx, jobID, expectedRevision, commandID, request)
 }
 
 func TestOrchestratorReplaysCompletedTurnAfterReplyPersistenceFailure(t *testing.T) {
