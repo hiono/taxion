@@ -3,11 +3,57 @@ package controller
 import (
 	"context"
 	"testing"
+	"strings"
 	"time"
 
 	"github.com/hiono/taxion/internal/domain"
 	"github.com/hiono/taxion/internal/provider"
+	"github.com/hiono/taxion/internal/store"
 )
+
+func bindACPTestWorktree(
+	t *testing.T,
+	database *store.Store,
+	controller *ExecutionController,
+	jobID, commandID, repositoryID string,
+	execution domain.RoleExecution,
+) (domain.RoleExecution, domain.ProviderStartIntent, domain.WorktreeAssignment) {
+	t.Helper()
+	assignment := domain.WorktreeAssignment{
+		ID: domain.WorktreeAssignmentID(jobID, execution.TaskID, repositoryID),
+		JobID: jobID, TaskID: execution.TaskID, RepositoryID: repositoryID,
+		RepositoryPath: t.TempDir(), WorktreePath: t.TempDir(),
+		BaselineCommit: strings.Repeat("a", 40), OwnerRoleExecutionID: execution.ID,
+	}
+	if _, _, err := controller.BindWorktree(context.Background(), execution.ID, commandID, assignment); err != nil {
+		t.Fatalf("BindWorktree: %v", err)
+	}
+	job, err := database.GetJob(context.Background(), jobID)
+	if err != nil {
+		t.Fatalf("GetJob after Worktree binding: %v", err)
+	}
+	var updatedExecution domain.RoleExecution
+	var intent domain.ProviderStartIntent
+	for _, candidate := range job.RoleExecutions {
+		if candidate.ID == execution.ID {
+			updatedExecution = candidate
+			break
+		}
+	}
+	for _, candidate := range job.ProviderStartIntents {
+		if candidate.RoleExecutionID == execution.ID {
+			intent = candidate
+			break
+		}
+	}
+	for _, candidate := range job.WorktreeAssignments {
+		if candidate.ID == assignment.ID {
+			assignment = candidate
+			break
+		}
+	}
+	return updatedExecution, intent, assignment
+}
 
 type fakeACPToolCallEvaluator struct {
 	effect   string
@@ -49,6 +95,11 @@ func TestACPExecutionPermissionAuthorizerRevalidatesExactTaskAuthority(t *testin
 	if err != nil {
 		t.Fatalf("StartTaskExecution: %v", err)
 	}
+	execution, intent, assignment := bindACPTestWorktree(
+		t, database, executionController, jobID,
+		"cmd_b1111111111111111111111111111111",
+		revision.Contract.TargetRepositories[0], execution,
+	)
 	evaluator := &fakeACPToolCallEvaluator{effect: permission.Effect, resource: permission.Resource}
 	authorizer, err := NewACPExecutionPermissionAuthorizer(database, evaluator)
 	if err != nil {
@@ -57,7 +108,8 @@ func TestACPExecutionPermissionAuthorizerRevalidatesExactTaskAuthority(t *testin
 	authorizer.now = func() time.Time { return now }
 	request := provider.ACPToolPermissionRequest{
 		OperationID: intent.ID, JobID: jobID, RoleExecutionID: execution.ID,
-		TaskID: task.ID, ExecutionPermissionID: permission.ID, SessionID: "session_1",
+		TaskID: task.ID, ExecutionPermissionID: permission.ID,
+		WorktreeAssignmentID: assignment.ID, WorktreePath: assignment.WorktreePath, SessionID: "session_1",
 		RequestSHA256: permission.RequestSHA256,
 		ProviderIdentity: provider.Identity{
 			ProviderID: permission.ProviderID, AccountID: permission.AccountID,
@@ -109,6 +161,11 @@ func TestACPExecutionPermissionAuthorizerRejectsMismatchedProviderAndRole(t *tes
 	if err != nil {
 		t.Fatalf("StartTaskExecution: %v", err)
 	}
+	execution, intent, assignment := bindACPTestWorktree(
+		t, database, executionController, jobID,
+		"cmd_b2222222222222222222222222222222",
+		revision.Contract.TargetRepositories[0], execution,
+	)
 	authorizer, err := NewACPExecutionPermissionAuthorizer(database, &fakeACPToolCallEvaluator{
 		effect: permission.Effect, resource: permission.Resource,
 	})
@@ -118,7 +175,8 @@ func TestACPExecutionPermissionAuthorizerRejectsMismatchedProviderAndRole(t *tes
 	authorizer.now = func() time.Time { return now }
 	request := provider.ACPToolPermissionRequest{
 		OperationID: intent.ID, JobID: jobID, RoleExecutionID: execution.ID,
-		TaskID: task.ID, ExecutionPermissionID: permission.ID, SessionID: "session_2",
+		TaskID: task.ID, ExecutionPermissionID: permission.ID,
+		WorktreeAssignmentID: assignment.ID, WorktreePath: assignment.WorktreePath, SessionID: "session_2",
 		RequestSHA256: permission.RequestSHA256,
 		ProviderIdentity: provider.Identity{
 			ProviderID: "foreign.provider", AccountID: permission.AccountID,
