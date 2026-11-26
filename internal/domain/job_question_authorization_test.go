@@ -104,11 +104,11 @@ func TestJobQuestionAuthorizationBindsOneApprovedQuestionAndPlannerSession(t *te
 	request := JobQuestionAuthorizationRequest{
 		JobID: job.ID, CommandID: "cmd_73737373737373737373737373737373",
 		QuestionMessageID: message.ID, PlannerRoleExecutionID: planner.ID,
-		ProviderSessionID:  startObservation.ProviderSessionID,
-		RepositoryID: pinnedRepository, PlanningRepositoryID: planningGrant.RepositoryID,
+		ProviderSessionID: startObservation.ProviderSessionID,
+		RepositoryID:      pinnedRepository, PlanningRepositoryID: planningGrant.RepositoryID,
 		ProviderID: planningGrant.ProviderID, AccountID: planningGrant.AccountID,
 		ConfigurationSHA256: planningGrant.ConfigurationSHA256,
-		ReadOnlyBoundary:    PlanningReadOnlyBoundary{
+		ReadOnlyBoundary: PlanningReadOnlyBoundary{
 			Mode: PlanningReadOnlyBoundarySnapshot, Reference: "question_snapshot_1", SHA256: strings.Repeat("d", 64),
 		},
 		Budget:   PlanningBudget{MaxTurns: 1, MaxTokens: 100},
@@ -207,7 +207,7 @@ func TestJobQuestionAuthorizationRejectsScopeAndBudgetExpansion(t *testing.T) {
 		JobID: job.ID, CommandID: "cmd_76767676767676767676767676767676",
 		QuestionMessageID: message.ID, PlannerRoleExecutionID: planner.ID,
 		ProviderSessionID:  startObservation.ProviderSessionID,
-		RepositoryID: contract.TargetRepositories[0], PlanningRepositoryID: grant.RepositoryID, ProviderID: grant.ProviderID,
+		RepositoryID:      contract.TargetRepositories[0], PlanningRepositoryID: grant.RepositoryID, ProviderID: grant.ProviderID,
 		AccountID: grant.AccountID, ConfigurationSHA256: grant.ConfigurationSHA256,
 		ReadOnlyBoundary:   PlanningReadOnlyBoundary{
 			Mode: PlanningReadOnlyBoundarySnapshot, Reference: "question_snapshot_2", SHA256: strings.Repeat("d", 64),
@@ -277,9 +277,9 @@ func TestJobQuestionAuthorizationRejectsScopeAndBudgetExpansion(t *testing.T) {
 			JobID: permission.JobID, TaskID: permission.TaskID, CommandID: permission.CommandID,
 			Role: permission.Role, Effect: permission.Effect, Resource: permission.Resource,
 			ProviderID: permission.ProviderID, AccountID: permission.AccountID,
-			ConfigurationSHA256:    permission.ConfigurationSHA256,
-			ReservedTurns: permission.ReservedTurns, ReservedTokens: permission.ReservedTokens,
-			ExpiresAt:  permission.ExpiresAt,
+			ConfigurationSHA256: permission.ConfigurationSHA256,
+			ReservedTurns:       permission.ReservedTurns, ReservedTokens: permission.ReservedTokens,
+			ExpiresAt: permission.ExpiresAt,
 		}
 		permission.RequestSHA256, err = ExecutionPermissionRequestSHA256(permissionRequest)
 		if err != nil {
