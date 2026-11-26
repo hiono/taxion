@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hiono/taxion/internal/auth"
 	"github.com/hiono/taxion/internal/domain"
 	"github.com/hiono/taxion/internal/provider"
 	"github.com/hiono/taxion/internal/store"
@@ -279,10 +278,10 @@ func TestCommunicationControllerPersistsCoderPlannerQuestionAndAnswer(t *testing
 		t.Fatalf("GetJob before mock Reviewer acceptance: %v", err)
 	}
 	reviewerSessionID := "session_reviewer"
-	_, reviewerObservation, err := database.AddProviderStartObservation(
+	_, reviewerObservation, err := database.AddTaskProviderStartObservation(
 		context.Background(), jobID, job.Revision, reviewerExecution.ProviderStartOperationID,
 		"cmd_72727272727272727272727272727272", domain.ProviderStartAccepted,
-		reviewerSessionID, "receipt_reviewer", strings.Repeat("f", 64), false, auth.AuthenticatedPrincipal{},
+		reviewerSessionID, "receipt_reviewer", strings.Repeat("f", 64), false,
 	)
 	if err != nil || reviewerObservation.Status != domain.ProviderStartAccepted {
 		t.Fatalf("record mock Reviewer Provider acceptance: %#v %v", reviewerObservation, err)
