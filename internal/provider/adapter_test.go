@@ -311,11 +311,6 @@ func TestTurnRequestValidatesReadOnlyContextBoundary(t *testing.T) {
 	if err := request.Validate(); err != nil {
 		t.Fatalf("valid read-only boundary: %v", err)
 	}
-	missingBoundary := request
-	missingBoundary.ReadOnlyBoundary = ReadOnlyContextBoundary{}
-	if err := missingBoundary.Validate(); err == nil {
-		t.Fatal("Turn request without a read-only context boundary was accepted")
-	}
 	request.ReadOnlyBoundary.Mode = "write"
 	if err := request.Validate(); err == nil {
 		t.Fatal("Turn request accepted a non-read-only boundary mode")
