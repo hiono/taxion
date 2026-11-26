@@ -2,9 +2,9 @@ package provider
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
-	"bytes"
 	"errors"
 	"io"
 	"os"
