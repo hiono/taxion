@@ -107,7 +107,7 @@ func TestPreUpgradeProcessCannotOverwriteV2AggregateFacts(t *testing.T) {
 			created_at TEXT NOT NULL,
 			updated_at TEXT NOT NULL
 		)`,
-		`PRAGMA user_version = 1`,
+		`PRAGMA user_version = 2`,
 	} {
 		if _, err := legacyConn.ExecContext(ctx, statement); err != nil {
 			t.Fatalf("initialize v1 database: %v", err)
