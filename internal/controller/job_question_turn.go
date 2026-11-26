@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/hiono/taxion/internal/domain"
 	"github.com/hiono/taxion/internal/provider"
@@ -177,9 +179,36 @@ func (c *JobQuestionTurnController) reconcileUnknown(
 			if lookup.Status != domain.JobQuestionTurnCompleted && lookup.Status != domain.JobQuestionTurnFailed {
 				return outcome, errors.New("Planner question Provider operation remains unresolved")
 			}
-			if !capabilities.HasEvidenceAtLeast(provider.CapabilityFinalOutput, provider.EvidenceLive) ||
-				!capabilities.HasEvidenceAtLeast(provider.CapabilityUsageIdentity, provider.EvidenceLive) ||
+			if !capabilities.HasEvidenceAtLeast(provider.CapabilityUsageIdentity, provider.EvidenceLive) ||
 				!capabilities.HasEvidenceAtLeast(provider.CapabilityUsageCompleteness, provider.EvidenceLive) {
+				return outcome, provider.ErrUnsupportedCapability
+			}
+			usage, err := c.runtime.Usage(ctx, provider.UsageRequest{
+				OperationID: intent.OperationID, SessionID: intent.ProviderSessionID, TurnID: intent.ID,
+			})
+			if err != nil {
+				return outcome, fmt.Errorf("retrieve UNKNOWN Planner question usage: %w", err)
+			}
+			if usage.OperationID != intent.OperationID || usage.SessionID != intent.ProviderSessionID ||
+				usage.TurnID != intent.ID || usage.UsageID == "" || usage.UsageID != lookup.UsageID ||
+				!usage.Complete || usage.Tokens > intent.ReservedTokens ||
+				!validQuestionTurnEvidence(usage.EvidenceSHA256) {
+				return outcome, provider.ErrProviderInvalidResult
+			}
+			if lookup.Status == domain.JobQuestionTurnFailed {
+				evidence := sha256String(lookup.EvidenceSHA256 + ":" + usage.EvidenceSHA256)
+				receipt, observation, err := c.persistObservation(
+					ctx, job.ID, intent.ID, domain.JobQuestionTurnFailed, usage.Tokens, "",
+					lookup.ReceiptID, evidence,
+				)
+				if err != nil {
+					return outcome, err
+				}
+				outcome.ObservationReceipt, outcome.Observation = receipt, observation
+				return outcome, errors.New("Planner question Provider operation failed")
+			}
+			if !capabilities.HasEvidenceAtLeast(provider.CapabilityFinalOutput, provider.EvidenceLive) ||
+				lookup.ResultSHA256 == "" {
 				return outcome, provider.ErrUnsupportedCapability
 			}
 			result, err := c.runtime.Result(ctx, provider.ResultRequest{
@@ -188,37 +217,34 @@ func (c *JobQuestionTurnController) reconcileUnknown(
 			if err != nil {
 				return outcome, fmt.Errorf("retrieve UNKNOWN Planner question result: %w", err)
 			}
-			usage, err := c.runtime.Usage(ctx, provider.UsageRequest{
-				OperationID: intent.OperationID, SessionID: intent.ProviderSessionID, TurnID: intent.ID,
-			})
-			if err != nil {
-				return outcome, fmt.Errorf("retrieve UNKNOWN Planner question usage: %w", err)
-			}
 			if result.OperationID != intent.OperationID || result.SessionID != intent.ProviderSessionID ||
 				result.TurnID != intent.ID || !result.Final || result.ResultSHA256 != sha256String(result.Content) ||
-				!validQuestionTurnEvidence(result.EvidenceSHA256) ||
-				usage.OperationID != intent.OperationID || usage.SessionID != intent.ProviderSessionID ||
-				usage.TurnID != intent.ID || usage.UsageID == "" || usage.UsageID != lookup.UsageID ||
-				!usage.Complete || usage.Tokens > intent.ReservedTokens ||
-				!validQuestionTurnEvidence(usage.EvidenceSHA256) ||
-				lookup.ResultSHA256 == "" || lookup.ResultSHA256 != result.ResultSHA256 {
+				!validQuestionTurnEvidence(result.EvidenceSHA256) || lookup.ResultSHA256 != result.ResultSHA256 {
 				return outcome, provider.ErrProviderInvalidResult
 			}
 			evidence := sha256String(lookup.EvidenceSHA256 + ":" + result.EvidenceSHA256 + ":" + usage.EvidenceSHA256)
+			if !validQuestionTurnReplyContent(result.Content) {
+				receipt, observation, err := c.persistObservation(
+					ctx, job.ID, intent.ID, domain.JobQuestionTurnFailed, usage.Tokens, "",
+					lookup.ReceiptID, evidence,
+				)
+				if err != nil {
+					return outcome, err
+				}
+				outcome.ObservationReceipt, outcome.Observation = receipt, observation
+				return outcome, provider.ErrProviderInvalidResult
+			}
 			receipt, observation, err := c.persistObservation(
-				ctx, job.ID, intent.ID, lookup.Status, usage.Tokens, result.Content,
+				ctx, job.ID, intent.ID, domain.JobQuestionTurnCompleted, usage.Tokens, result.Content,
 				lookup.ReceiptID, evidence,
 			)
 			if err != nil {
 				return outcome, err
 			}
 			outcome.ObservationReceipt, outcome.Observation = receipt, observation
-			if observation.Status == domain.JobQuestionTurnCompleted {
-				reply, err := c.persistQuestionReply(ctx, job.ID, grant, question, intent, observation)
-				outcome.Reply = reply
-				return outcome, err
-			}
-			return outcome, errors.New("Planner question Provider operation failed")
+			reply, err := c.persistQuestionReply(ctx, job.ID, grant, question, intent, observation)
+			outcome.Reply = reply
+			return outcome, err
 		}
 	}
 
@@ -336,8 +362,16 @@ func (c *JobQuestionTurnController) dispatch(
 		outcome.ObservationReceipt, outcome.Observation = receipt, observation
 		return outcome, errors.New("Planner question Provider Turn is not terminal")
 	}
+	observationStatus := result.Status
+	observationContent := result.Output
+	if observationStatus == domain.JobQuestionTurnFailed {
+		observationContent = ""
+	} else if !validQuestionTurnReplyContent(observationContent) {
+		observationStatus = domain.JobQuestionTurnFailed
+		observationContent = ""
+	}
 	receipt, observation, err := c.persistObservation(
-		ctx, intent.JobID, intent.ID, result.Status, result.TokensUsed, result.Output,
+		ctx, intent.JobID, intent.ID, observationStatus, result.TokensUsed, observationContent,
 		result.ReceiptID, result.EvidenceSHA256,
 	)
 	if err != nil {
@@ -345,6 +379,9 @@ func (c *JobQuestionTurnController) dispatch(
 	}
 	outcome.ObservationReceipt, outcome.Observation = receipt, observation
 	if observation.Status == domain.JobQuestionTurnFailed {
+		if result.Status == domain.JobQuestionTurnCompleted {
+			return outcome, provider.ErrProviderInvalidResult
+		}
 		return outcome, errors.New("Planner question Provider Turn failed")
 	}
 	reply, err := c.persistQuestionReply(ctx, intent.JobID, grant, question, intent, observation)
@@ -507,4 +544,10 @@ func validQuestionTurnEvidence(value string) bool {
 		}
 	}
 	return true
+}
+
+func validQuestionTurnReplyContent(content string) bool {
+	return utf8.ValidString(content) &&
+		strings.TrimSpace(content) != "" &&
+		len([]byte(content)) <= domain.MaxJobMessageBodyBytes
 }
