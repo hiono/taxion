@@ -416,16 +416,6 @@ func executionPermissionBudgetUsed(job Job, revision uint64) (uint64, uint64, er
 		turns += uint64(permission.ReservedTurns)
 		tokens += permission.ReservedTokens
 	}
-	for _, authorization := range job.JobQuestionAuthorizations {
-		if authorization.ContractRevision != revision {
-			continue
-		}
-		if ^uint64(0)-turns < uint64(authorization.Budget.MaxTurns) || ^uint64(0)-tokens < authorization.Budget.MaxTokens {
-			return 0, 0, fmt.Errorf("%w: JobQuestionAuthorization budget overflow", ErrInvalidJob)
-		}
-		turns += uint64(authorization.Budget.MaxTurns)
-		tokens += authorization.Budget.MaxTokens
-	}
 	return turns, tokens, nil
 }
 
