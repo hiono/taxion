@@ -473,7 +473,10 @@ func withCredential[T any](ctx context.Context, broker CredentialBroker, identit
 	if acquireErr != nil || lease == nil {
 		if lease != nil {
 			if closeErr := closeCredentialLease(lease); closeErr != nil {
-				return result, errors.Join(ErrCredentialUnavailable, ErrCredentialLeaseCleanupFailed)
+				return result, errors.Join(
+					ErrCredentialUnavailable, ErrCredentialLeaseCleanupFailed,
+					&OperationError{Class: FailureNotDispatched, Code: OperationCodeUnavailable},
+				)
 			}
 		}
 		return result, errors.Join(ErrCredentialUnavailable, &OperationError{Class: FailureNotDispatched, Code: OperationCodeUnavailable})
