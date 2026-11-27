@@ -391,6 +391,11 @@ func TestJobQuestionAuthorizationReservesBudgetAcrossQuestions(t *testing.T) {
 		"Clarify the second approved constraint.",
 		now.Add(4*time.Minute),
 	)
+	thirdQuestion := newQuestion(
+		"cmd_87878787878787878787878787878787",
+		"Clarify the third approved constraint.",
+		now.Add(4*time.Minute+30*time.Second),
+	)
 	secondRequest := firstRequest
 	secondRequest.CommandID = "cmd_85858585858585858585858585858585"
 	secondRequest.QuestionMessageID = secondQuestion.ID
@@ -432,17 +437,12 @@ func TestJobQuestionAuthorizationReservesBudgetAcrossQuestions(t *testing.T) {
 		t.Fatalf("ExecutionPermission admission ignored JobQuestionAuthorization reservations: %v", err)
 	}
 
-	thirdQuestion := newQuestion(
-		"cmd_87878787878787878787878787878787",
-		"Clarify the third approved constraint.",
-		now.Add(6*time.Minute),
-	)
 	thirdRequest := firstRequest
 	thirdRequest.CommandID = "cmd_88888888888888888888888888888888"
 	thirdRequest.QuestionMessageID = thirdQuestion.ID
 	thirdRequest.ReadOnlyBoundary.Reference = "question_budget_snapshot_3"
 	thirdRequest.ReadOnlyBoundary.SHA256 = strings.Repeat("f", 64)
-	if _, err := NewJobQuestionAuthorization(job, thirdRequest, now.Add(4*time.Minute)); err == nil ||
+	if _, err := NewJobQuestionAuthorization(job, thirdRequest, now.Add(4*time.Minute+45*time.Second)); err == nil ||
 		!strings.Contains(err.Error(), "timestamp precedes") {
 		t.Fatalf("out-of-order JobQuestionAuthorization timestamp = %v, want monotonicity rejection", err)
 	}
