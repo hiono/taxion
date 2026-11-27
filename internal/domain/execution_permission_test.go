@@ -236,6 +236,29 @@ func TestExecutionPermissionCannotExpandTaskScopeOrBudget(t *testing.T) {
 		t.Fatalf("Reviewer permission on an approved Task resource should remain valid: %v", err)
 	}
 
+	coderRepositoryRequest := request
+	coderRepositoryRequest.Resource = "repo_taxion"
+	repositorySHA, _ := ExecutionPermissionRequestSHA256(coderRepositoryRequest)
+	repositoryAssessment := executionPermissionTestAssessment(coderRepositoryRequest, repositorySHA, now.Add(time.Minute))
+	repositoryPermission, err := NewExecutionPermission(job, coderRepositoryRequest, repositorySHA, repositoryAssessment, now.Add(time.Minute))
+	if err != nil {
+		t.Fatalf("Coder permission on a target repository: %v", err)
+	}
+	persistedInvalid := repositoryPermission
+	persistedInvalid.Resource = "resource_ci"
+	invalidRequest := coderRepositoryRequest
+	invalidRequest.Resource = "resource_ci"
+	invalidSHA, _ := ExecutionPermissionRequestSHA256(invalidRequest)
+	persistedInvalid.RequestSHA256 = invalidSHA
+	persistedInvalid.Assessment = executionPermissionTestAssessment(invalidRequest, invalidSHA, now.Add(time.Minute))
+	persistedInvalid.AssessmentSHA256, err = persistedInvalid.Assessment.SHA256()
+	if err != nil {
+		t.Fatalf("mutated assessment digest: %v", err)
+	}
+	if err := persistedInvalid.Validate(job); err == nil {
+		t.Fatal("ExecutionPermission.Validate accepted a persisted Coder grant on a Task resource")
+	}
+
 	request.Resource = "repo_taxion"
 	request.ReservedTurns = 2
 	request.ReservedTokens = 101
