@@ -479,3 +479,31 @@ func TestProviderReceiptIdentifierAcceptsTheProviderIdentifierContract(t *testin
 		t.Fatal("Provider receipt identifier exceeding the Provider limit was accepted")
 	}
 }
+
+func TestJobQuestionTurnAdmissionIncludesUnresolvedPlanningTurnsOnSameSession(t *testing.T) {
+	now := time.Now().UTC()
+	grant := JobQuestionAuthorization{
+		ID: "job_question_authorization_1", PlannerRoleExecutionID: "planner_execution_1",
+		ProviderSessionID: "provider_session_1",
+	}
+	job := Job{
+		PlanningTurnIntents: []PlanningTurnIntent{{
+			ID: "planning_turn_1", RoleExecutionID: grant.PlannerRoleExecutionID,
+			ProviderSessionID: grant.ProviderSessionID,
+			CreatedRevision: 1, CreatedAt: now.Add(-2 * time.Minute),
+		}},
+		PlanningTurnObservations: []PlanningTurnObservation{{
+			TurnID: "planning_turn_1", Status: PlanningTurnUnknown,
+			CreatedRevision: 2, CreatedAt: now.Add(-time.Minute),
+		}},
+	}
+	if _, _, err := jobQuestionTurnBudgetUsedBefore(job, grant.ID, grant, now, 3); err == nil ||
+		!strings.Contains(err.Error(), "previous Planner Provider Turn") {
+		t.Fatalf("unresolved ordinary PlanningTurn was not included in the same-session guard: %v", err)
+	}
+	job.PlanningTurnObservations[0].Status = PlanningTurnCompleted
+	if turns, tokens, err := jobQuestionTurnBudgetUsedBefore(job, grant.ID, grant, now, 3); err != nil ||
+		turns != 0 || tokens != 0 {
+		t.Fatalf("completed ordinary PlanningTurn incorrectly blocked a question: turns=%d tokens=%d err=%v", turns, tokens, err)
+	}
+}
