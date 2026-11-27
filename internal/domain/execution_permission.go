@@ -175,7 +175,7 @@ func ValidateExecutionPermissionRequest(job Job, request ExecutionPermissionRequ
 		containsExact(revision.Contract.ApprovalRequiredEffects, request.Effect) {
 		return errors.New("ExecutionPermission effect requires a separate human approval")
 	}
-	turns, tokens, err := executionPermissionBudgetUsed(job, revision.Revision)
+	turns, tokens, err := jobQuestionAuthorizationBudgetUsed(job, revision.Revision)
 	if err != nil {
 		return err
 	}
@@ -384,7 +384,7 @@ func validateExecutionPermissionFacts(job Job) error {
 		previousAt = permission.CreatedAt
 	}
 	for _, revision := range job.JobContractRevisions {
-		turns, tokens, err := executionPermissionBudgetUsed(job, revision.Revision)
+		turns, tokens, err := jobQuestionAuthorizationBudgetUsed(job, revision.Revision)
 		if err != nil {
 			return err
 		}
