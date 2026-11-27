@@ -240,7 +240,8 @@ func (w WorktreeAssignment) Validate(job Job) error {
 		w.CreatedRevision > job.Revision {
 		return errors.New("WorktreeAssignment aggregate identity or creation metadata mismatch")
 	}
-	if !filepath.IsAbs(w.RepositoryPath) || filepath.Clean(w.RepositoryPath) != w.RepositoryPath ||
+	if !utf8.ValidString(w.RepositoryPath) || !utf8.ValidString(w.WorktreePath) ||
+		!filepath.IsAbs(w.RepositoryPath) || filepath.Clean(w.RepositoryPath) != w.RepositoryPath ||
 		!filepath.IsAbs(w.WorktreePath) || filepath.Clean(w.WorktreePath) != w.WorktreePath ||
 		w.RepositoryPath == w.WorktreePath {
 		return errors.New("WorktreeAssignment paths must be distinct absolute canonical paths")
@@ -332,7 +333,8 @@ func NewWorktreeAssignmentBinding(
 	if _, err := hex.DecodeString(assignment.BaselineCommit); err != nil || len(assignment.BaselineCommit) != 40 {
 		return WorktreeAssignment{}, errors.New("WorktreeAssignment baseline commit must be a full Git SHA-1")
 	}
-	if !filepath.IsAbs(assignment.RepositoryPath) || filepath.Clean(assignment.RepositoryPath) != assignment.RepositoryPath ||
+	if !utf8.ValidString(assignment.RepositoryPath) || !utf8.ValidString(assignment.WorktreePath) ||
+		!filepath.IsAbs(assignment.RepositoryPath) || filepath.Clean(assignment.RepositoryPath) != assignment.RepositoryPath ||
 		!filepath.IsAbs(assignment.WorktreePath) || filepath.Clean(assignment.WorktreePath) != assignment.WorktreePath ||
 		assignment.RepositoryPath == assignment.WorktreePath {
 		return WorktreeAssignment{}, errors.New("WorktreeAssignment paths must be distinct absolute canonical paths")
