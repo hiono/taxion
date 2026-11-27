@@ -72,6 +72,7 @@ func (e *fakeACPToolCallEvaluator) Evaluate(_ context.Context, _ provider.ACPToo
 type revokedACPExecutionPermissionStore struct {
 	ProviderExecutionStore
 	revokedAt time.Time
+	reads     int
 }
 
 func (s *revokedACPExecutionPermissionStore) GetJob(ctx context.Context, jobID string) (domain.Job, error) {
@@ -79,8 +80,11 @@ func (s *revokedACPExecutionPermissionStore) GetJob(ctx context.Context, jobID s
 	if err != nil {
 		return domain.Job{}, err
 	}
-	for i := range job.ExecutionPermissions {
-		job.ExecutionPermissions[i].ExpiresAt = s.revokedAt
+	s.reads++
+	if s.reads > 1 {
+		for i := range job.ExecutionPermissions {
+			job.ExecutionPermissions[i].ExpiresAt = s.revokedAt
+		}
 	}
 	return job, nil
 }
