@@ -156,15 +156,15 @@ func copilotProfileDirectory() (string, error) {
 }
 
 func copilotProfileEnvironment(profile string) []string {
-	blocked := map[string]struct{}{
-		"HOME": {}, "XDG_CONFIG_HOME": {}, "XDG_CACHE_HOME": {}, "XDG_DATA_HOME": {},
-		"COPILOT_GITHUB_TOKEN": {}, "GH_TOKEN": {}, "GITHUB_TOKEN": {},
-		"DBUS_SESSION_BUS_ADDRESS": {}, "XDG_RUNTIME_DIR": {}, "SSH_AUTH_SOCK": {},
+	// Start from an allowlist: blocking a few known token names still leaks
+	// credentials introduced by other SDKs or local tooling.
+	allowed := map[string]struct{}{
+		"PATH": {}, "TMPDIR": {}, "LANG": {}, "LC_ALL": {}, "LC_CTYPE": {}, "TERM": {},
 	}
-	environment := make([]string, 0, len(os.Environ())+4)
+	environment := make([]string, 0, len(allowed)+4)
 	for _, entry := range os.Environ() {
 		name, _, _ := strings.Cut(entry, "=")
-		if _, skip := blocked[name]; !skip {
+		if _, keep := allowed[name]; keep {
 			environment = append(environment, entry)
 		}
 	}
