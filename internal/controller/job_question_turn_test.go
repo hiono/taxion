@@ -1350,4 +1350,3 @@ func TestJobQuestionTurnControllerReturnsConcurrentTerminalObservationAfterLateU
 			outcome, f.runtime.sendCalls)
 	}
 }
-
