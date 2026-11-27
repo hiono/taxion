@@ -1193,8 +1193,11 @@ func TestJobQuestionTurnControllerBoundsUnknownLookupRecovery(t *testing.T) {
 	f.runtime.capabilities = capabilities
 	f.runtime.lookupHook = func(ctx context.Context, _ provider.LookupRequest) error {
 		deadline, ok := ctx.Deadline()
-		if !ok || time.Until(deadline) > 5*time.Second {
-			t.Errorf("Lookup deadline = %v, present=%v; want an independent five-second bound", deadline, ok)
+		if !ok {
+			return errors.New("Lookup context has no deadline")
+		}
+		if remaining := time.Until(deadline); remaining <= 0 || remaining > 5*time.Second {
+			return errors.New("Lookup deadline is outside the independent five-second bound")
 		}
 		<-ctx.Done()
 		return ctx.Err()
@@ -1212,3 +1215,80 @@ func TestJobQuestionTurnControllerBoundsUnknownLookupRecovery(t *testing.T) {
 		t.Fatalf("timed-out recovery dispatched another Provider operation: lookup=%d send=%d", f.runtime.lookupCalls, f.runtime.sendCalls)
 	}
 }
+
+func TestJobQuestionTurnControllerSerializesUnresolvedTurnsAcrossQuestionGrants(t *testing.T) {
+	f := newJobQuestionTurnFixture(t)
+	ctx := context.Background()
+	f.runtime.sendErr = &provider.OperationError{
+		Class: provider.FailureAmbiguous,
+		Code:  provider.OperationCodeUnknown,
+	}
+	if _, err := f.controller.Send(ctx, f.jobID, f.authorizationID,
+		"cmd_b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1", 100); err == nil {
+		t.Fatal("ambiguous first Send unexpectedly succeeded")
+	}
+	if f.runtime.sendCalls != 1 {
+		t.Fatalf("initial Provider Send calls=%d, want 1", f.runtime.sendCalls)
+	}
+
+	job, err := f.database.GetJob(ctx, f.jobID)
+	if err != nil {
+		t.Fatalf("GetJob after UNKNOWN turn: %v", err)
+	}
+	var firstGrant domain.JobQuestionAuthorization
+	for _, grant := range job.JobQuestionAuthorizations {
+		if grant.ID == f.authorizationID {
+			firstGrant = grant
+			break
+		}
+	}
+	if firstGrant.ID == "" {
+		t.Fatal("first JobQuestionAuthorization was not persisted")
+	}
+	coder, found := findRoleExecution(job, f.coderID)
+	if !found {
+		t.Fatal("Coder RoleExecution was not found")
+	}
+	coderSession, found := acceptedRoleSession(job, coder)
+	if !found {
+		t.Fatal("Coder has no accepted Provider Session")
+	}
+	communication, err := NewCommunicationController(f.database)
+	if err != nil {
+		t.Fatalf("NewCommunicationController: %v", err)
+	}
+	question, err := communication.SendFromRole(ctx, RoleMessageRequest{
+		JobID: f.jobID, RoleExecutionID: f.coderID, ProviderSessionID: coderSession,
+		CommandID: "cmd_b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+		Recipient: domain.ActorRef{Kind: domain.ActorPlanner, ID: f.plannerID},
+		Body:      "A second question for the same Planner Session.",
+	})
+	if err != nil {
+		t.Fatalf("SendFromRole second question: %v", err)
+	}
+	authorizations, err := NewJobQuestionAuthorizationController(f.database,
+		fixedQuestionTurnContextResolver{context: QuestionReadOnlyContext{
+			RepositoryID: firstGrant.RepositoryID,
+			Boundary:     firstGrant.ReadOnlyBoundary,
+		}},
+	)
+	if err != nil {
+		t.Fatalf("NewJobQuestionAuthorizationController: %v", err)
+	}
+	_, secondGrant, err := authorizations.Authorize(ctx, f.jobID, question.Message.ID,
+		"cmd_b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3",
+		domain.PlanningBudget{MaxTurns: 1, MaxTokens: 10}, firstGrant.Deadline)
+	if err != nil {
+		t.Fatalf("Authorize second question: %v", err)
+	}
+
+	if _, err := f.controller.Send(ctx, f.jobID, secondGrant.ID,
+		"cmd_b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4", 10); err == nil ||
+		!strings.Contains(err.Error(), "Provider Session is unresolved") {
+		t.Fatalf("second question on unresolved Planner Session = %v, want unresolved-session rejection", err)
+	}
+	if f.runtime.sendCalls != 1 {
+		t.Fatalf("second question was dispatched while the Planner Session had an UNKNOWN turn: sends=%d", f.runtime.sendCalls)
+	}
+}
+

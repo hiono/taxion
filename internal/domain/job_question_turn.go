@@ -105,7 +105,7 @@ func NewJobQuestionTurnIntent(job Job, request JobQuestionTurnIntentRequest, now
 	); err != nil {
 		return JobQuestionTurnIntent{}, err
 	}
-	turnNumber, tokensUsed, err := jobQuestionTurnBudgetUsed(job, grant.ID)
+	turnNumber, tokensUsed, err := jobQuestionTurnBudgetUsedBefore(job, grant.ID, job.Revision+1, now)
 	if err != nil {
 		return JobQuestionTurnIntent{}, err
 	}
@@ -180,7 +180,7 @@ func (t JobQuestionTurnIntent) Validate(job Job) error {
 		return errors.New("JobQuestionTurnIntent does not bind its JobQuestionAuthorization")
 	}
 	for _, revision := range job.JobContractRevisions {
-		if revision.Revision > grant.ContractRevision && revision.CreatedRevision < t.CreatedRevision {
+		if revision.Revision > grant.ContractRevision && revision.CreatedRevision <= t.CreatedRevision {
 			return errors.New("JobQuestionTurnIntent was created after its JobQuestionAuthorization was superseded")
 		}
 	}
@@ -245,6 +245,9 @@ func NewJobQuestionTurnObservation(job Job, request JobQuestionTurnObservationRe
 		contentSHA256 = sha256HexDomain(request.Content)
 	}
 	previous, foundPrevious := latestJobQuestionTurnObservation(job, intent.ID)
+	if foundPrevious && now.Before(previous.CreatedAt) {
+		return JobQuestionTurnObservation{}, errors.New("question turn observation time precedes the previous observation")
+	}
 	if !foundPrevious {
 		if request.ReconcilesUnknown {
 			return JobQuestionTurnObservation{}, errors.New("first question turn observation cannot reconcile UNKNOWN")
@@ -291,6 +294,12 @@ func (o JobQuestionTurnObservation) Validate(job Job, intent JobQuestionTurnInte
 		o.CreatedAt.IsZero() || o.CreatedAt.Before(intent.CreatedAt) ||
 		o.CreatedRevision <= intent.CreatedRevision || o.CreatedRevision > job.Revision+1 {
 		return errors.New("JobQuestionTurnObservation identity or metadata mismatch")
+	}
+	for _, previous := range job.JobQuestionTurnObservations {
+		if previous.IntentID == intent.ID && previous.CreatedRevision < o.CreatedRevision &&
+			o.CreatedAt.Before(previous.CreatedAt) {
+			return errors.New("JobQuestionTurnObservation time precedes the previous observation")
+		}
 	}
 	if o.Status == JobQuestionTurnUnknown {
 		if o.TokensUsed != 0 || o.Content != "" || o.ContentSHA256 != "" ||
@@ -449,6 +458,10 @@ func jobQuestionTurnBudgetUsedBefore(
 	beforeRevision uint64,
 	beforeAt time.Time,
 ) (uint32, uint64, error) {
+	grant, found := jobQuestionAuthorizationByID(job, authorizationID)
+	if !found {
+		return 0, 0, errors.New("JobQuestionAuthorization was not found")
+	}
 	observationsByIntent := make(map[string]JobQuestionTurnObservation, len(job.JobQuestionTurnObservations))
 	for _, observation := range job.JobQuestionTurnObservations {
 		if observation.CreatedRevision >= beforeRevision ||
@@ -464,12 +477,19 @@ func jobQuestionTurnBudgetUsedBefore(
 	var turns uint32
 	var tokens uint64
 	for _, intent := range job.JobQuestionTurnIntents {
-		if intent.JobQuestionAuthorizationID != authorizationID || intent.CreatedRevision >= beforeRevision {
+		if intent.CreatedRevision >= beforeRevision {
+			continue
+		}
+		observation, observed := observationsByIntent[intent.ID]
+		if intent.ProviderSessionID == grant.ProviderSessionID &&
+			(!observed || observation.Status == JobQuestionTurnUnknown) {
+			return turns, tokens, errors.New("previous JobQuestion Provider Turn on this Provider Session is unresolved; reconcile the same OperationID before another turn")
+		}
+		if intent.JobQuestionAuthorizationID != authorizationID {
 			continue
 		}
 		turns++
-		observation, found := observationsByIntent[intent.ID]
-		if !found || observation.Status == JobQuestionTurnUnknown {
+		if !observed || observation.Status == JobQuestionTurnUnknown {
 			return turns, tokens, errors.New("previous JobQuestion Provider Turn is unresolved; reconcile the same OperationID before another turn")
 		}
 		if ^uint64(0)-tokens < observation.TokensUsed {

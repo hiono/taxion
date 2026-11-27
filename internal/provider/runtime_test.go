@@ -493,6 +493,24 @@ func TestRuntimeSendAllowsBoundedFirstDispatchWithReadOnlyEvidenceOnly(t *testin
 	}
 }
 
+func TestRuntimeSendRequiresRecoveryEvidenceForUnboundedSend(t *testing.T) {
+	adapter := newTestAdapter(CapabilityReadOnlyContextEnforcement)
+	broker := &testBroker{secret: []byte("runtime-test-secret")}
+	runtime, err := newTestRuntime(adapter, broker)
+	if err != nil {
+		t.Fatalf("newTestRuntime: %v", err)
+	}
+	request := validTurnRequest()
+	request.ReadOnlyBoundary = ReadOnlyContextBoundary{}
+	if _, err := runtime.Send(context.Background(), request); !errors.Is(err, ErrUnsupportedCapability) {
+		t.Fatalf("unbounded Send without recovery evidence = %v, want ErrUnsupportedCapability", err)
+	}
+	if adapter.sendCalls != 0 || broker.acquires != 0 {
+		t.Fatalf("unsupported unbounded Send acquired credentials or called Adapter: sends=%d acquires=%d",
+			adapter.sendCalls, broker.acquires)
+	}
+}
+
 func TestRuntimeSendPreservesUnknownAndRejectsCredentialBearingOutput(t *testing.T) {
 	adapter := newTestAdapter(CapabilitySendIdempotency, CapabilityReadOnlyContextEnforcement)
 	adapter.sendResult = TurnResult{Status: "UNKNOWN"}
