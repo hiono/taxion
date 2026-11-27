@@ -127,9 +127,10 @@ func TestACPExecutionPermissionAuthorizerRevalidatesExactTaskAuthority(t *testin
 		RepositoryPath: t.TempDir(), WorktreePath: t.TempDir(),
 		BaselineCommit: strings.Repeat("a", 40), OwnerRoleExecutionID: execution.ID,
 	}
+	observationAt := time.Now().UTC().Round(0)
 	startAttempt, err := domain.NewProviderStartObservation(
 		unboundJob, intent.ID, "", domain.ProviderStartObservationCommandID(intent.ID, domain.ProviderStartUnknown, "", "", "", false),
-		domain.ProviderStartUnknown, "", "", "", false, now,
+		domain.ProviderStartUnknown, "", "", "", false, observationAt,
 	)
 	if err != nil {
 		t.Fatalf("NewProviderStartObservation for Worktree binding guard: %v", err)
@@ -139,8 +140,8 @@ func TestACPExecutionPermissionAuthorizerRevalidatesExactTaskAuthority(t *testin
 		append([]domain.ProviderStartObservation(nil), unboundJob.ProviderStartObservations...), startAttempt,
 	)
 	attemptedJob.Revision = startAttempt.CreatedRevision
-	attemptedJob.UpdatedAt = now
-	if _, err := domain.NewWorktreeAssignmentBinding(attemptedJob, execution.ID, worktreeCandidate, now); err == nil {
+	attemptedJob.UpdatedAt = observationAt
+	if _, err := domain.NewWorktreeAssignmentBinding(attemptedJob, execution.ID, worktreeCandidate, observationAt); err == nil {
 		t.Fatal("NewWorktreeAssignmentBinding accepted retroactive binding after an UNKNOWN Provider Start")
 	}
 	invalidPath := filepath.Join(t.TempDir(), string([]byte{0xff}))
