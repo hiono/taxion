@@ -1106,8 +1106,8 @@ func TestJobQuestionTurnReturnsExistingPlannerReplyBeforeExpiredGrantRecovery(t 
 	if err != nil {
 		t.Fatalf("GetJob: %v", err)
 	}
-	_, _, err = f.database.AddJobMessage(context.Background(), f.jobID, job.Revision,
-		"cmd_b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5", domain.JobMessageRequest{
+	_, secondQuestion, err := f.database.AddJobMessage(context.Background(), f.jobID, job.Revision,
+		"cmd_b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5", domain.JobMessageRequest{
 			Sender:           domain.ActorRef{Kind: domain.ActorPlanner, ID: f.plannerID},
 			Recipient:        domain.ActorRef{Kind: domain.ActorCoder, ID: f.coderID},
 			ReplyToMessageID: f.questionID,
