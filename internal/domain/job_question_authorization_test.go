@@ -492,12 +492,13 @@ func TestJobQuestionTurnAdmissionIncludesUnresolvedPlanningTurnsOnSameSession(t 
 			ProviderSessionID: grant.ProviderSessionID,
 			CreatedRevision:   1, CreatedAt: now.Add(-2 * time.Minute),
 		}},
+		JobQuestionAuthorizations: []JobQuestionAuthorization{grant},
 		PlanningTurnObservations: []PlanningTurnObservation{{
 			TurnID: "planning_turn_1", Status: PlanningTurnUnknown,
 			CreatedRevision: 2, CreatedAt: now.Add(-time.Minute),
 		}},
 	}
-	if _, _, err := jobQuestionTurnBudgetUsedBefore(job, grant.ID, grant, now, 3); err == nil ||
+	if _, _, err := jobQuestionTurnBudgetUsedBefore(job, grant.ID, 3, now); err == nil ||
 		!strings.Contains(err.Error(), "previous Planner Provider Turn") {
 		t.Fatalf("unresolved ordinary PlanningTurn was not included in the same-session guard: %v", err)
 	}
@@ -532,8 +533,9 @@ func TestJobQuestionTurnAdmissionTreatsPersistedReplyAsTerminalWithoutProviderOb
 		CreatedRevision: 1, CreatedAt: now.Add(-2 * time.Minute),
 	}
 	job := Job{
-		JobMessages:            []JobMessage{question, reply},
-		JobQuestionTurnIntents: []JobQuestionTurnIntent{intent},
+		JobMessages:              []JobMessage{question, reply},
+		JobQuestionAuthorizations: []JobQuestionAuthorization{grant},
+		JobQuestionTurnIntents:   []JobQuestionTurnIntent{intent},
 	}
 	turns, tokens, err := jobQuestionTurnBudgetUsedBefore(job, grant.ID, grant, now, 3)
 	if err != nil || turns != 1 || tokens != intent.ReservedTokens {
