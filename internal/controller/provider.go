@@ -470,6 +470,7 @@ func (c *ProviderController) DispatchTaskExecution(
 	if !worktreeBound && !previousFound {
 		return domain.ProviderStartObservation{}, provider.StartResult{}, errors.New("Task Provider Start requires a Worktree binding before its first dispatch")
 	}
+	if previousFound {
 	capabilities, err := c.runtime.Capabilities(ctx)
 	if err != nil {
 		return domain.ProviderStartObservation{}, provider.StartResult{}, err
@@ -530,6 +531,7 @@ func (c *ProviderController) DispatchTaskExecution(
 	}
 	if !worktreeBound {
 		return previous, provider.StartResult{}, errors.New("Task Provider Start lookup did not confirm an existing session; retry is blocked without a Worktree binding")
+	}
 	}
 	request := provider.StartRequest{
 		OperationID: intent.ID, JobID: job.ID, RoleExecutionID: execution.ID,
@@ -1389,13 +1391,6 @@ func (c *ProviderController) SendPlanning(
 			return store.CommandReceipt{}, domain.PlanningTurnIntent{}, domain.PlanningTurnObservation{}, provider.TurnResult{}, err
 		}
 	}
-	capabilities, err := c.runtime.Capabilities(ctx)
-	if err != nil {
-		return store.CommandReceipt{}, domain.PlanningTurnIntent{}, domain.PlanningTurnObservation{}, provider.TurnResult{}, err
-	}
-	if capabilities.Identity != c.runtime.Identity() || !capabilities.SupportsSafeSend() {
-		return store.CommandReceipt{}, domain.PlanningTurnIntent{}, domain.PlanningTurnObservation{}, provider.TurnResult{}, provider.ErrUnsupportedCapability
-	}
 	promptSHA256 := sha256String(prompt)
 	request := provider.TurnRequest{
 		OperationID: domain.PlanningTurnOperationID(commandID), TurnID: domain.PlanningTurnIntentID(commandID),
@@ -1439,6 +1434,11 @@ func (c *ProviderController) reconcileTurn(
 	request provider.TurnRequest,
 	principal auth.AuthenticatedPrincipal,
 ) (store.CommandReceipt, domain.PlanningTurnIntent, domain.PlanningTurnObservation, provider.TurnResult, error) {
+	previous, previousFound := latestProviderTurnObservation(job, turn.ID)
+	if previousFound && previous.Status != domain.PlanningTurnUnknown {
+		return receipt, turn, previous, turnResultFromObservation(previous), nil
+	}
+	if previousFound {
 	capabilities, err := c.runtime.Capabilities(ctx)
 	if err != nil {
 		return receipt, turn, domain.PlanningTurnObservation{}, provider.TurnResult{}, err
@@ -1518,6 +1518,7 @@ func (c *ProviderController) reconcileTurn(
 			return receipt, turn, observation, provider.TurnResult{}, persistErr
 		}
 		return receipt, turn, observation, provider.TurnResult{}, provider.ErrUnsupportedCapability
+	}
 	}
 	current, _, grant, _, err := c.providerObservationTarget(
 		ctx, job.ID, turn.RoleExecutionID, turn.ProviderSessionID, turn.ID, principal,
