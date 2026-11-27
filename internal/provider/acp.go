@@ -68,13 +68,13 @@ type acpSession struct {
 	sessionID        string
 	startOperationID string
 	process          *acpProcess
-	turnGate        chan struct{}
-	stopping        atomic.Bool
-	promptMu        sync.Mutex
-	promptCtx       context.Context
-	promptCancelled bool
-	mu              sync.RWMutex
-	turns           map[string]TurnResult
+	turnGate         chan struct{}
+	stopping         atomic.Bool
+	promptMu         sync.Mutex
+	promptCtx        context.Context
+	promptCancelled  bool
+	mu               sync.RWMutex
+	turns            map[string]TurnResult
 }
 
 type acpProcess struct {
@@ -302,8 +302,8 @@ func (a *ACPAdapter) Start(ctx context.Context, request StartRequest, _ Credenti
 		sessionID:        sessionID,
 		startOperationID: request.OperationID,
 		process:          process,
-		turnGate:        turnGate,
-		turns:           make(map[string]TurnResult),
+		turnGate:         turnGate,
+		turns:            make(map[string]TurnResult),
 	}
 	if request.TaskID != "" && request.ExecutionPermissionID != "" && a.config.PermissionAuthorizer != nil {
 		process.setPermissionHandler(func(_ context.Context, raw json.RawMessage) (bool, func()) {
