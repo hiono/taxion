@@ -1468,9 +1468,9 @@ func TestOrchestratorDeliversLaterCompletedReplyAfterEarlierUnknown(t *testing.T
 	}
 	_, secondQuestion, err := f.database.AddJobMessage(ctx, f.jobID, job.Revision,
 		"cmd_c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5", domain.JobMessageRequest{
-			Sender: domain.ActorRef{Kind: domain.ActorCoder, ID: f.coderID},
+			Sender:    domain.ActorRef{Kind: domain.ActorCoder, ID: f.coderID},
 			Recipient: domain.ActorRef{Kind: domain.ActorPlanner, ID: f.plannerID},
-			Body: "Please clarify a second constraint.",
+			Body:      "Please clarify a second constraint.",
 		})
 	if err != nil {
 		t.Fatalf("AddJobMessage second question: %v", err)
