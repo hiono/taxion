@@ -96,6 +96,10 @@ func (c *JobQuestionTurnController) Send(
 	if !found {
 		return outcome, errors.New("JobQuestionAuthorization source Question was not found")
 	}
+	if reply, found := existingPlannerReply(job, question); found {
+		outcome.Reply = CommunicationOutcome{Message: reply}
+		return outcome, nil
+	}
 	prompt := jobQuestionTurnPrompt(question.Body)
 	promptSHA256 := sha256String(prompt)
 
@@ -471,6 +475,13 @@ func (c *JobQuestionTurnController) persistQuestionReply(
 	intent domain.JobQuestionTurnIntent,
 	observation domain.JobQuestionTurnObservation,
 ) (CommunicationOutcome, error) {
+	job, err := c.store.GetJob(ctx, jobID)
+	if err != nil {
+		return CommunicationOutcome{}, err
+	}
+	if reply, found := existingPlannerReply(job, question); found {
+		return CommunicationOutcome{Message: reply}, nil
+	}
 	return c.communication.SendFromRole(ctx, RoleMessageRequest{
 		JobID:             jobID,
 		RoleExecutionID:   grant.PlannerRoleExecutionID,
@@ -480,6 +491,17 @@ func (c *JobQuestionTurnController) persistQuestionReply(
 		ReplyToMessageID:  question.ID,
 		Body:              observation.Content,
 	})
+}
+
+func existingPlannerReply(job domain.Job, question domain.JobMessage) (domain.JobMessage, bool) {
+	for _, message := range job.JobMessages {
+		if message.ReplyToMessageID == question.ID &&
+			message.Sender == (domain.ActorRef{Kind: domain.ActorPlanner, ID: question.Recipient.ID}) &&
+			message.Recipient == question.Sender {
+			return message, true
+		}
+	}
+	return domain.JobMessage{}, false
 }
 
 func (c *JobQuestionTurnController) verifiedCapabilities(
