@@ -65,6 +65,9 @@ type acpSession struct {
 	process         *acpProcess
 	turnGate        chan struct{}
 	stopping        atomic.Bool
+	promptMu        sync.Mutex
+	promptCtx       context.Context
+	promptCancelled bool
 	mu              sync.RWMutex
 	turns           map[string]TurnResult
 }
@@ -88,7 +91,7 @@ type acpProcess struct {
 	updateBytes       int64
 	updateWake        chan struct{}
 	permissionMu      sync.RWMutex
-	permissionHandler func(context.Context, json.RawMessage) bool
+	permissionHandler func(context.Context, json.RawMessage) (bool, func())
 	writeGate         chan struct{}
 	nextID            atomic.Uint64
 }
@@ -282,7 +285,7 @@ func (a *ACPAdapter) Start(ctx context.Context, request StartRequest, _ Credenti
 		turns:           make(map[string]TurnResult),
 	}
 	if request.TaskID != "" && request.ExecutionPermissionID != "" && a.config.PermissionAuthorizer != nil {
-		process.setPermissionHandler(func(permissionCtx context.Context, raw json.RawMessage) bool {
+		process.setPermissionHandler(func(_ context.Context, raw json.RawMessage) (bool, func()) {
 			var permissionRequest struct {
 				SessionID string          `json:"sessionId"`
 				ToolCall  json.RawMessage `json:"toolCall"`
@@ -291,9 +294,18 @@ func (a *ACPAdapter) Start(ctx context.Context, request StartRequest, _ Credenti
 				permissionRequest.SessionID != session.sessionID ||
 				len(bytes.TrimSpace(permissionRequest.ToolCall)) == 0 ||
 				bytes.Equal(bytes.TrimSpace(permissionRequest.ToolCall), []byte("null")) {
-				return false
+				return false, nil
 			}
-			err := a.config.PermissionAuthorizer.Authorize(permissionCtx, ACPToolPermissionRequest{
+			session.promptMu.Lock()
+			promptCtx := session.promptCtx
+			active := promptCtx != nil && !session.promptCancelled && promptCtx.Err() == nil &&
+				!session.stopping.Load()
+			session.promptMu.Unlock()
+			if !active {
+				return false, nil
+			}
+			evaluationCtx, cancel := context.WithTimeout(promptCtx, time.Second)
+			err := a.config.PermissionAuthorizer.Authorize(evaluationCtx, ACPToolPermissionRequest{
 				OperationID: request.OperationID, JobID: request.JobID,
 				RoleExecutionID: request.RoleExecutionID, TaskID: request.TaskID,
 				ExecutionPermissionID: request.ExecutionPermissionID,
@@ -303,7 +315,16 @@ func (a *ACPAdapter) Start(ctx context.Context, request StartRequest, _ Credenti
 				ProviderIdentity: a.config.Identity,
 				ToolCall:         append([]byte(nil), permissionRequest.ToolCall...),
 			})
-			return err == nil && !session.stopping.Load()
+			cancel()
+			session.promptMu.Lock()
+			active = session.promptCtx == promptCtx && !session.promptCancelled &&
+				promptCtx.Err() == nil && !session.stopping.Load()
+			if err == nil && active {
+				// Keep the prompt lock until the permission response is written.
+				// Cancellation takes the same lock before marking the prompt cancelled.
+				return true, session.promptMu.Unlock
+			}
+			return false, session.promptMu.Unlock
 		})
 	}
 	result := StartResult{
@@ -482,6 +503,9 @@ func (a *ACPAdapter) send(ctx context.Context, session *acpSession, request Turn
 	if !owned || session.stopping.Load() {
 		return TurnResult{}, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown}
 	}
+	if err := operationCtx.Err(); err != nil {
+		return TurnResult{}, err
+	}
 	session.mu.RLock()
 	existing, cached = session.turns[request.OperationID]
 	session.mu.RUnlock()
@@ -521,12 +545,27 @@ func (a *ACPAdapter) send(ctx context.Context, session *acpSession, request Turn
 		output.WriteString(chunk)
 		return nil
 	}
+	session.promptMu.Lock()
+	session.promptCtx = operationCtx
+	session.promptCancelled = false
+	session.promptMu.Unlock()
+	defer func() {
+		session.promptMu.Lock()
+		if session.promptCtx == operationCtx {
+			session.promptCtx = nil
+			session.promptCancelled = false
+		}
+		session.promptMu.Unlock()
+	}()
 	response, err := session.process.callForSession(operationCtx, session, "session/prompt", map[string]any{
 		"sessionId": request.SessionID,
 		"prompt":    []map[string]string{{"type": "text", "text": request.Prompt}},
 	}, onUpdate)
 	if err != nil {
 		if operationCtx.Err() != nil {
+			session.promptMu.Lock()
+			session.promptCancelled = true
+			session.promptMu.Unlock()
 			cancelCtx, cancelNotify := context.WithTimeout(context.Background(), 100*time.Millisecond)
 			_ = session.process.notify(cancelCtx, "session/cancel", map[string]string{"sessionId": request.SessionID})
 			cancelNotify()
@@ -808,13 +847,13 @@ func newACPProcess(command *exec.Cmd, stdin io.WriteCloser) *acpProcess {
 	}
 }
 
-func (p *acpProcess) setPermissionHandler(handler func(context.Context, json.RawMessage) bool) {
+func (p *acpProcess) setPermissionHandler(handler func(context.Context, json.RawMessage) (bool, func())) {
 	p.permissionMu.Lock()
 	p.permissionHandler = handler
 	p.permissionMu.Unlock()
 }
 
-func (p *acpProcess) currentPermissionHandler() func(context.Context, json.RawMessage) bool {
+func (p *acpProcess) currentPermissionHandler() func(context.Context, json.RawMessage) (bool, func()) {
 	p.permissionMu.RLock()
 	defer p.permissionMu.RUnlock()
 	return p.permissionHandler
@@ -847,10 +886,11 @@ func (p *acpProcess) read(stdout io.Reader) {
 						} `json:"options"`
 					}
 					allowed := false
+					var releasePermissionLock func()
 					if json.Unmarshal(message.Params, &permissionParams) == nil {
 						if handler := p.currentPermissionHandler(); handler != nil {
 							ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-							allowed = handler(ctx, message.Params)
+							allowed, releasePermissionLock = handler(ctx, message.Params)
 							cancel()
 						}
 					}
@@ -863,15 +903,25 @@ func (p *acpProcess) read(stdout io.Reader) {
 						}
 					}
 					response["result"] = map[string]any{"outcome": outcome}
+					ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+					err := p.write(ctx, response)
+					cancel()
+					if releasePermissionLock != nil {
+						releasePermissionLock()
+					}
+					if err != nil {
+						p.fail(errors.New("ACP server request response failed"))
+						return
+					}
 				} else {
 					response["error"] = map[string]any{"code": -32601, "message": "Method not found"}
-				}
-				ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-				err := p.write(ctx, response)
-				cancel()
-				if err != nil {
-					p.fail(errors.New("ACP server request response failed"))
-					return
+					ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+					err := p.write(ctx, response)
+					cancel()
+					if err != nil {
+						p.fail(errors.New("ACP server request response failed"))
+						return
+					}
 				}
 				continue
 			}
