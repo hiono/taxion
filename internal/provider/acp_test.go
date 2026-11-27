@@ -1621,3 +1621,75 @@ func TestACPAdapterCloseTracksDetachedProcesses(t *testing.T) {
 type acpTestPermissionAuthorizer struct {
 	calls int
 }
+
+func TestACPAdapterBoundsResultRetentionAndPreservesOperationTombstones(t *testing.T) {
+	adapter := &ACPAdapter{
+		byID:                  make(map[string]*acpSession),
+		detached:              make(map[string]*acpSession),
+		retiredOps:            map[string]struct{}{"start_retired": {}},
+		resultCache:           make(map[string]acpResultCacheEntry),
+		resultCacheLimit:      5,
+		resultCacheEntryLimit: 2,
+		resultRetention:       time.Minute,
+	}
+	first := &acpSession{
+		sessionID: "session_first", turns: make(map[string]TurnResult),
+		turnStoredAt: make(map[string]time.Time), retiredTurns: make(map[string]struct{}),
+	}
+	second := &acpSession{
+		sessionID: "session_second", turns: make(map[string]TurnResult),
+		turnStoredAt: make(map[string]time.Time), retiredTurns: make(map[string]struct{}),
+	}
+	adapter.detached[first.sessionID] = first
+	adapter.detached[second.sessionID] = second
+
+	adapter.cacheTurnResult(first, TurnResult{
+		OperationID: "operation_first", SessionID: first.sessionID, TurnID: "turn_first",
+		Status: "COMPLETED", Output: "1234",
+	})
+	adapter.cacheTurnResult(second, TurnResult{
+		OperationID: "operation_second", SessionID: second.sessionID, TurnID: "turn_second",
+		Status: "COMPLETED", Output: "5678",
+	})
+	if adapter.resultCacheBytes > adapter.resultCacheLimit || len(adapter.resultCache) != 1 {
+		t.Fatalf("adapter result cache exceeded its budget: bytes=%d entries=%d", adapter.resultCacheBytes, len(adapter.resultCache))
+	}
+	if _, found := first.turns["operation_first"]; found {
+		t.Fatal("oldest output was not evicted")
+	}
+	if _, found := first.retiredTurns["operation_first"]; !found {
+		t.Fatal("evicting output also removed the operation tombstone")
+	}
+	if _, found := adapter.retiredOps["start_retired"]; !found {
+		t.Fatal("result eviction removed a retired Start tombstone")
+	}
+	if _, err := adapter.Result(context.Background(), ResultRequest{
+		OperationID: "operation_first", SessionID: first.sessionID, TurnID: "turn_first",
+	}, nil); !errors.Is(err, ErrUnsupportedCapability) {
+		t.Fatalf("evicted Result error = %v, want ErrUnsupportedCapability", err)
+	}
+	result, err := adapter.Result(context.Background(), ResultRequest{
+		OperationID: "operation_second", SessionID: second.sessionID, TurnID: "turn_second",
+	}, nil)
+	if err != nil || result.Content != "5678" || !result.Final {
+		t.Fatalf("recent Result was not retained: %#v err=%v", result, err)
+	}
+
+	key := acpResultCacheKey(second.sessionID, "operation_second")
+	adapter.mu.Lock()
+	entry := adapter.resultCache[key]
+	entry.storedAt = time.Now().Add(-2 * time.Minute)
+	adapter.resultCache[key] = entry
+	second.mu.Lock()
+	second.turnStoredAt["operation_second"] = entry.storedAt
+	second.mu.Unlock()
+	adapter.mu.Unlock()
+	if _, err := adapter.Result(context.Background(), ResultRequest{
+		OperationID: "operation_second", SessionID: second.sessionID, TurnID: "turn_second",
+	}, nil); !errors.Is(err, ErrUnsupportedCapability) {
+		t.Fatalf("expired Result error = %v, want ErrUnsupportedCapability", err)
+	}
+	if _, found := second.retiredTurns["operation_second"]; !found {
+		t.Fatal("expiry removed the operation tombstone")
+	}
+}
