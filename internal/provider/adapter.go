@@ -181,6 +181,12 @@ func (c Capabilities) SupportsEventReplay() bool {
 // Verified filters declarations through a trusted evidence verifier. An unverified
 // optional capability is omitted without disabling unrelated verified capabilities.
 func (c Capabilities) Verified(ctx context.Context, expected Identity, verifier CapabilityVerifier) (Capabilities, error) {
+	if ctx == nil {
+		return Capabilities{}, errors.New("Provider capability verification context is required")
+	}
+	if err := ctx.Err(); err != nil {
+		return Capabilities{}, err
+	}
 	if verifier == nil {
 		return Capabilities{}, errors.New("Provider capability verifier is required")
 	}

@@ -1088,10 +1088,9 @@ func TestOrchestratorContinuesAfterPerTurnDeadlineWhileCallerContextIsActive(t *
 	if err == nil || !strings.Contains(err.Error(), f.questionID) {
 		t.Fatalf("ProcessPlannerInbox error = %v, want first request deadline error", err)
 	}
-	if len(outcomes) != 2 || outcomes[0].Observation.ID != "" ||
-		outcomes[1].Observation.Status != domain.JobQuestionTurnCompleted ||
-		outcomes[1].Reply.Message.ReplyToMessageID != secondQuestion.ID || f.runtime.sendCalls != 2 {
-		t.Fatalf("per-turn deadline stopped the inbox pass: outcomes=%#v sends=%d err=%v",
+	if len(outcomes) != 1 || outcomes[0].Observation.Status != domain.JobQuestionTurnUnknown ||
+		f.runtime.sendCalls != 1 {
+		t.Fatalf("unresolved Planner Session allowed another question dispatch: outcomes=%#v sends=%d err=%v",
 			outcomes, f.runtime.sendCalls, err)
 	}
 }
@@ -1203,8 +1202,10 @@ func TestJobQuestionTurnControllerBoundsUnknownLookupRecovery(t *testing.T) {
 		return ctx.Err()
 	}
 
+	parentCtx, cancelParent := context.WithTimeout(context.Background(), 7*time.Second)
+	defer cancelParent()
 	started := time.Now()
-	_, err := f.controller.Send(context.Background(), f.jobID, f.authorizationID, commandID, 100)
+	_, err := f.controller.Send(parentCtx, f.jobID, f.authorizationID, commandID, 100)
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("stalled Provider Lookup error = %v, want bounded deadline", err)
 	}
@@ -1253,18 +1254,14 @@ func TestJobQuestionTurnControllerSerializesUnresolvedTurnsAcrossQuestionGrants(
 	if !found {
 		t.Fatal("Coder has no accepted Provider Session")
 	}
-	communication, err := NewCommunicationController(f.database)
+	_, question, err := f.database.AddJobMessage(ctx, f.jobID, job.Revision,
+		"cmd_b2b2b2b2b2b2b2b2b2b2b2b2b2b2", domain.JobMessageRequest{
+			Sender: domain.ActorRef{Kind: domain.ActorCoder, ID: f.coderID},
+			Recipient: domain.ActorRef{Kind: domain.ActorPlanner, ID: f.plannerID},
+			Body: "A second question for the same Planner Session.",
+		})
 	if err != nil {
-		t.Fatalf("NewCommunicationController: %v", err)
-	}
-	question, err := communication.SendFromRole(ctx, RoleMessageRequest{
-		JobID: f.jobID, RoleExecutionID: f.coderID, ProviderSessionID: coderSession,
-		CommandID: "cmd_b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
-		Recipient: domain.ActorRef{Kind: domain.ActorPlanner, ID: f.plannerID},
-		Body:      "A second question for the same Planner Session.",
-	})
-	if err != nil {
-		t.Fatalf("SendFromRole second question: %v", err)
+		t.Fatalf("AddJobMessage second question: %v", err)
 	}
 	authorizations, err := NewJobQuestionAuthorizationController(f.database,
 		fixedQuestionTurnContextResolver{context: QuestionReadOnlyContext{

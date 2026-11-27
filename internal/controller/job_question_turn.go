@@ -113,7 +113,6 @@ func (c *JobQuestionTurnController) Send(
 		if hasReply {
 			outcome.Reply = CommunicationOutcome{Message: reply}
 			outcome.Observation, _ = latestJobQuestionTurnObservation(job, intent.ID)
-			return outcome, nil
 		}
 	} else {
 		if hasReply {
@@ -140,9 +139,8 @@ func (c *JobQuestionTurnController) Send(
 		if err != nil {
 			return outcome, err
 		}
-		// A replayed intent is not permission to dispatch again. The receipt revision
-		// identifies whether this call atomically created the intent.
-		existing = receipt.Revision != job.Revision+1
+		// Only the call that atomically created the intent may claim the first dispatch.
+		existing = !receipt.Created
 		outcome.IntentReceipt, outcome.Intent = receipt, created
 		intent = created
 		job, err = c.store.GetJob(ctx, jobID)
@@ -300,10 +298,25 @@ func (c *JobQuestionTurnController) reconcileUnknown(
 	if err := currentGrant.ValidateFor(currentJob, currentQuestion.ID, currentGrant.PlannerRoleExecutionID, currentGrant.ProviderSessionID, now); err != nil {
 		return outcome, err
 	}
-	if !capabilities.HasEvidenceAtLeast(provider.CapabilitySendIdempotency, c.minimumEvidence) {
+	if latest, found := latestJobQuestionTurnObservation(currentJob, intent.ID); found {
+		outcome.Observation = latest
+		switch latest.Status {
+		case domain.JobQuestionTurnCompleted:
+			reply, replyErr := c.persistQuestionReply(ctx, intent.JobID, currentGrant, currentQuestion, intent, latest)
+			outcome.Reply = reply
+			return outcome, replyErr
+		case domain.JobQuestionTurnFailed:
+			return outcome, errors.New("Planner question turn completed with a Provider failure")
+		}
+	}
+	currentCapabilities, err := c.verifiedCapabilities(ctx, currentGrant)
+	if err != nil {
+		return outcome, err
+	}
+	if !currentCapabilities.HasEvidenceAtLeast(provider.CapabilitySendIdempotency, c.minimumEvidence) {
 		return outcome, provider.ErrUnsupportedCapability
 	}
-	return c.dispatch(ctx, outcome, currentGrant, currentQuestion, intent, capabilities)
+	return c.dispatch(ctx, outcome, currentGrant, currentQuestion, intent, currentCapabilities)
 }
 
 func (c *JobQuestionTurnController) dispatch(
@@ -369,6 +382,14 @@ func (c *JobQuestionTurnController) dispatch(
 				return outcome, fmt.Errorf("persist UNKNOWN Planner question turn after ambiguous Send: %w", persistErr)
 			}
 			outcome.ObservationReceipt, outcome.Observation = receipt, observation
+			if observation.Status == domain.JobQuestionTurnCompleted {
+				reply, replyErr := c.persistQuestionReply(ctx, intent.JobID, grant, question, intent, observation)
+				outcome.Reply = reply
+				return outcome, replyErr
+			}
+			if observation.Status == domain.JobQuestionTurnFailed {
+				return outcome, errors.New("Planner question Provider operation failed")
+			}
 		}
 		return outcome, err
 	}
@@ -449,6 +470,9 @@ func (c *JobQuestionTurnController) persistObservation(
 			if previous.Status != domain.JobQuestionTurnUnknown {
 				if previous.Status == status && previous.TokensUsed == tokens &&
 					previous.Content == content && previous.ReceiptID == receiptID {
+					return store.CommandReceipt{}, previous, nil
+				}
+				if status == domain.JobQuestionTurnUnknown {
 					return store.CommandReceipt{}, previous, nil
 				}
 				return store.CommandReceipt{}, empty, errors.New("terminal Planner question observation cannot be replaced")

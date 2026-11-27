@@ -481,7 +481,8 @@ func jobQuestionTurnBudgetUsedBefore(
 			continue
 		}
 		observation, observed := observationsByIntent[intent.ID]
-		if intent.ProviderSessionID == grant.ProviderSessionID &&
+		if intent.RoleExecutionID == grant.PlannerRoleExecutionID &&
+			intent.ProviderSessionID == grant.ProviderSessionID &&
 			(!observed || observation.Status == JobQuestionTurnUnknown) {
 			return turns, tokens, errors.New("previous JobQuestion Provider Turn on this Provider Session is unresolved; reconcile the same OperationID before another turn")
 		}

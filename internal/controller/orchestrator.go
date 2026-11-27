@@ -217,6 +217,12 @@ func (c *OrchestratorController) ProcessPlannerInbox(
 			commandID = intent.CommandID
 			reservedTokens = intent.ReservedTokens
 		}
+		if intent, exists := latestQuestionTurnIntentForAuthorization(job, grant.ID); exists {
+			if observation, observed := latestJobQuestionTurnObservation(job, intent.ID); observed &&
+				observation.Status == domain.JobQuestionTurnFailed {
+				continue
+			}
+		}
 		outcome, err := c.questionTurn.Send(ctx, jobID, grant.ID, commandID, reservedTokens)
 		outcomes = append(outcomes, outcome)
 		if err != nil {
@@ -224,6 +230,9 @@ func (c *OrchestratorController) ProcessPlannerInbox(
 				return outcomes, ctx.Err()
 			}
 			processingErrors = append(processingErrors, fmt.Errorf("process Planner question %s: %w", question.ID, err))
+			if outcome.Observation.Status == domain.JobQuestionTurnUnknown {
+				break
+			}
 			continue
 		}
 	}

@@ -150,5 +150,19 @@ func (c *JobQuestionAuthorizationController) Authorize(
 		ReadOnlyBoundary:     readOnlyContext.Boundary,
 		Budget:               budget, Deadline: deadline.UTC().Round(0),
 	}
-	return c.store.AddJobQuestionAuthorization(ctx, job.ID, job.Revision, request)
+	receipt, authorization, err := c.store.AddJobQuestionAuthorization(ctx, job.ID, job.Revision, request)
+	if !errors.Is(err, store.ErrIdempotencyConflict) {
+		return receipt, authorization, err
+	}
+	replayedReceipt, replayedAuthorization, found, replayErr :=
+		c.store.GetJobQuestionAuthorizationCommand(ctx, jobID, commandID)
+	if replayErr != nil {
+		return store.CommandReceipt{}, domain.JobQuestionAuthorization{}, replayErr
+	}
+	if found && replayedAuthorization.QuestionMessageID == questionMessageID &&
+		replayedAuthorization.Budget == budget &&
+		replayedAuthorization.Deadline.Equal(deadline.UTC().Round(0)) {
+		return replayedReceipt, replayedAuthorization, nil
+	}
+	return store.CommandReceipt{}, domain.JobQuestionAuthorization{}, err
 }
