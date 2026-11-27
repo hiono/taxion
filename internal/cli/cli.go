@@ -45,11 +45,19 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer, version V
 		return login(ctx, stdout, stderr)
 	}
 	if args[0] == "dev" {
-		if len(args) < 3 || args[1] != "job" || args[2] != "create" {
-			fmt.Fprintln(stderr, "expected: taxion dev job create --request \"...\"")
-			return 2
+		if len(args) >= 3 && args[1] == "job" && args[2] == "create" {
+			return createLocalJob(ctx, args[3:], stdout, stderr)
 		}
-		return createLocalJob(ctx, args[3:], stdout, stderr)
+		if len(args) >= 3 && args[1] == "provider" {
+			switch args[2] {
+			case "login":
+				return loginACPProvider(ctx, args[3:], stdout, stderr)
+			case "run":
+				return runACPProvider(ctx, args[3:], stdout, stderr)
+			}
+		}
+		fmt.Fprintln(stderr, "commands: taxion dev job create, taxion dev provider login, taxion dev provider run")
+		return 2
 	}
 	if args[0] != "job" || len(args) < 2 {
 		fmt.Fprintln(stderr, "コマンドを確認してください: taxion auth login、taxion dev job create、taxion job <create|authorize-planning|start-planning|approve|amend|show|list>")
@@ -649,6 +657,8 @@ Usage:
   taxion job start-planning --authorization-id <grant-id> <job-id>
   taxion job approve --revision <n> --canonical-hash <sha256> --canonicalization-version <n> --reason <text> <job-id>
   taxion dev job create --request "Local untrusted DRAFT only"
+  taxion dev provider login
+  taxion dev provider run --prompt "..."
   taxion job show <job-id>
   taxion job list
   taxion version
