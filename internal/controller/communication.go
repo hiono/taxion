@@ -168,36 +168,12 @@ func (c *CommunicationController) ContextForMessage(
 		return result, errors.New("RoleExecution has no currently accepted Provider Session")
 	}
 	actor := domain.ActorRef{Kind: actorKind, ID: execution.ID}
-	included := make(map[string]struct{})
-	for _, candidate := range job.JobMessages {
-		if candidate.Sender == actor || candidate.Recipient == actor {
-			included[candidate.ID] = struct{}{}
-		}
-	}
-	if _, found := included[message.ID]; !found {
+	if message.Sender != actor && message.Recipient != actor {
 		return result, errors.New("message is not part of the recipient RoleExecution conversation")
 	}
-	changed := true
-	for changed {
-		changed = false
-		for _, candidate := range job.JobMessages {
-			if _, found := included[candidate.ID]; found && candidate.ReplyToMessageID != "" {
-				if _, exists := included[candidate.ReplyToMessageID]; !exists {
-					included[candidate.ReplyToMessageID] = struct{}{}
-					changed = true
-				}
-			}
-			if _, found := included[candidate.ReplyToMessageID]; found {
-				if _, exists := included[candidate.ID]; !exists {
-					included[candidate.ID] = struct{}{}
-					changed = true
-				}
-			}
-		}
-	}
-	conversation := make([]domain.JobMessage, 0, len(included))
+	conversation := make([]domain.JobMessage, 0, len(job.JobMessages))
 	for _, candidate := range job.JobMessages {
-		if _, found := included[candidate.ID]; found {
+		if candidate.Sender == actor || candidate.Recipient == actor {
 			conversation = append(conversation, candidate)
 		}
 	}
