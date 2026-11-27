@@ -481,11 +481,11 @@ func TestOrchestratorRoutesPlannerInboxAndReturnsAnswerToOriginalCoder(t *testin
 	if err != nil {
 		t.Fatalf("NewOrchestratorController: %v", err)
 	}
-	outcomes, err := orchestrator.ProcessPlannerInbox(
-		context.Background(), fixture.jobID, fixture.plannerID,
+	outcomes, err := orchestrator.ProcessPlannerQuestions(
+		context.Background(), fixture.jobID, fixture.plannerID, fixture.questionID,
 	)
 	if err != nil {
-		t.Fatalf("ProcessPlannerInbox: %v", err)
+		t.Fatalf("ProcessPlannerQuestions: %v", err)
 	}
 	if len(outcomes) != 1 || outcomes[0].Observation.Status != domain.JobQuestionTurnCompleted ||
 		fixture.runtime.sendCalls != 1 {
@@ -508,8 +508,8 @@ func TestOrchestratorRoutesPlannerInboxAndReturnsAnswerToOriginalCoder(t *testin
 		t.Fatalf("original Coder Inbox does not contain the correlated Planner answer: %#v", inbox)
 	}
 	// Reprocessing the same inbox is idempotent and must not create another Provider Turn or reply.
-	if _, err := orchestrator.ProcessPlannerInbox(context.Background(), fixture.jobID, fixture.plannerID); err != nil {
-		t.Fatalf("replay ProcessPlannerInbox: %v", err)
+	if _, err := orchestrator.ProcessPlannerQuestions(context.Background(), fixture.jobID, fixture.plannerID, fixture.questionID); err != nil {
+		t.Fatalf("replay ProcessPlannerQuestions: %v", err)
 	}
 	job, err := fixture.database.GetJob(context.Background(), fixture.jobID)
 	if err != nil {
@@ -549,7 +549,7 @@ func TestOrchestratorRestoresQuestionTurnAndReplyAfterSQLiteRestart(t *testing.T
 	if err != nil {
 		t.Fatalf("NewOrchestratorController: %v", err)
 	}
-	first, err := orchestrator.ProcessPlannerInbox(context.Background(), fixture.jobID, fixture.plannerID)
+	first, err := orchestrator.ProcessPlannerQuestions(context.Background(), fixture.jobID, fixture.plannerID, fixture.questionID)
 	if err != nil || len(first) != 1 || first[0].Observation.Status != domain.JobQuestionTurnCompleted ||
 		fixture.runtime.sendCalls != 1 {
 		t.Fatalf("initial Planner inbox processing failed: outcomes=%#v sends=%d err=%v",
@@ -594,7 +594,7 @@ func TestOrchestratorRestoresQuestionTurnAndReplyAfterSQLiteRestart(t *testing.T
 	if err != nil {
 		t.Fatalf("NewOrchestratorController after restart: %v", err)
 	}
-	replayed, err := orchestrator.ProcessPlannerInbox(context.Background(), fixture.jobID, fixture.plannerID)
+	replayed, err := orchestrator.ProcessPlannerQuestions(context.Background(), fixture.jobID, fixture.plannerID, fixture.questionID)
 	if err != nil || len(replayed) != 1 || replayed[0].Observation.Status != domain.JobQuestionTurnCompleted ||
 		replayed[0].Reply.Message.ReplyToMessageID != fixture.questionID || fixture.runtime.sendCalls != 1 {
 		t.Fatalf("SQLite restart replay changed the completed turn or resent Provider work: outcomes=%#v sends=%d err=%v",
@@ -686,9 +686,9 @@ func TestOrchestratorContinuesAfterFailedQuestionAndCollectsErrors(t *testing.T)
 		}
 		return nil
 	}
-	outcomes, err := orchestrator.ProcessPlannerInbox(context.Background(), fixture.jobID, fixture.plannerID)
+	outcomes, err := orchestrator.ProcessPlannerQuestions(context.Background(), fixture.jobID, fixture.plannerID, fixture.questionID, secondQuestion.ID)
 	if err == nil || !strings.Contains(err.Error(), fixture.questionID) {
-		t.Fatalf("ProcessPlannerInbox error = %v, want first question failure", err)
+		t.Fatalf("ProcessPlannerQuestions error = %v, want first question failure", err)
 	}
 	if len(outcomes) != 2 || outcomes[0].Observation.Status != domain.JobQuestionTurnFailed ||
 		outcomes[1].Observation.Status != domain.JobQuestionTurnCompleted || fixture.runtime.sendCalls != 2 {
@@ -712,7 +712,7 @@ func TestOrchestratorContinuesAfterFailedQuestionAndCollectsErrors(t *testing.T)
 		}
 	}
 	// Replay must retain the completed turn and its correlated reply without another Provider Send.
-	replayed, replayErr := orchestrator.ProcessPlannerInbox(context.Background(), fixture.jobID, fixture.plannerID)
+	replayed, replayErr := orchestrator.ProcessPlannerQuestions(context.Background(), fixture.jobID, fixture.plannerID, fixture.questionID, secondQuestion.ID)
 	if replayErr != nil || len(replayed) != 1 ||
 		replayed[0].Observation.Status != domain.JobQuestionTurnCompleted || fixture.runtime.sendCalls != 2 {
 		t.Fatalf("inbox replay did not skip the prior terminal failure or preserve the completed turn: outcomes=%#v sends=%d err=%v",
@@ -774,7 +774,7 @@ func TestOrchestratorReplaysCompletedTurnAfterReplyPersistenceFailure(t *testing
 	if err != nil {
 		t.Fatalf("NewOrchestratorController: %v", err)
 	}
-	first, err := orchestrator.ProcessPlannerInbox(context.Background(), fixture.jobID, fixture.plannerID)
+	first, err := orchestrator.ProcessPlannerQuestions(context.Background(), fixture.jobID, fixture.plannerID, fixture.questionID)
 	if err == nil || len(first) != 1 || first[0].Observation.Status != domain.JobQuestionTurnCompleted ||
 		fixture.runtime.sendCalls != 1 {
 		t.Fatalf("reply persistence failure did not retain completed turn: outcomes=%#v sends=%d err=%v",
@@ -788,7 +788,7 @@ func TestOrchestratorReplaysCompletedTurnAfterReplyPersistenceFailure(t *testing
 		t.Fatalf("failed reply persistence changed terminal turn or stored a partial reply: observations=%d messages=%d",
 			len(job.JobQuestionTurnObservations), len(job.JobMessages))
 	}
-	second, err := orchestrator.ProcessPlannerInbox(context.Background(), fixture.jobID, fixture.plannerID)
+	second, err := orchestrator.ProcessPlannerQuestions(context.Background(), fixture.jobID, fixture.plannerID, fixture.questionID)
 	if err != nil || len(second) != 1 || second[0].Observation.Status != domain.JobQuestionTurnCompleted ||
 		second[0].Reply.Message.ReplyToMessageID != fixture.questionID || fixture.runtime.sendCalls != 1 {
 		t.Fatalf("completed-turn replay did not persist the missing reply: outcomes=%#v sends=%d err=%v",
@@ -1075,9 +1075,9 @@ func TestOrchestratorContinuesAfterQuestionAuthorizationFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewOrchestratorController: %v", err)
 	}
-	outcomes, err := orchestrator.ProcessPlannerInbox(context.Background(), f.jobID, f.plannerID)
+	outcomes, err := orchestrator.ProcessPlannerQuestions(context.Background(), f.jobID, f.plannerID)
 	if err == nil || !strings.Contains(err.Error(), secondQuestion.ID) {
-		t.Fatalf("ProcessPlannerInbox error = %v, want second question authorization failure", err)
+		t.Fatalf("ProcessPlannerQuestions error = %v, want second question authorization failure", err)
 	}
 	if len(outcomes) != 2 || outcomes[0].Reply.Message.ReplyToMessageID != f.questionID ||
 		outcomes[1].Reply.Message.ReplyToMessageID != thirdQuestion.ID || f.runtime.sendCalls != 2 {
@@ -1135,9 +1135,9 @@ func TestOrchestratorStopsAfterPerTurnDeadlineWithUnknownSession(t *testing.T) {
 		}
 		return nil
 	}
-	outcomes, err := orchestrator.ProcessPlannerInbox(context.Background(), f.jobID, f.plannerID)
+	outcomes, err := orchestrator.ProcessPlannerQuestions(context.Background(), f.jobID, f.plannerID)
 	if err == nil || !strings.Contains(err.Error(), f.questionID) {
-		t.Fatalf("ProcessPlannerInbox error = %v, want first request deadline error", err)
+		t.Fatalf("ProcessPlannerQuestions error = %v, want first request deadline error", err)
 	}
 	if len(outcomes) != 1 || outcomes[0].Observation.Status != domain.JobQuestionTurnUnknown ||
 		f.runtime.sendCalls != 1 {

@@ -190,11 +190,20 @@ func TestCommunicationControllerPersistsCoderPlannerQuestionAndAnswer(t *testing
 		t.Fatalf("SendRoleMessage Coder QUESTION: %v", err)
 	}
 	question := route.Message
-	if len(route.QuestionTurns) != 1 || len(route.ResumedContexts) != 1 {
-		t.Fatalf("automatic Planner route did not return one turn and one resumed context: %#v", route)
+	if len(route.ResumedContexts) != 0 {
+		t.Fatalf("JobMessage delivery implicitly started a Planner turn: %#v", route.ResumedContexts)
 	}
-	answer := route.QuestionTurns[0].Reply
-	resumedCoder := route.ResumedContexts[0]
+	turns, err := orchestrator.ProcessPlannerQuestions(
+		context.Background(), jobID, plannerExecution.ID, question.Message.ID,
+	)
+	if err != nil || len(turns) != 1 {
+		t.Fatalf("explicit Planner question execution: turns=%#v err=%v", turns, err)
+	}
+	answer := turns[0].Reply
+	resumedCoder, err := communication.ContextForMessage(context.Background(), jobID, answer.Message.ID)
+	if err != nil {
+		t.Fatalf("restore Coder context after explicit Planner answer: %v", err)
+	}
 	if resumedCoder.RoleExecution.ID != coderExecution.ID ||
 		resumedCoder.ProviderSessionID != coderStart.ProviderSessionID ||
 		len(resumedCoder.Messages) != 2 ||
