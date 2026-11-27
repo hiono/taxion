@@ -801,6 +801,19 @@ func TestACPAdapterAcceptsFinalResponseBeforePeerEOF(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("ACP process did not reach EOF after final response")
 	}
+	deadline := time.Now().Add(time.Second)
+	for {
+		adapter.mu.Lock()
+		retired := adapter.detached[started.SessionID] == session
+		adapter.mu.Unlock()
+		if retired {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("dead ACP process was not retired from the live session indexes")
+		}
+		time.Sleep(time.Millisecond)
+	}
 	adapter.mu.Lock()
 	_, attached := adapter.byID[started.SessionID]
 	_, roleAttached := adapter.byRole[request.RoleExecutionID]
