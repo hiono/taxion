@@ -64,6 +64,7 @@ func (c *OrchestratorController) SendRoleMessage(
 		outcome.QuestionTurns, err = c.ProcessPlannerInbox(ctx, request.JobID, request.Recipient.ID)
 		contexts := make(map[domain.ActorRef]RoleExecutionContext)
 		order := make([]domain.ActorRef, 0, len(outcome.QuestionTurns)+1)
+		ordered := make(map[domain.ActorRef]bool)
 		var restoreErrors []error
 		for _, turn := range outcome.QuestionTurns {
 			reply := turn.Reply.Message
@@ -71,8 +72,9 @@ func (c *OrchestratorController) SendRoleMessage(
 				continue
 			}
 			recipient := reply.Recipient
-			if _, exists := contexts[recipient]; !exists {
+			if !ordered[recipient] {
 				order = append(order, recipient)
+				ordered[recipient] = true
 			}
 			resumed, contextErr := c.communication.ContextForMessage(ctx, request.JobID, reply.ID)
 			if contextErr != nil {
@@ -109,8 +111,9 @@ func (c *OrchestratorController) SendRoleMessage(
 					restoreErrors = append(restoreErrors, actorErr)
 				} else {
 					actor := domain.ActorRef{Kind: actorKind, ID: resumed.RoleExecution.ID}
-					if _, exists := contexts[actor]; !exists {
+					if !ordered[actor] {
 						order = append(order, actor)
+						ordered[actor] = true
 					}
 					// The fallback reads the latest Job; replace any older context for this Actor.
 					contexts[actor] = resumed
