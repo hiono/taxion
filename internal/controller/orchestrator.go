@@ -111,7 +111,7 @@ func (c *OrchestratorController) ProcessPlannerQuestions(
 				observation.Status == domain.JobQuestionTurnFailed {
 				continue
 			}
-			if sessionBlocked {
+			if sessionBlocked && !questionHasPlannerReply(job, question) {
 				if observation, observed := latestJobQuestionTurnObservation(job, intent.ID); !observed ||
 					observation.Status != domain.JobQuestionTurnCompleted {
 					continue
