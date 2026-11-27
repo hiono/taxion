@@ -1696,3 +1696,33 @@ func TestACPAdapterBoundsResultRetentionAndPreservesOperationTombstones(t *testi
 		t.Fatal("expiry removed the operation tombstone")
 	}
 }
+
+func TestACPAdapterDeclaresOnlySyntheticReadOnlyEnforcement(t *testing.T) {
+	identity := Identity{
+		ProviderID: "copilot", AccountID: "test-account", SDKVersion: "acp-v1",
+		ConfigurationSHA256: strings.Repeat("a", 64),
+	}
+	adapter := &ACPAdapter{config: ACPConfig{Identity: identity}}
+	capabilities, err := adapter.Capabilities(context.Background())
+	if err != nil {
+		t.Fatalf("Capabilities: %v", err)
+	}
+	if err := capabilities.Validate(identity); err != nil {
+		t.Fatalf("Validate capabilities: %v", err)
+	}
+	if !capabilities.HasEvidenceAtLeast(CapabilityReadOnlyContextEnforcement, EvidenceSynthetic) {
+		t.Fatal("default-deny ACP permission handling was not declared at synthetic evidence level")
+	}
+	if capabilities.HasEvidenceAtLeast(CapabilityReadOnlyContextEnforcement, EvidenceLive) {
+		t.Fatal("fake-peer/default-deny evidence was incorrectly promoted to live evidence")
+	}
+	for _, capability := range []Capability{
+		CapabilityStartIdempotency, CapabilityStartLookup, CapabilitySendIdempotency,
+		CapabilitySendLookup, CapabilitySessionReattach, CapabilityEventReplay,
+		CapabilityStopProof, CapabilityFinalOutput, CapabilityUsageIdentity, CapabilityUsageCompleteness,
+	} {
+		if capabilities.Has(capability) {
+			t.Fatalf("ACP adapter declared unverified capability %q", capability)
+		}
+	}
+}
