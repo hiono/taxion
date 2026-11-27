@@ -733,8 +733,10 @@ func TestProviderControllerReconcilesUnknownTurnWithLookupAndCompleteUsage(t *te
 	}
 }
 
-func TestProviderControllerRejectsSendWithoutSafeCapability(t *testing.T) {
-	runtime := &fakePlanningProviderRuntime{}
+func TestProviderControllerAllowsOneShotSendButNeverRetriesUnknownWithoutProof(t *testing.T) {
+	runtime := &fakePlanningProviderRuntime{
+		sendErr: &provider.OperationError{Class: provider.FailureAmbiguous, Code: provider.OperationCodeTimeout},
+	}
 	controller, database, principal, jobID, grantID, documents := newProviderControllerFixture(t, runtime)
 	_, execution, _, _, err := controller.StartPlanning(
 		context.Background(), jobID, grantID, "cmd_22222222222222222222222222222222", documents, principal,
@@ -742,15 +744,27 @@ func TestProviderControllerRejectsSendWithoutSafeCapability(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartPlanning: %v", err)
 	}
+	commandID := "cmd_23232323232323232323232323232323"
+	_, turn, observation, _, err := controller.SendPlanning(
+		context.Background(), jobID, execution.ID, "session_1",
+		commandID, "inspect the accepted repository snapshot", 100, principal,
+	)
+	if err == nil || observation.Status != domain.PlanningTurnUnknown || runtime.sendCalls != 1 {
+		t.Fatalf("initial Send was not attempted exactly once and recorded UNKNOWN: turn=%#v observation=%#v calls=%d err=%v",
+			turn, observation, runtime.sendCalls, err)
+	}
+	runtime.capabilities = provider.Capabilities{Identity: runtime.identity}
 	if _, _, _, _, err := controller.SendPlanning(
 		context.Background(), jobID, execution.ID, "session_1",
-		"cmd_23232323232323232323232323232323", "inspect the accepted repository snapshot", 100, principal,
+		commandID, "inspect the accepted repository snapshot", 100, principal,
 	); !errors.Is(err, provider.ErrUnsupportedCapability) {
-		t.Fatalf("SendPlanning error = %v, want ErrUnsupportedCapability", err)
+		t.Fatalf("UNKNOWN retry error = %v, want ErrUnsupportedCapability", err)
 	}
 	job, err := database.GetJob(context.Background(), jobID)
-	if err != nil || len(job.PlanningTurnIntents) != 0 || runtime.sendCalls != 0 {
-		t.Fatalf("unsupported Send created intent or called Runtime: %#v calls=%d err=%v", job.PlanningTurnIntents, runtime.sendCalls, err)
+	if err != nil || len(job.PlanningTurnIntents) != 1 || len(job.PlanningTurnObservations) != 1 ||
+		runtime.sendCalls != 1 || runtime.lookupCalls != 0 {
+		t.Fatalf("unsafe retry or missing lifecycle facts: intents=%d observations=%d sends=%d lookups=%d err=%v",
+			len(job.PlanningTurnIntents), len(job.PlanningTurnObservations), runtime.sendCalls, runtime.lookupCalls, err)
 	}
 }
 
@@ -1290,15 +1304,6 @@ func TestProviderControllerDispatchesTaskCoderStartWithDurableIntentAndReconcile
 			EvidenceSHA256: strings.Repeat("f", 64),
 		},
 	}
-	runtime.capabilities = provider.Capabilities{
-		Identity: runtime.identity, StartLookup: true, StartIdempotency: true,
-		Evidence: []provider.CapabilityEvidence{
-			{Capability: provider.CapabilityStartLookup, Identity: runtime.identity, TestID: "task-start-test",
-				EvidenceSHA256: strings.Repeat("a", 64), EvidenceLevel: provider.EvidenceSynthetic, VerifiedAt: now},
-			{Capability: provider.CapabilityStartIdempotency, Identity: runtime.identity, TestID: "task-start-test",
-				EvidenceSHA256: strings.Repeat("b", 64), EvidenceLevel: provider.EvidenceSynthetic, VerifiedAt: now},
-		},
-	}
 	controller, err := NewProviderControllerWithExecution(database, runtime, executionController)
 	if err != nil {
 		t.Fatalf("NewProviderControllerWithExecution: %v", err)
@@ -1323,7 +1328,7 @@ func TestProviderControllerDispatchesTaskCoderStartWithDurableIntentAndReconcile
 		t.Fatalf("DispatchTaskExecution: %v", err)
 	}
 	if observation.Status != domain.ProviderStartAccepted || result.OperationID != intent.ID ||
-		result.SessionID == "" || runtime.lookupCalls != 1 || runtime.startCalls != 1 {
+		result.SessionID == "" || runtime.lookupCalls != 0 || runtime.startCalls != 1 {
 		t.Fatalf("Task Provider Start was not accepted exactly once: observation=%#v result=%#v lookups=%d starts=%d",
 			observation, result, runtime.lookupCalls, runtime.startCalls)
 	}
