@@ -36,6 +36,7 @@ type ACPConfig struct {
 	Command              string
 	Args                 []string
 	WorkingDirectory     string
+	HomeDirectory        string
 	Identity             Identity
 	PermissionAuthorizer ACPToolPermissionAuthorizer
 	// Environment lists non-secret host variables explicitly passed to the CLI.
@@ -180,6 +181,23 @@ func NewACPAdapter(config ACPConfig) (*ACPAdapter, error) {
 		seenEnvironment[name] = struct{}{}
 	}
 	config.WorkingDirectory = absolute
+	if config.HomeDirectory != "" {
+		home, err := filepath.Abs(config.HomeDirectory)
+		if err != nil {
+			return nil, errors.New("ACP home directory is invalid")
+		}
+		if err := os.MkdirAll(home, 0700); err != nil {
+			return nil, errors.New("ACP home directory is unavailable")
+		}
+		info, err := os.Lstat(home)
+		if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+			return nil, errors.New("ACP home directory must be a real directory")
+		}
+		if err := os.Chmod(home, 0700); err != nil {
+			return nil, errors.New("ACP home directory permissions could not be restricted")
+		}
+		config.HomeDirectory = home
+	}
 	return &ACPAdapter{
 		config:                config,
 		byRole:                make(map[string]*acpSession),
@@ -1038,15 +1056,32 @@ func (a *ACPAdapter) Close() error {
 }
 
 func (a *ACPAdapter) startProcess() (*acpProcess, error) {
-	homeDir, err := os.MkdirTemp("", "taxion-acp-home-")
-	if err != nil {
-		return nil, errors.New("prepare isolated ACP home failed")
+	homeDir := a.config.HomeDirectory
+	cleanupHome := func() {}
+	if homeDir == "" {
+		var err error
+		homeDir, err = os.MkdirTemp("", "taxion-acp-home-")
+		if err != nil {
+			return nil, errors.New("prepare isolated ACP home failed")
+		}
+		cleanupHome = func() { _ = os.RemoveAll(homeDir) }
+	} else if err := os.MkdirAll(homeDir, 0700); err != nil {
+		return nil, errors.New("prepare persistent ACP home failed")
 	}
-	cleanupHome := func() { _ = os.RemoveAll(homeDir) }
+	for _, directory := range []string{".config", ".cache", ".local/share"} {
 	for _, directory := range []string{".config", ".cache", ".local/share"} {
 		if err := os.MkdirAll(filepath.Join(homeDir, directory), 0700); err != nil {
 			cleanupHome()
-			return nil, errors.New("prepare isolated ACP home failed")
+			return nil, errors.New("prepare ACP home failed")
+		}
+	}
+	if a.config.HomeDirectory != "" {
+		if err := os.Chmod(homeDir, 0700); err != nil {
+			return nil, errors.New("restrict persistent ACP home permissions failed")
+		}
+		info, err := os.Lstat(homeDir)
+		if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+			return nil, errors.New("persistent ACP home must be a real directory")
 		}
 	}
 	command := exec.Command(a.config.Command, a.config.Args...)
