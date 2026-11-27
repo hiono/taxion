@@ -503,7 +503,7 @@ func TestJobQuestionTurnAdmissionIncludesUnresolvedPlanningTurnsOnSameSession(t 
 		t.Fatalf("unresolved ordinary PlanningTurn was not included in the same-session guard: %v", err)
 	}
 	job.PlanningTurnObservations[0].Status = PlanningTurnCompleted
-	if turns, tokens, err := jobQuestionTurnBudgetUsedBefore(job, grant.ID, grant, now, 3); err != nil ||
+	if turns, tokens, err := jobQuestionTurnBudgetUsedBefore(job, grant.ID, 3, now); err != nil ||
 		turns != 0 || tokens != 0 {
 		t.Fatalf("completed ordinary PlanningTurn incorrectly blocked a question: turns=%d tokens=%d err=%v", turns, tokens, err)
 	}
@@ -533,9 +533,9 @@ func TestJobQuestionTurnAdmissionTreatsPersistedReplyAsTerminalWithoutProviderOb
 		CreatedRevision: 1, CreatedAt: now.Add(-2 * time.Minute),
 	}
 	job := Job{
-		JobMessages:              []JobMessage{question, reply},
+		JobMessages:               []JobMessage{question, reply},
 		JobQuestionAuthorizations: []JobQuestionAuthorization{grant},
-		JobQuestionTurnIntents:   []JobQuestionTurnIntent{intent},
+		JobQuestionTurnIntents:    []JobQuestionTurnIntent{intent},
 	}
 	turns, tokens, err := jobQuestionTurnBudgetUsedBefore(job, grant.ID, grant, now, 3)
 	if err != nil || turns != 1 || tokens != intent.ReservedTokens {
