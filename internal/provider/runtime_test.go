@@ -477,6 +477,24 @@ func TestRuntimeSendRejectsMissingReadOnlyEnforcementBeforeCredentialAcquisition
 	}
 }
 
+func TestRuntimeSendRequiresIdempotencyForRecoveryDispatch(t *testing.T) {
+	adapter := newTestAdapter(CapabilityReadOnlyContextEnforcement, CapabilitySendLookup)
+	broker := &testBroker{secret: []byte("runtime-test-secret")}
+	runtime, err := newTestRuntime(adapter, broker)
+	if err != nil {
+		t.Fatalf("newTestRuntime: %v", err)
+	}
+	request := validTurnRequest()
+	request.RequireSendIdempotency = true
+	if _, err := runtime.Send(context.Background(), request); !errors.Is(err, ErrUnsupportedCapability) {
+		t.Fatalf("recovery Send without idempotency evidence = %v, want ErrUnsupportedCapability", err)
+	}
+	if adapter.sendCalls != 0 || broker.acquires != 0 {
+		t.Fatalf("unsupported recovery Send reached Provider: sends=%d credential acquisitions=%d",
+			adapter.sendCalls, broker.acquires)
+	}
+}
+
 func TestRuntimeSendAllowsBoundedFirstDispatchWithReadOnlyEvidenceOnly(t *testing.T) {
 	adapter := newTestAdapter(CapabilityReadOnlyContextEnforcement)
 	broker := &testBroker{secret: []byte("runtime-test-secret")}

@@ -175,7 +175,7 @@ func (c *JobQuestionTurnController) Send(
 	if err := grant.ValidateFor(job, question.ID, grant.PlannerRoleExecutionID, grant.ProviderSessionID, now); err != nil {
 		return outcome, err
 	}
-	return c.dispatch(ctx, outcome, grant, question, intent, capabilities)
+	return c.dispatch(ctx, outcome, grant, question, intent, capabilities, false)
 }
 
 func (c *JobQuestionTurnController) reconcileUnknown(
@@ -319,7 +319,7 @@ func (c *JobQuestionTurnController) reconcileUnknown(
 	if !currentCapabilities.HasEvidenceAtLeast(provider.CapabilitySendIdempotency, c.minimumEvidence) {
 		return outcome, provider.ErrUnsupportedCapability
 	}
-	return c.dispatch(ctx, outcome, currentGrant, currentQuestion, intent, currentCapabilities)
+	return c.dispatch(ctx, outcome, currentGrant, currentQuestion, intent, currentCapabilities, true)
 }
 
 func (c *JobQuestionTurnController) dispatch(
@@ -329,6 +329,7 @@ func (c *JobQuestionTurnController) dispatch(
 	question domain.JobMessage,
 	intent domain.JobQuestionTurnIntent,
 	capabilities provider.Capabilities,
+	requireSendIdempotency bool,
 ) (JobQuestionTurnOutcome, error) {
 	if !capabilities.HasEvidenceAtLeast(provider.CapabilityReadOnlyContextEnforcement, c.minimumEvidence) {
 		return outcome, provider.ErrUnsupportedCapability
@@ -345,7 +346,8 @@ func (c *JobQuestionTurnController) dispatch(
 			Reference: grant.ReadOnlyBoundary.Reference,
 			SHA256:    grant.ReadOnlyBoundary.SHA256,
 		},
-		MaxTokens: intent.ReservedTokens,
+		RequireSendIdempotency: requireSendIdempotency,
+		MaxTokens:              intent.ReservedTokens,
 		Deadline:  intent.Deadline,
 	}
 	if err := request.Validate(); err != nil {

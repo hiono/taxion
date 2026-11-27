@@ -122,6 +122,10 @@ func (r *Runtime) Send(ctx context.Context, request TurnRequest) (TurnResult, er
 		!capabilities.HasEvidenceAtLeast(CapabilityReadOnlyContextEnforcement, r.minimumEvidence) {
 		return TurnResult{}, ErrUnsupportedCapability
 	}
+	if request.RequireSendIdempotency &&
+		!capabilities.HasEvidenceAtLeast(CapabilitySendIdempotency, r.minimumEvidence) {
+		return TurnResult{}, ErrUnsupportedCapability
+	}
 	// A bounded first dispatch needs read-only enforcement. The controller owns
 	// recovery decisions because only it can compare the request with persisted
 	// operation state; it must require Lookup or idempotency evidence before

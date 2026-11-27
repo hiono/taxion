@@ -385,9 +385,10 @@ type TurnRequest struct {
 	SessionID        string
 	PromptSHA256     string
 	Prompt           string
-	ReadOnlyBoundary ReadOnlyContextBoundary
-	MaxTokens        uint64
-	Deadline         time.Time
+	ReadOnlyBoundary       ReadOnlyContextBoundary
+	RequireSendIdempotency bool
+	MaxTokens              uint64
+	Deadline               time.Time
 }
 
 func (r TurnRequest) Validate() error {
