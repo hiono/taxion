@@ -287,6 +287,11 @@ func TestRuntimeRejectsExpiredStartDeadlineBeforeCredentialAcquisition(t *testin
 	request.Deadline = time.Now().UTC().Add(-time.Second)
 	if _, err := runtime.Start(context.Background(), request); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("expired Start deadline error = %v", err)
+	} else {
+		var operationError *OperationError
+		if !errors.As(err, &operationError) || operationError.Class != FailureNotDispatched {
+			t.Fatalf("expired Start deadline classification = %#v, want FailureNotDispatched", operationError)
+		}
 	}
 	if broker.acquires != 0 || adapter.startCalls != 0 {
 		t.Fatalf("expired request acquired credential or called Adapter: acquires=%d starts=%d", broker.acquires, adapter.startCalls)
@@ -324,9 +329,36 @@ func TestRuntimeRejectsCanceledContextBeforeCredentialAcquisition(t *testing.T) 
 	cancel()
 	if _, err := runtime.Start(ctx, validStartRequest()); !errors.Is(err, context.Canceled) {
 		t.Fatalf("canceled Start context error = %v", err)
+	} else {
+		var operationError *OperationError
+		if !errors.As(err, &operationError) || operationError.Class != FailureNotDispatched {
+			t.Fatalf("canceled Start classification = %#v, want FailureNotDispatched", operationError)
+		}
 	}
 	if broker.acquires != 0 || adapter.startCalls != 0 {
 		t.Fatalf("canceled request acquired credential or called Adapter: acquires=%d starts=%d", broker.acquires, adapter.startCalls)
+	}
+}
+
+func TestRuntimeSendCanceledContextIsNotDispatchedBeforeCredentialAcquisition(t *testing.T) {
+	adapter := newTestAdapter(CapabilitySendIdempotency)
+	broker := &testBroker{secret: []byte("runtime-test-secret")}
+	runtime, err := newTestRuntime(adapter, broker)
+	if err != nil {
+		t.Fatalf("newTestRuntime: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := runtime.Send(ctx, validTurnRequest()); !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled Send context error = %v", err)
+	} else {
+		var operationError *OperationError
+		if !errors.As(err, &operationError) || operationError.Class != FailureNotDispatched {
+			t.Fatalf("canceled Send classification = %#v, want FailureNotDispatched", operationError)
+		}
+	}
+	if broker.acquires != 0 || adapter.sendCalls != 0 {
+		t.Fatalf("canceled Send acquired credential or called Adapter: acquires=%d sends=%d", broker.acquires, adapter.sendCalls)
 	}
 }
 
