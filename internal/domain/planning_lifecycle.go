@@ -12,14 +12,14 @@ const (
 	PlanningTurnNotDispatched = "NOT_DISPATCHED"
 	PlanningTurnCompleted     = "COMPLETED"
 	PlanningTurnFailed        = "FAILED"
-	PlanningEffectAllow    = "ALLOW"
-	PlanningEffectDeny     = "DENY"
-	PlanningBoundaryTurn   = "turn"
-	PlanningBoundaryEffect = "effect"
-	PlanningBoundaryResume = "resume"
-	PlanningResumeUnknown  = "UNKNOWN"
-	PlanningResumeAttached = "ATTACHED"
-	PlanningResumeFailed   = "FAILED"
+	PlanningEffectAllow       = "ALLOW"
+	PlanningEffectDeny        = "DENY"
+	PlanningBoundaryTurn      = "turn"
+	PlanningBoundaryEffect    = "effect"
+	PlanningBoundaryResume    = "resume"
+	PlanningResumeUnknown     = "UNKNOWN"
+	PlanningResumeAttached    = "ATTACHED"
+	PlanningResumeFailed      = "FAILED"
 )
 
 type PlanningBoundaryError struct {
