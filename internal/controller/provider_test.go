@@ -1427,7 +1427,7 @@ func TestProviderControllerReconcilesTaskCoderStartUnknownBySameOperationID(t *t
 	executionController.now = func() time.Time { return request.ExpiresAt.Add(time.Second) }
 	accepted, result, err := controller.DispatchTaskExecution(ctx, jobID, execution.ID, permission.ID, request)
 	if err != nil || accepted.Status != domain.ProviderStartAccepted || !accepted.ReconcilesUnknown ||
-		result.OperationID != intent.ID || runtime.startCalls != 1 || runtime.lookupCalls != 1 {
+		result.OperationID != intent.ID || runtime.startCalls != 1 || runtime.lookupCalls != 2 {
 		t.Fatalf("UNKNOWN Task Start was not reconciled by same OperationID Lookup: %#v %#v starts=%d lookups=%d err=%v",
 			accepted, result, runtime.startCalls, runtime.lookupCalls, err)
 	}
