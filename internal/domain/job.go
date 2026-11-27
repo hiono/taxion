@@ -864,6 +864,7 @@ func (j Job) Validate() error {
 	}
 	seenWorktrees := make(map[string]struct{}, len(j.WorktreeAssignments))
 	seenWorktreePaths := make(map[string]struct{}, len(j.WorktreeAssignments))
+	worktreesByID := make(map[string]WorktreeAssignment, len(j.WorktreeAssignments))
 	for _, assignment := range j.WorktreeAssignments {
 		if err := assignment.Validate(j); err != nil {
 			return fmt.Errorf("%w: invalid WorktreeAssignment: %v", ErrInvalidJob, err)
@@ -876,6 +877,17 @@ func (j Job) Validate() error {
 		}
 		seenWorktrees[assignment.ID] = struct{}{}
 		seenWorktreePaths[assignment.WorktreePath] = struct{}{}
+		worktreesByID[assignment.ID] = assignment
+	}
+	for _, execution := range j.RoleExecutions {
+		if execution.WorktreeAssignmentID == "" && execution.WorktreePath == "" {
+			continue
+		}
+		assignment, found := worktreesByID[execution.WorktreeAssignmentID]
+		if !found || assignment.OwnerRoleExecutionID != execution.ID ||
+			assignment.TaskID != execution.TaskID || assignment.WorktreePath != execution.WorktreePath {
+			return fmt.Errorf("%w: RoleExecution Worktree binding has no matching persisted assignment", ErrInvalidJob)
+		}
 	}
 	startIntentsByID := make(map[string]ProviderStartIntent, len(j.ProviderStartIntents))
 	for _, intent := range j.ProviderStartIntents {
