@@ -327,7 +327,7 @@ func (a *ACPAdapter) Start(ctx context.Context, request StartRequest, _ Credenti
 		turns:            make(map[string]TurnResult),
 	}
 	if request.TaskID != "" && request.ExecutionPermissionID != "" && a.config.PermissionAuthorizer != nil {
-		process.setPermissionHandler(func(_ context.Context, raw json.RawMessage) (bool, func()) {
+		process.setPermissionHandler(func(ctx context.Context, raw json.RawMessage) (bool, func()) {
 			var permissionRequest struct {
 				SessionID string          `json:"sessionId"`
 				ToolCall  json.RawMessage `json:"toolCall"`
