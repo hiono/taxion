@@ -171,6 +171,11 @@ func TestACPExecutionPermissionAuthorizerRevalidatesExactTaskAuthority(t *testin
 	if err != nil {
 		t.Fatalf("GetJob after Worktree binding: %v", err)
 	}
+	withoutPersistedAssignment := persistedJob
+	withoutPersistedAssignment.WorktreeAssignments = nil
+	if err := withoutPersistedAssignment.Validate(); err == nil {
+		t.Fatal("Job.Validate accepted a RoleExecution binding without its persisted WorktreeAssignment")
+	}
 	for _, field := range []string{"repository", "worktree"} {
 		candidate := assignment
 		if field == "repository" {
