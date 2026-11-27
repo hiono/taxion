@@ -273,7 +273,8 @@ func persistPlanningFact[T any](ctx context.Context, s *Store, jobID string, exp
 		return CommandReceipt{}, zero, fmt.Errorf("encode Job with planning lifecycle fact: %w", err)
 	}
 	aggregateHash := digest(payload)
-	receipt = CommandReceipt{CommandID: commandID, JobID: jobID, Revision: job.Revision, PayloadSHA256: requestHash, CreatedAt: now, Created: true}
+	receipt = CommandReceipt{CommandID: commandID, JobID: jobID, Revision: job.Revision, PayloadSHA256: requestHash, CreatedAt: now,
+		Created: commandType == addJobQuestionTurnIntentCommandType}
 	encodedReceipt, err := json.Marshal(receipt)
 	if err != nil {
 		return CommandReceipt{}, zero, fmt.Errorf("encode planning lifecycle receipt: %w", err)
