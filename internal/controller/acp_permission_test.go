@@ -128,7 +128,7 @@ func TestACPExecutionPermissionAuthorizerRevalidatesExactTaskAuthority(t *testin
 		BaselineCommit: strings.Repeat("a", 40), OwnerRoleExecutionID: execution.ID,
 	}
 	startAttempt, err := domain.NewProviderStartObservation(
-		unboundJob, intent.ID, "", "cmd_c1111111111111111111111111111111",
+		unboundJob, intent.ID, "", domain.ProviderStartObservationCommandID(intent.ID, domain.ProviderStartUnknown, "", "", "", false),
 		domain.ProviderStartUnknown, "", "", "", false, now,
 	)
 	if err != nil {
