@@ -416,6 +416,37 @@ func TestJobQuestionAuthorizationReservesBudgetAcrossQuestions(t *testing.T) {
 	if err := job.Validate(); err != nil {
 		t.Fatalf("Job.Validate with fully reserved question budgets: %v", err)
 	}
+	extraPermissionRequest := permissionRequest
+	extraPermissionRequest.CommandID = "cmd_86868686868686868686868686868686"
+	extraPermissionRequest.ReservedTurns = 1
+	extraPermissionRequest.ReservedTokens = 1
+	extraPermissionSHA, err := ExecutionPermissionRequestSHA256(extraPermissionRequest)
+	if err != nil {
+		t.Fatalf("ExecutionPermissionRequestSHA256 for extra permission: %v", err)
+	}
+	if _, err := NewExecutionPermission(
+		job, extraPermissionRequest, extraPermissionSHA,
+		executionPermissionTestAssessment(extraPermissionRequest, extraPermissionSHA, now),
+		now.Add(6*time.Minute),
+	); err == nil || !strings.Contains(err.Error(), "budget") {
+		t.Fatalf("ExecutionPermission admission ignored JobQuestionAuthorization reservations: %v", err)
+	}
+
+	thirdQuestion := newQuestion(
+		"cmd_87878787878787878787878787878787",
+		"Clarify the third approved constraint.",
+		now.Add(6*time.Minute),
+	)
+	thirdRequest := firstRequest
+	thirdRequest.CommandID = "cmd_88888888888888888888888888888888"
+	thirdRequest.QuestionMessageID = thirdQuestion.ID
+	thirdRequest.ReadOnlyBoundary.Reference = "question_budget_snapshot_3"
+	thirdRequest.ReadOnlyBoundary.SHA256 = strings.Repeat("f", 64)
+	if _, err := NewJobQuestionAuthorization(job, thirdRequest, now.Add(4*time.Minute)); err == nil ||
+		!strings.Contains(err.Error(), "timestamp precedes") {
+		t.Fatalf("out-of-order JobQuestionAuthorization timestamp = %v, want monotonicity rejection", err)
+	}
+
 	job.JobQuestionAuthorizations[len(job.JobQuestionAuthorizations)-1].Budget.MaxTokens++
 	if err := job.Validate(); err == nil {
 		t.Fatal("Job.Validate accepted aggregate question grants beyond the approved Job budget")
