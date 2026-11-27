@@ -1069,7 +1069,6 @@ func TestOrchestratorContinuesAfterPerTurnDeadlineWhileCallerContextIsActive(t *
 	}
 }
 
-
 func TestJobQuestionTurnReturnsExistingPlannerReplyBeforeExpiredGrantRecovery(t *testing.T) {
 	f := newJobQuestionTurnFixture(t)
 	const commandID = "cmd_b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4"
@@ -1083,9 +1082,10 @@ func TestJobQuestionTurnReturnsExistingPlannerReplyBeforeExpiredGrantRecovery(t 
 	}
 	_, err = f.database.AddJobMessage(context.Background(), f.jobID, job.Revision,
 		"cmd_b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5", domain.JobMessageRequest{
-			Sender: domain.ActorRef{Kind: domain.ActorPlanner, ID: f.plannerID},
-			Recipient: domain.ActorRef{Kind: domain.ActorCoder, ID: f.coderID},
-			ReplyToMessageID: f.questionID, Body: "ordinary Planner reply",
+			Sender:           domain.ActorRef{Kind: domain.ActorPlanner, ID: f.plannerID},
+			Recipient:        domain.ActorRef{Kind: domain.ActorCoder, ID: f.coderID},
+			ReplyToMessageID: f.questionID,
+			Body:             "ordinary Planner reply",
 		})
 	if err != nil {
 		t.Fatalf("AddJobMessage: %v", err)
@@ -1119,9 +1119,10 @@ func TestJobQuestionTurnDoesNotDuplicateAnOrdinaryPlannerReply(t *testing.T) {
 	_, question := findJobMessage(job, f.questionID)
 	_, err = f.database.AddJobMessage(context.Background(), f.jobID, job.Revision,
 		"cmd_b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7", domain.JobMessageRequest{
-			Sender: domain.ActorRef{Kind: domain.ActorPlanner, ID: f.plannerID},
-			Recipient: domain.ActorRef{Kind: domain.ActorCoder, ID: f.coderID},
-			ReplyToMessageID: f.questionID, Body: "ordinary Planner reply",
+			Sender:           domain.ActorRef{Kind: domain.ActorPlanner, ID: f.plannerID},
+			Recipient:        domain.ActorRef{Kind: domain.ActorCoder, ID: f.coderID},
+			ReplyToMessageID: f.questionID,
+			Body:             "ordinary Planner reply",
 		})
 	if err != nil {
 		t.Fatalf("AddJobMessage: %v", err)
