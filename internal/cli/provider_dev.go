@@ -58,7 +58,7 @@ func runACPProvider(ctx context.Context, args []string, stdout, stderr io.Writer
 		return 2
 	}
 	if flags.NArg() != 0 || strings.TrimSpace(*prompt) == "" || *timeout <= 0 {
-		fmt.Fprintln(stderr, "usage: taxion dev provider run --prompt \"... \" [--timeout 10m]")
+		fmt.Fprintln(stderr, "usage: taxion dev provider run --prompt \"...\" [--timeout 10m]")
 		return 2
 	}
 	commandPath, err := exec.LookPath(*command)
