@@ -492,6 +492,26 @@ func TestRuntimeSendPreservesUnknownAndRejectsCredentialBearingOutput(t *testing
 	}
 }
 
+func TestRuntimePreservesReportedUsageWhenTurnExceedsBudget(t *testing.T) {
+	adapter := newTestAdapter(CapabilitySendIdempotency)
+	adapter.sendResult = TurnResult{
+		Status: "FAILED", TokensUsed: 25, ReceiptID: "receipt_2",
+		EvidenceSHA256: strings.Repeat("b", 64),
+	}
+	broker := &testBroker{secret: []byte("runtime-test-secret")}
+	runtime, err := newTestRuntime(adapter, broker)
+	if err != nil {
+		t.Fatalf("NewRuntime: %v", err)
+	}
+	result, err := runtime.Send(context.Background(), validTurnRequest())
+	if err != nil {
+		t.Fatalf("Send over-budget FAILED result: %v", err)
+	}
+	if result.Status != "FAILED" || result.TokensUsed != 25 || result.Output != "" {
+		t.Fatalf("over-budget usage was not preserved safely: %#v", result)
+	}
+}
+
 func TestRuntimeRejectsCredentialInFinalResultAsUnknown(t *testing.T) {
 	adapter := newTestAdapter(CapabilityFinalOutput)
 	adapter.resultContent = "final result included runtime-test-secret"
