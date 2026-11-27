@@ -62,14 +62,20 @@ func (c *OrchestratorController) SendRoleMessage(
 	switch request.Recipient.Kind {
 	case domain.ActorPlanner:
 		outcome.QuestionTurns, err = c.ProcessPlannerInbox(ctx, request.JobID, request.Recipient.ID)
+		restored := make(map[domain.ActorRef]struct{})
 		for _, turn := range outcome.QuestionTurns {
 			if turn.Reply.Message.ID == "" {
+				continue
+			}
+			recipient := turn.Reply.Message.Recipient
+			if _, exists := restored[recipient]; exists {
 				continue
 			}
 			resumed, contextErr := c.communication.ContextForMessage(ctx, request.JobID, turn.Reply.Message.ID)
 			if contextErr != nil {
 				return outcome, fmt.Errorf("restore original Role context after Planner reply: %w", contextErr)
 			}
+			restored[recipient] = struct{}{}
 			outcome.ResumedContexts = append(outcome.ResumedContexts, resumed)
 		}
 		replyContextRestored := false
@@ -92,7 +98,14 @@ func (c *OrchestratorController) SendRoleMessage(
 				return outcome, contextErr
 			}
 			if found {
-				outcome.ResumedContexts = append(outcome.ResumedContexts, resumed)
+				actorKind, actorErr := actorKindForRole(resumed.RoleExecution.Role)
+				if actorErr != nil {
+					return outcome, actorErr
+				}
+				actor := domain.ActorRef{Kind: actorKind, ID: resumed.RoleExecution.ID}
+				if _, exists := restored[actor]; !exists {
+					outcome.ResumedContexts = append(outcome.ResumedContexts, resumed)
+				}
 			}
 		}
 		return outcome, err
