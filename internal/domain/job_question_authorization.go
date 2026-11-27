@@ -54,6 +54,7 @@ func NewJobQuestionAuthorization(job Job, request JobQuestionAuthorizationReques
 	if err := job.Validate(); err != nil {
 		return JobQuestionAuthorization{}, fmt.Errorf("validate Job before JobQuestionAuthorization: %w", err)
 	}
+	now = now.UTC().Round(0)
 	if job.State != JobActive || len(job.JobContractRevisions) == 0 {
 		return JobQuestionAuthorization{}, errors.New("JobQuestionAuthorization requires an ACTIVE Job with an approved JobContract")
 	}
@@ -135,11 +136,14 @@ func NewJobQuestionAuthorization(job Job, request JobQuestionAuthorizationReques
 			return JobQuestionAuthorization{}, errors.New("QUESTION already has a JobQuestionAuthorization")
 		}
 	}
+	if count := len(job.JobQuestionAuthorizations); count > 0 &&
+		now.Before(job.JobQuestionAuthorizations[count-1].CreatedAt) {
+		return JobQuestionAuthorization{}, errors.New("JobQuestionAuthorization timestamp precedes the previous grant")
+	}
 	if job.Revision >= uint64(^uint64(0)>>1) {
 		return JobQuestionAuthorization{}, errors.New("Job revision exhausted")
 	}
 
-	now = now.UTC().Round(0)
 	authorization := JobQuestionAuthorization{
 		ID: JobQuestionAuthorizationID(request.CommandID), CommandID: request.CommandID,
 		JobID: job.ID, JobApprovalID: approval.ID, ContractRevision: latest.Revision,
