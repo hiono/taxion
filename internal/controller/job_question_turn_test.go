@@ -1080,6 +1080,9 @@ func TestJobQuestionTurnReturnsExistingPlannerReplyBeforeExpiredGrantRecovery(t 
 	if err != nil {
 		t.Fatalf("GetJob: %v", err)
 	}
+	if wait := time.Until(job.UpdatedAt); wait > 0 {
+		time.Sleep(wait + time.Millisecond)
+	}
 	_, _, err = f.database.AddJobMessage(context.Background(), f.jobID, job.Revision,
 		"cmd_b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5", domain.JobMessageRequest{
 			Sender:           domain.ActorRef{Kind: domain.ActorPlanner, ID: f.plannerID},
@@ -1117,6 +1120,9 @@ func TestJobQuestionTurnDoesNotDuplicateAnOrdinaryPlannerReply(t *testing.T) {
 		t.Fatalf("GetJob: %v", err)
 	}
 	question, _ := findJobMessage(job, f.questionID)
+	if wait := time.Until(job.UpdatedAt); wait > 0 {
+		time.Sleep(wait + time.Millisecond)
+	}
 	_, _, err = f.database.AddJobMessage(context.Background(), f.jobID, job.Revision,
 		"cmd_b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7", domain.JobMessageRequest{
 			Sender:           domain.ActorRef{Kind: domain.ActorPlanner, ID: f.plannerID},
