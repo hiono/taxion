@@ -490,7 +490,7 @@ func TestJobQuestionTurnAdmissionIncludesUnresolvedPlanningTurnsOnSameSession(t 
 		PlanningTurnIntents: []PlanningTurnIntent{{
 			ID: "planning_turn_1", RoleExecutionID: grant.PlannerRoleExecutionID,
 			ProviderSessionID: grant.ProviderSessionID,
-			CreatedRevision: 1, CreatedAt: now.Add(-2 * time.Minute),
+			CreatedRevision:   1, CreatedAt: now.Add(-2 * time.Minute),
 		}},
 		PlanningTurnObservations: []PlanningTurnObservation{{
 			TurnID: "planning_turn_1", Status: PlanningTurnUnknown,
@@ -515,10 +515,10 @@ func TestJobQuestionTurnAdmissionTreatsPersistedReplyAsTerminalWithoutProviderOb
 		ProviderSessionID: "provider_session_1",
 	}
 	question := JobMessage{
-		ID: "message_question_1",
-		Sender: ActorRef{Kind: ActorCoder, ID: "coder_execution_1"},
+		ID:        "message_question_1",
+		Sender:    ActorRef{Kind: ActorCoder, ID: "coder_execution_1"},
 		Recipient: ActorRef{Kind: ActorPlanner, ID: grant.PlannerRoleExecutionID},
-		Body: "Please clarify this constraint.", CreatedAt: now.Add(-2 * time.Minute),
+		Body:      "Please clarify this constraint.", CreatedAt: now.Add(-2 * time.Minute),
 	}
 	reply := JobMessage{
 		ID: "message_reply_1", Sender: question.Recipient, Recipient: question.Sender,
@@ -532,7 +532,7 @@ func TestJobQuestionTurnAdmissionTreatsPersistedReplyAsTerminalWithoutProviderOb
 		CreatedRevision: 1, CreatedAt: now.Add(-2 * time.Minute),
 	}
 	job := Job{
-		JobMessages: []JobMessage{question, reply},
+		JobMessages:            []JobMessage{question, reply},
 		JobQuestionTurnIntents: []JobQuestionTurnIntent{intent},
 	}
 	turns, tokens, err := jobQuestionTurnBudgetUsedBefore(job, grant.ID, grant, now, 3)
