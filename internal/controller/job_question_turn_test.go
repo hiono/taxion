@@ -1318,3 +1318,36 @@ func TestJobQuestionTurnIntentReceiptDistinguishesCreationFromReplay(t *testing.
 		t.Fatal("replayed intent receipt incorrectly claimed creation")
 	}
 }
+
+func TestJobQuestionTurnControllerReturnsConcurrentTerminalObservationAfterLateUnknownSend(t *testing.T) {
+	f := newJobQuestionTurnFixture(t)
+	commandID := "cmd_fedcba9876543210fedcba9876543215"
+	f.runtime.sendHook = func(ctx context.Context, request provider.TurnRequest) error {
+		if request.TurnID == "" {
+			return errors.New("Provider Send omitted the persisted Turn identity")
+		}
+		_, _, err := f.controller.persistObservation(
+			ctx, f.jobID, request.TurnID, domain.JobQuestionTurnCompleted,
+			5, "Recovered Planner answer", "receipt_turn_late_1",
+			sha256String("late terminal observation evidence"),
+		)
+		if err != nil {
+			return err
+		}
+		return &provider.OperationError{
+			Class: provider.FailureAmbiguous,
+			Code:  provider.OperationCodeUnknown,
+		}
+	}
+
+	outcome, err := f.controller.Send(context.Background(), f.jobID, f.authorizationID, commandID, 100)
+	if err != nil {
+		t.Fatalf("Send after another caller committed the terminal observation: %v", err)
+	}
+	if outcome.Observation.Status != domain.JobQuestionTurnCompleted ||
+		outcome.Reply.Message.Body != "Recovered Planner answer" || f.runtime.sendCalls != 1 {
+		t.Fatalf("late UNKNOWN overwrote or hid the committed terminal result: outcome=%#v sends=%d",
+			outcome, f.runtime.sendCalls)
+	}
+}
+
