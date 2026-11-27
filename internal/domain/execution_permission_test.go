@@ -203,7 +203,7 @@ func TestExecutionPermissionCannotExpandTaskScopeOrBudget(t *testing.T) {
 	taskRequest := TaskRequest{
 		JobID: job.ID, CommandID: "cmd_82828282828282828282828282828282",
 		Title: "Narrow Task", Purpose: "Restrict execution to one resource",
-		TargetRepositories: []string{}, TargetResources: []string{"resource_ci"},
+		TargetRepositories: []string{"repo_taxion"}, TargetResources: []string{"resource_ci"},
 		Budget:             JobContractBudget{MaxTurns: 1, MaxTokens: 100},
 		Deadline:           now.Add(15 * time.Minute),
 		AcceptanceCriteria: []string{"Only the selected resource is changed"},
@@ -218,17 +218,25 @@ func TestExecutionPermissionCannotExpandTaskScopeOrBudget(t *testing.T) {
 
 	request := executionPermissionTestRequest(job, now.Add(time.Minute))
 	request.ExpiresAt = task.Deadline.Add(-time.Minute)
-	if request.TaskID != task.ID || request.Resource != "resource_ci" {
+	if request.TaskID != task.ID || request.Resource != "repo_taxion" {
 		t.Fatalf("permission request did not resolve the narrowed Task: %#v", request)
 	}
-	request.Resource = "repo_taxion"
+	request.Resource = "resource_ci"
 	requestSHA, _ := ExecutionPermissionRequestSHA256(request)
 	assessment := executionPermissionTestAssessment(request, requestSHA, now.Add(time.Minute))
 	if _, err := NewExecutionPermission(job, request, requestSHA, assessment, now.Add(time.Minute)); err == nil {
-		t.Fatal("Job-approved resource outside Task scope was accepted")
+		t.Fatal("Coder permission on a Task resource without a target repository was accepted")
+	}
+	reviewer := request
+	reviewer.CommandID = "cmd_83838383838383838383838383838383"
+	reviewer.Role = "REVIEWER"
+	reviewerSHA, _ := ExecutionPermissionRequestSHA256(reviewer)
+	reviewerAssessment := executionPermissionTestAssessment(reviewer, reviewerSHA, now.Add(time.Minute))
+	if _, err := NewExecutionPermission(job, reviewer, reviewerSHA, reviewerAssessment, now.Add(time.Minute)); err != nil {
+		t.Fatalf("Reviewer permission on an approved Task resource should remain valid: %v", err)
 	}
 
-	request.Resource = "resource_ci"
+	request.Resource = "repo_taxion"
 	request.ReservedTurns = 2
 	request.ReservedTokens = 101
 	requestSHA, _ = ExecutionPermissionRequestSHA256(request)
