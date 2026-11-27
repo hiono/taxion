@@ -645,7 +645,9 @@ func (a *ACPAdapter) send(ctx context.Context, session *acpSession, request Turn
 			_ = session.process.notify(cancelCtx, "session/cancel", map[string]string{"sessionId": request.SessionID})
 			cancelNotify()
 		}
-		a.detachSession(session)
+		session.stopping.Store(true)
+		// Keep the RoleExecution reserved until trackProcess observes process.done.
+		// A replacement Start must not overlap a CLI that is still shutting down.
 		session.process.terminate()
 		return TurnResult{}, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown}
 	}
