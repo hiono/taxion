@@ -303,7 +303,7 @@ func (r *Runtime) Result(ctx context.Context, request ResultRequest) (Result, er
 		return Result{}, safeAdapterError(err)
 	}
 	if result.OperationID != request.OperationID || result.SessionID != request.SessionID ||
-		result.TurnID != request.TurnID || !result.Final || sha256Hex(result.Content) != result.ResultSHA256 ||
+		(request.TurnID != "" && result.TurnID != request.TurnID) || !result.Final || sha256Hex(result.Content) != result.ResultSHA256 ||
 		!validSHA256(result.EvidenceSHA256) {
 		return Result{}, errors.Join(ErrProviderInvalidResult, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown})
 	}

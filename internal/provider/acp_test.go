@@ -121,6 +121,11 @@ func TestACPHelperProcess(t *testing.T) {
 				_ = writer.Flush()
 				return
 			}
+			if acpHelperSetting("require-deny") == "1" && permissionReply.Result.Outcome.Outcome != "cancelled" {
+				_, _ = writer.WriteString("expected default permission denial\n")
+				_ = writer.Flush()
+				return
+			}
 			if block := acpHelperSetting("block"); block != "" && promptText == block {
 				if signalPath := acpHelperSetting("signal"); signalPath != "" {
 					file, openErr := os.OpenFile(signalPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
@@ -186,7 +191,7 @@ func TestACPHelperProcess(t *testing.T) {
 }
 
 func TestACPAdapterUsesOneProcessPerRoleAndDeniesToolRequests(t *testing.T) {
-	t.Setenv("TAXION_ACP_HELPER", "1")
+	t.Setenv("TAXION_ACP_HELPER", "1;require-deny=1")
 	t.Setenv("GH_TOKEN", "host-gh-token")
 	t.Setenv("GITHUB_TOKEN", "host-github-token")
 	identity := testIdentity()
@@ -1044,6 +1049,12 @@ func TestACPProcessBoundsQueuedUpdateBytes(t *testing.T) {
 		}
 		select {
 		case <-process.readerDone:
+			if err := process.drainUpdates(ctx, func(json.RawMessage) error {
+				updates++
+				return nil
+			}); err != nil {
+				t.Fatalf("final drainUpdates: %v", err)
+			}
 			if updates != 5 {
 				t.Fatalf("drained %d updates, want 5", updates)
 			}

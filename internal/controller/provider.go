@@ -146,6 +146,16 @@ func (a *ACPExecutionPermissionAuthorizer) Authorize(ctx context.Context, reques
 	if err != nil || effect != permission.Effect || resource != permission.Resource {
 		return errors.New("ACP tool call exceeds the exact approved effect or resource")
 	}
+	// Evaluation may block while the Start or permission expires. Re-read time
+	// after the external evaluator returns so a pre-expiry check cannot authorize
+	// a tool call after its authority has expired.
+	now = a.now()
+	if !now.Before(startIntent.Deadline) {
+		return errors.New("ACP tool permission is outside the Provider Start deadline")
+	}
+	if err := permission.ValidateFor(job, request.OperationID, request.RequestSHA256, now); err != nil {
+		return errors.New("ACP tool permission expired or was revoked during evaluation")
+	}
 	return nil
 }
 
