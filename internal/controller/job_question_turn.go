@@ -157,15 +157,32 @@ func (c *JobQuestionTurnController) Send(
 	}
 	if latest, found := latestJobQuestionTurnObservation(job, intent.ID); found {
 		outcome.Observation = latest
-		if latest.Status == domain.JobQuestionTurnCompleted {
+		switch latest.Status {
+		case domain.JobQuestionTurnCompleted:
 			reply, err := c.persistQuestionReply(ctx, jobID, grant, question, intent, latest)
 			outcome.Reply = reply
 			return outcome, err
-		}
-		if latest.Status == domain.JobQuestionTurnFailed {
+		case domain.JobQuestionTurnFailed:
 			return outcome, errors.New("Planner question turn completed with a Provider failure")
+		case domain.JobQuestionTurnNotDispatched:
+			if hasReply {
+				return outcome, nil
+			}
+			now := c.now().UTC().Round(0)
+			if err := grant.ValidateFor(job, question.ID, grant.PlannerRoleExecutionID, grant.ProviderSessionID, now); err != nil {
+				return outcome, err
+			}
+			capabilities, err := c.verifiedCapabilities(ctx, grant)
+			if err != nil {
+				return outcome, err
+			}
+			if !capabilities.HasEvidenceAtLeast(provider.CapabilityReadOnlyContextEnforcement, c.minimumEvidence) {
+				return outcome, provider.ErrUnsupportedCapability
+			}
+			return c.dispatch(ctx, outcome, grant, question, intent, capabilities, false)
+		default:
+			return c.reconcileUnknown(ctx, outcome, job, grant, question, intent)
 		}
-		return c.reconcileUnknown(ctx, outcome, job, grant, question, intent)
 	}
 	if existing {
 		return c.reconcileUnknown(ctx, outcome, job, grant, question, intent)
@@ -386,6 +403,22 @@ func (c *JobQuestionTurnController) dispatch(
 	}
 	result, err := c.runtime.Send(ctx, request)
 	if err != nil {
+		if providerOperationNotDispatched(err) && !requireSendIdempotency {
+			var operationError *provider.OperationError
+			code := provider.OperationCodeUnavailable
+			if errors.As(err, &operationError) && operationError != nil && operationError.Code != "" {
+				code = operationError.Code
+			}
+			evidence := sha256String("taxion:job-question-turn:not-dispatched:" + intent.OperationID + ":" + code)
+			receipt, observation, persistErr := c.persistObservation(
+				ctx, intent.JobID, intent.ID, domain.JobQuestionTurnNotDispatched, 0, "", "", evidence,
+			)
+			if persistErr != nil {
+				return outcome, errors.Join(err, fmt.Errorf("persist NOT_DISPATCHED Planner question turn: %w", persistErr))
+			}
+			outcome.ObservationReceipt, outcome.Observation = receipt, observation
+			return outcome, err
+		}
 		if providerOperationMayHaveStarted(err) {
 			receipt, observation, persistErr := c.persistObservation(
 				ctx, intent.JobID, intent.ID, domain.JobQuestionTurnUnknown, 0, "", "", "",
@@ -501,7 +534,13 @@ func (c *JobQuestionTurnController) persistObservation(
 			if previous.Status == domain.JobQuestionTurnUnknown && status == domain.JobQuestionTurnUnknown {
 				return store.CommandReceipt{}, previous, nil
 			}
-			if previous.Status != domain.JobQuestionTurnUnknown {
+			if previous.Status == domain.JobQuestionTurnNotDispatched {
+				if status == domain.JobQuestionTurnNotDispatched && previous.TokensUsed == tokens &&
+					previous.Content == content && previous.ReceiptID == receiptID &&
+					previous.EvidenceSHA256 == evidenceSHA256 {
+					return store.CommandReceipt{}, previous, nil
+				}
+			} else if previous.Status != domain.JobQuestionTurnUnknown {
 				if previous.Status == status && previous.TokensUsed == tokens &&
 					previous.Content == content && previous.ReceiptID == receiptID {
 					return store.CommandReceipt{}, previous, nil
