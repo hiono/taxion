@@ -366,18 +366,24 @@ func TestRuntimeClosesCredentialAndReturnsUnknownWhenAdapterPanics(t *testing.T)
 	}
 }
 
-func TestRuntimeRejectsSyntheticCapabilityBeforeCredentialAcquisition(t *testing.T) {
+func TestRuntimeAllowsOneShotStartAndSendWithoutRetryEvidence(t *testing.T) {
 	adapter := newTestAdapter(CapabilityStartIdempotency)
 	broker := &testBroker{secret: []byte("runtime-test-secret")}
 	runtime, err := NewRuntime(adapter, broker, runtimeTestVerifier{})
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
 	}
-	if _, err := runtime.Start(context.Background(), validStartRequest()); !errors.Is(err, ErrUnsupportedCapability) {
-		t.Fatalf("Start error = %v", err)
+	start, err := runtime.Start(context.Background(), validStartRequest())
+	if err != nil || start.SessionID != "session_1" {
+		t.Fatalf("one-shot Start: %#v %v", start, err)
 	}
-	if adapter.startCalls != 0 || broker.acquires != 0 {
-		t.Fatalf("unsupported capability caused side effects: adapter=%d broker=%d", adapter.startCalls, broker.acquires)
+	turn, err := runtime.Send(context.Background(), validTurnRequest())
+	if err != nil || turn.Status != "COMPLETED" {
+		t.Fatalf("one-shot Send: %#v %v", turn, err)
+	}
+	if adapter.startCalls != 1 || adapter.sendCalls != 1 || broker.acquires != 2 || broker.closed != 2 {
+		t.Fatalf("one-shot dispatch / credential lifecycle: start=%d send=%d acquired=%d closed=%d",
+			adapter.startCalls, adapter.sendCalls, broker.acquires, broker.closed)
 	}
 }
 
