@@ -96,10 +96,7 @@ func (c *JobQuestionTurnController) Send(
 	if !found {
 		return outcome, errors.New("JobQuestionAuthorization source Question was not found")
 	}
-	if reply, found := existingPlannerReply(job, question); found {
-		outcome.Reply = CommunicationOutcome{Message: reply}
-		return outcome, nil
-	}
+	reply, hasReply := existingPlannerReply(job, question)
 	prompt := jobQuestionTurnPrompt(question.Body)
 	promptSHA256 := sha256String(prompt)
 
@@ -110,7 +107,16 @@ func (c *JobQuestionTurnController) Send(
 			return outcome, store.ErrIdempotencyConflict
 		}
 		outcome.Intent = intent
+		if hasReply {
+			outcome.Reply = CommunicationOutcome{Message: reply}
+			outcome.Observation, _ = latestJobQuestionTurnObservation(job, intent.ID)
+			return outcome, nil
+		}
 	} else {
+		if hasReply {
+			outcome.Reply = CommunicationOutcome{Message: reply}
+			return outcome, nil
+		}
 		now := c.now().UTC().Round(0)
 		if err := grant.ValidateFor(job, question.ID, grant.PlannerRoleExecutionID, grant.ProviderSessionID, now); err != nil {
 			return outcome, err
