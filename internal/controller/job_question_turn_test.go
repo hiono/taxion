@@ -1248,9 +1248,9 @@ func TestJobQuestionTurnControllerSerializesUnresolvedTurnsAcrossQuestionGrants(
 	}
 	_, question, err := f.database.AddJobMessage(ctx, f.jobID, job.Revision,
 		"cmd_b2b2b2b2b2b2b2b2b2b2b2b2b2b2", domain.JobMessageRequest{
-			Sender: domain.ActorRef{Kind: domain.ActorCoder, ID: f.coderID},
+			Sender:    domain.ActorRef{Kind: domain.ActorCoder, ID: f.coderID},
 			Recipient: domain.ActorRef{Kind: domain.ActorPlanner, ID: f.plannerID},
-			Body: "A second question for the same Planner Session.",
+			Body:      "A second question for the same Planner Session.",
 		})
 	if err != nil {
 		t.Fatalf("AddJobMessage second question: %v", err)
