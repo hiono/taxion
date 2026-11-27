@@ -1281,7 +1281,6 @@ func TestJobQuestionTurnControllerSerializesUnresolvedTurnsAcrossQuestionGrants(
 	}
 }
 
-
 func TestJobQuestionTurnIntentReceiptDistinguishesCreationFromReplay(t *testing.T) {
 	f := newJobQuestionTurnFixture(t)
 	ctx := context.Background()

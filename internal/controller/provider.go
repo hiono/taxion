@@ -1001,8 +1001,13 @@ func providerStopDefinitiveFailureEvidence(operationID string, err error) (strin
 
 func providerOperationMayHaveStarted(err error) bool {
 	var operationError *provider.OperationError
-	return errors.As(err, &operationError) && operationError != nil &&
-		operationError.Class == provider.FailureAmbiguous
+	if errors.As(err, &operationError) && operationError != nil {
+		return operationError.Class == provider.FailureAmbiguous
+	}
+	// A timeout or cancellation after dispatch does not prove that the Provider
+	// rejected the operation; preserve it as UNKNOWN until the same OperationID
+	// is reconciled.
+	return errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled)
 }
 
 func providerDefinitiveFailureEvidence(operationID string, err error) (string, bool) {
