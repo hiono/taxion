@@ -13,6 +13,8 @@ import (
 	"github.com/hiono/taxion/internal/store"
 )
 
+const plannerQuestionRecoveryCallTimeout = 5 * time.Second
+
 type JobQuestionTurnStore interface {
 	CommunicationStore
 	AddJobQuestionTurnIntent(
@@ -199,7 +201,9 @@ func (c *JobQuestionTurnController) reconcileUnknown(
 			OperationID: intent.OperationID, SessionID: intent.ProviderSessionID, TurnID: intent.ID,
 			RequireResultDigest: true,
 		}
-		lookup, lookupErr := c.runtime.Lookup(ctx, request)
+		lookupCtx, cancelLookup := context.WithTimeout(ctx, plannerQuestionRecoveryCallTimeout)
+		lookup, lookupErr := c.runtime.Lookup(lookupCtx, request)
+		cancelLookup()
 		if lookupErr != nil {
 			return outcome, fmt.Errorf("lookup UNKNOWN Planner question turn: %w", lookupErr)
 		}
@@ -210,9 +214,11 @@ func (c *JobQuestionTurnController) reconcileUnknown(
 			if lookup.Status != domain.JobQuestionTurnCompleted && lookup.Status != domain.JobQuestionTurnFailed {
 				return outcome, errors.New("Planner question Provider operation remains unresolved")
 			}
-			usage, err := c.runtime.Usage(ctx, provider.UsageRequest{
+			usageCtx, cancelUsage := context.WithTimeout(ctx, plannerQuestionRecoveryCallTimeout)
+			usage, err := c.runtime.Usage(usageCtx, provider.UsageRequest{
 				OperationID: intent.OperationID, SessionID: intent.ProviderSessionID, TurnID: intent.ID,
 			})
+			cancelUsage()
 			if err != nil {
 				return outcome, fmt.Errorf("retrieve UNKNOWN Planner question usage: %w", err)
 			}
@@ -240,9 +246,11 @@ func (c *JobQuestionTurnController) reconcileUnknown(
 			if lookup.ResultSHA256 == "" {
 				return outcome, provider.ErrProviderInvalidResult
 			}
-			result, err := c.runtime.Result(ctx, provider.ResultRequest{
+			resultCtx, cancelResult := context.WithTimeout(ctx, plannerQuestionRecoveryCallTimeout)
+			result, err := c.runtime.Result(resultCtx, provider.ResultRequest{
 				OperationID: intent.OperationID, SessionID: intent.ProviderSessionID, TurnID: intent.ID,
 			})
+			cancelResult()
 			if err != nil {
 				return outcome, fmt.Errorf("retrieve UNKNOWN Planner question result: %w", err)
 			}
