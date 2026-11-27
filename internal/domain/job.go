@@ -768,8 +768,11 @@ func (j Job) Validate() error {
 			}
 			switch previous.Status {
 			case ProviderStartUnknown:
-				if observation.Status == ProviderStartUnknown || observation.Status == ProviderStartNotDispatched ||
-					!observation.ReconcilesUnknown {
+				if observation.Status == ProviderStartUnknown {
+					if observation.ReconcilesUnknown {
+						return fmt.Errorf("%w: UNKNOWN Provider Start observation cannot claim reconciliation", ErrInvalidJob)
+					}
+				} else if observation.Status == ProviderStartNotDispatched || !observation.ReconcilesUnknown {
 					return fmt.Errorf("%w: invalid UNKNOWN Provider Start reconciliation for %s", ErrInvalidJob, operationID)
 				}
 			case ProviderStartNotDispatched:
