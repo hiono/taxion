@@ -1075,7 +1075,7 @@ func TestOrchestratorContinuesAfterQuestionAuthorizationFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewOrchestratorController: %v", err)
 	}
-	outcomes, err := orchestrator.ProcessPlannerQuestions(context.Background(), f.jobID, f.plannerID)
+	outcomes, err := orchestrator.ProcessPlannerQuestions(context.Background(), f.jobID, f.plannerID, f.questionID, secondQuestion.ID, thirdQuestion.ID)
 	if err == nil || !strings.Contains(err.Error(), secondQuestion.ID) {
 		t.Fatalf("ProcessPlannerQuestions error = %v, want second question authorization failure", err)
 	}
@@ -1092,7 +1092,7 @@ func TestOrchestratorStopsAfterPerTurnDeadlineWithUnknownSession(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetJob: %v", err)
 	}
-	_, _, err = f.database.AddJobMessage(context.Background(), f.jobID, job.Revision,
+	_, secondQuestion, err := f.database.AddJobMessage(context.Background(), f.jobID, job.Revision,
 		"cmd_b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6", domain.JobMessageRequest{
 			Sender:    domain.ActorRef{Kind: domain.ActorCoder, ID: f.coderID},
 			Recipient: domain.ActorRef{Kind: domain.ActorPlanner, ID: f.plannerID},
@@ -1135,7 +1135,7 @@ func TestOrchestratorStopsAfterPerTurnDeadlineWithUnknownSession(t *testing.T) {
 		}
 		return nil
 	}
-	outcomes, err := orchestrator.ProcessPlannerQuestions(context.Background(), f.jobID, f.plannerID)
+	outcomes, err := orchestrator.ProcessPlannerQuestions(context.Background(), f.jobID, f.plannerID, f.questionID, secondQuestion.ID)
 	if err == nil || !strings.Contains(err.Error(), f.questionID) {
 		t.Fatalf("ProcessPlannerQuestions error = %v, want first request deadline error", err)
 	}
