@@ -460,80 +460,80 @@ func (c *ProviderController) DispatchTaskExecution(
 	}
 	previous, previousFound := latestStartObservation(job, intent.ID)
 	if previousFound {
-				switch previous.Status {
-				case domain.ProviderStartAccepted:
-					return previous, startResultFromObservation(previous), nil
-				case domain.ProviderStartFailed:
-					return previous, provider.StartResult{}, errors.New("Task Provider Start was definitively rejected")
-				}
+		switch previous.Status {
+		case domain.ProviderStartAccepted:
+			return previous, startResultFromObservation(previous), nil
+		case domain.ProviderStartFailed:
+			return previous, provider.StartResult{}, errors.New("Task Provider Start was definitively rejected")
+		}
+	}
+	if !worktreeBound && !previousFound {
+		return domain.ProviderStartObservation{}, provider.StartResult{}, errors.New("Task Provider Start requires a Worktree binding before its first dispatch")
+	}
+	if previousFound {
+		capabilities, err := c.runtime.Capabilities(ctx)
+		if err != nil {
+			return domain.ProviderStartObservation{}, provider.StartResult{}, err
+		}
+		if capabilities.Identity != identity {
+			return domain.ProviderStartObservation{}, provider.StartResult{}, provider.ErrUnsupportedCapability
+		}
+		canLookup := capabilities.HasEvidenceAtLeast(provider.CapabilityStartLookup, provider.EvidenceSynthetic)
+		canRetry := capabilities.HasEvidenceAtLeast(provider.CapabilityStartIdempotency, provider.EvidenceSynthetic)
+		if !canLookup && !canRetry {
+			observation, persistErr := c.recordTaskStartObservation(ctx, job.ID, intent.ID, domain.ProviderStartUnknown, "", "", "", false)
+			if persistErr != nil {
+				return observation, provider.StartResult{}, errors.Join(provider.ErrUnsupportedCapability, persistErr)
 			}
-			if !worktreeBound && !previousFound {
-				return domain.ProviderStartObservation{}, provider.StartResult{}, errors.New("Task Provider Start requires a Worktree binding before its first dispatch")
-			}
-			if previousFound {
-			capabilities, err := c.runtime.Capabilities(ctx)
-			if err != nil {
-				return domain.ProviderStartObservation{}, provider.StartResult{}, err
-			}
-			if capabilities.Identity != identity {
-				return domain.ProviderStartObservation{}, provider.StartResult{}, provider.ErrUnsupportedCapability
-			}
-			canLookup := capabilities.HasEvidenceAtLeast(provider.CapabilityStartLookup, provider.EvidenceSynthetic)
-			canRetry := capabilities.HasEvidenceAtLeast(provider.CapabilityStartIdempotency, provider.EvidenceSynthetic)
-			if !canLookup && !canRetry {
+			return observation, provider.StartResult{}, provider.ErrUnsupportedCapability
+		}
+		if canLookup {
+			lookupRequest := provider.LookupRequest{OperationID: intent.ID}
+			lookup, lookupErr := c.runtime.Lookup(ctx, lookupRequest)
+			if lookupErr != nil {
 				observation, persistErr := c.recordTaskStartObservation(ctx, job.ID, intent.ID, domain.ProviderStartUnknown, "", "", "", false)
 				if persistErr != nil {
-					return observation, provider.StartResult{}, errors.Join(provider.ErrUnsupportedCapability, persistErr)
+					return observation, provider.StartResult{}, errors.Join(lookupErr, persistErr)
 				}
-				return observation, provider.StartResult{}, provider.ErrUnsupportedCapability
+				return observation, provider.StartResult{}, lookupErr
 			}
-			if canLookup {
-				lookupRequest := provider.LookupRequest{OperationID: intent.ID}
-				lookup, lookupErr := c.runtime.Lookup(ctx, lookupRequest)
-				if lookupErr != nil {
-					observation, persistErr := c.recordTaskStartObservation(ctx, job.ID, intent.ID, domain.ProviderStartUnknown, "", "", "", false)
-					if persistErr != nil {
-						return observation, provider.StartResult{}, errors.Join(lookupErr, persistErr)
-					}
-					return observation, provider.StartResult{}, lookupErr
+			if err := lookup.Validate(lookupRequest); err != nil {
+				observation, persistErr := c.recordTaskStartObservation(ctx, job.ID, intent.ID, domain.ProviderStartUnknown, "", "", "", false)
+				if persistErr != nil {
+					return observation, provider.StartResult{}, errors.Join(provider.ErrProviderInvalidResult, persistErr)
 				}
-				if err := lookup.Validate(lookupRequest); err != nil {
-					observation, persistErr := c.recordTaskStartObservation(ctx, job.ID, intent.ID, domain.ProviderStartUnknown, "", "", "", false)
-					if persistErr != nil {
-						return observation, provider.StartResult{}, errors.Join(provider.ErrProviderInvalidResult, persistErr)
-					}
-					return observation, provider.StartResult{}, provider.ErrProviderInvalidResult
-				}
-				if lookup.Found {
-					switch lookup.Status {
-					case provider.LookupStatusFailed:
-						observation, persistErr := c.recordTaskStartObservation(ctx, job.ID, intent.ID, domain.ProviderStartFailed, "", lookup.ReceiptID, lookup.EvidenceSHA256, false)
-						if persistErr != nil {
-							return observation, provider.StartResult{}, persistErr
-						}
-						return observation, provider.StartResult{}, errors.New("Task Provider Start lookup confirmed failure")
-					case "ACCEPTED", "RUNNING", "ATTACHED", "COMPLETED":
-						observation, persistErr := c.recordTaskStartObservation(ctx, job.ID, intent.ID, domain.ProviderStartAccepted,
-							lookup.SessionID, lookup.ReceiptID, lookup.EvidenceSHA256, false)
-						if persistErr != nil {
-							return observation, provider.StartResult{}, persistErr
-						}
-						return observation, startResultFromObservation(observation), nil
-					default:
-						observation, persistErr := c.recordTaskStartObservation(ctx, job.ID, intent.ID, domain.ProviderStartUnknown,
-							lookup.SessionID, lookup.ReceiptID, lookup.EvidenceSHA256, false)
-						if persistErr != nil {
-							return observation, provider.StartResult{}, persistErr
-						}
-						return observation, provider.StartResult{}, errors.New("Task Provider Start lookup did not confirm a terminally classifiable state")
-					}
-				}
+				return observation, provider.StartResult{}, provider.ErrProviderInvalidResult
 			}
-			if !worktreeBound {
-				return previous, provider.StartResult{}, errors.New("Task Provider Start lookup did not confirm an existing session; retry is blocked without a Worktree binding")
+			if lookup.Found {
+				switch lookup.Status {
+				case provider.LookupStatusFailed:
+					observation, persistErr := c.recordTaskStartObservation(ctx, job.ID, intent.ID, domain.ProviderStartFailed, "", lookup.ReceiptID, lookup.EvidenceSHA256, false)
+					if persistErr != nil {
+						return observation, provider.StartResult{}, persistErr
+					}
+					return observation, provider.StartResult{}, errors.New("Task Provider Start lookup confirmed failure")
+				case "ACCEPTED", "RUNNING", "ATTACHED", "COMPLETED":
+					observation, persistErr := c.recordTaskStartObservation(ctx, job.ID, intent.ID, domain.ProviderStartAccepted,
+						lookup.SessionID, lookup.ReceiptID, lookup.EvidenceSHA256, false)
+					if persistErr != nil {
+						return observation, provider.StartResult{}, persistErr
+					}
+					return observation, startResultFromObservation(observation), nil
+				default:
+					observation, persistErr := c.recordTaskStartObservation(ctx, job.ID, intent.ID, domain.ProviderStartUnknown,
+						lookup.SessionID, lookup.ReceiptID, lookup.EvidenceSHA256, false)
+					if persistErr != nil {
+						return observation, provider.StartResult{}, persistErr
+					}
+					return observation, provider.StartResult{}, errors.New("Task Provider Start lookup did not confirm a terminally classifiable state")
+				}
 			}
 		}
-		request := provider.StartRequest{
+		if !worktreeBound {
+			return previous, provider.StartResult{}, errors.New("Task Provider Start lookup did not confirm an existing session; retry is blocked without a Worktree binding")
+		}
+	}
+	request := provider.StartRequest{
 			OperationID: intent.ID, JobID: job.ID, RoleExecutionID: execution.ID,
 			TaskID: execution.TaskID, ExecutionPermissionID: permission.ID,
 			WorktreeAssignmentID: worktreeAssignment.ID, WorktreePath: worktreeAssignment.WorktreePath,
@@ -1439,86 +1439,86 @@ func (c *ProviderController) DispatchTaskExecution(
 			return receipt, turn, previous, turnResultFromObservation(previous), nil
 		}
 		if previousFound {
-		capabilities, err := c.runtime.Capabilities(ctx)
-		if err != nil {
-			return receipt, turn, domain.PlanningTurnObservation{}, provider.TurnResult{}, err
-		}
-		if capabilities.Identity != c.runtime.Identity() {
-			return receipt, turn, domain.PlanningTurnObservation{}, provider.TurnResult{}, provider.ErrUnsupportedCapability
-		}
-		canLookup := capabilities.HasEvidenceAtLeast(provider.CapabilitySendLookup, provider.EvidenceLive)
-		canRetry := capabilities.HasEvidenceAtLeast(provider.CapabilitySendIdempotency, provider.EvidenceLive)
-		if canLookup {
-			lookup, lookupErr := c.runtime.Lookup(ctx, provider.LookupRequest{
-				OperationID: turn.OperationID, SessionID: turn.ProviderSessionID, TurnID: turn.ID,
-			})
-			if lookupErr != nil {
-				observation, persistErr := c.recordTurnObservation(
-					ctx, job.ID, turn.ID, domain.PlanningTurnUnknown, 0, "", principal,
-				)
-				if persistErr != nil {
-					return receipt, turn, observation, provider.TurnResult{}, errors.Join(lookupErr, persistErr)
-				}
-				return receipt, turn, observation, provider.TurnResult{}, lookupErr
+			capabilities, err := c.runtime.Capabilities(ctx)
+			if err != nil {
+				return receipt, turn, domain.PlanningTurnObservation{}, provider.TurnResult{}, err
 			}
-			if lookup.Found {
-				if lookup.Status == domain.PlanningTurnCompleted || lookup.Status == domain.PlanningTurnFailed {
-					_, usage, usageErr := c.retrieveProviderUsage(
-						ctx, job.ID, turn.RoleExecutionID, turn.ProviderSessionID, turn.ID, lookup.UsageID, principal,
+			if capabilities.Identity != c.runtime.Identity() {
+				return receipt, turn, domain.PlanningTurnObservation{}, provider.TurnResult{}, provider.ErrUnsupportedCapability
+			}
+			canLookup := capabilities.HasEvidenceAtLeast(provider.CapabilitySendLookup, provider.EvidenceLive)
+			canRetry := capabilities.HasEvidenceAtLeast(provider.CapabilitySendIdempotency, provider.EvidenceLive)
+			if canLookup {
+				lookup, lookupErr := c.runtime.Lookup(ctx, provider.LookupRequest{
+					OperationID: turn.OperationID, SessionID: turn.ProviderSessionID, TurnID: turn.ID,
+				})
+				if lookupErr != nil {
+					observation, persistErr := c.recordTurnObservation(
+						ctx, job.ID, turn.ID, domain.PlanningTurnUnknown, 0, "", principal,
 					)
-					if usageErr != nil {
-						observation, persistErr := c.recordTurnObservation(
-							ctx, job.ID, turn.ID, domain.PlanningTurnUnknown, 0, "", principal,
-						)
-						if persistErr != nil {
-							return receipt, turn, observation, provider.TurnResult{}, errors.Join(usageErr, persistErr)
-						}
-						return receipt, turn, observation, provider.TurnResult{}, usageErr
+					if persistErr != nil {
+						return receipt, turn, observation, provider.TurnResult{}, errors.Join(lookupErr, persistErr)
 					}
-					if !usage.Complete {
-						observation, persistErr := c.recordTurnObservation(
-							ctx, job.ID, turn.ID, domain.PlanningTurnUnknown, 0, "", principal,
-						)
-						if persistErr != nil {
-							return receipt, turn, observation, provider.TurnResult{}, persistErr
-						}
-						return receipt, turn, observation, provider.TurnResult{}, errors.New("Provider Turn terminal state awaits complete Usage evidence")
-					}
-					observation, err := c.recordTurnObservation(
-						ctx, job.ID, turn.ID, lookup.Status, usage.Tokens, usage.EvidenceSHA256, principal,
-					)
-					if err != nil {
-						unknown, persistErr := c.recordTurnObservation(
-							ctx, job.ID, turn.ID, domain.PlanningTurnUnknown, 0, "", principal,
-						)
-						if persistErr != nil {
-							return receipt, turn, unknown, provider.TurnResult{}, errors.Join(err, persistErr)
-						}
-						return receipt, turn, unknown, provider.TurnResult{}, err
-					}
-					return receipt, turn, observation, provider.TurnResult{
-						OperationID: turn.OperationID, TurnID: turn.ID, SessionID: turn.ProviderSessionID,
-						ReceiptID: lookup.ReceiptID, Status: lookup.Status, TokensUsed: usage.Tokens,
-						EvidenceSHA256: usage.EvidenceSHA256,
-					}, nil
+					return receipt, turn, observation, provider.TurnResult{}, lookupErr
 				}
+				if lookup.Found {
+					if lookup.Status == domain.PlanningTurnCompleted || lookup.Status == domain.PlanningTurnFailed {
+						_, usage, usageErr := c.retrieveProviderUsage(
+							ctx, job.ID, turn.RoleExecutionID, turn.ProviderSessionID, turn.ID, lookup.UsageID, principal,
+						)
+						if usageErr != nil {
+							observation, persistErr := c.recordTurnObservation(
+								ctx, job.ID, turn.ID, domain.PlanningTurnUnknown, 0, "", principal,
+							)
+							if persistErr != nil {
+								return receipt, turn, observation, provider.TurnResult{}, errors.Join(usageErr, persistErr)
+							}
+							return receipt, turn, observation, provider.TurnResult{}, usageErr
+						}
+						if !usage.Complete {
+							observation, persistErr := c.recordTurnObservation(
+								ctx, job.ID, turn.ID, domain.PlanningTurnUnknown, 0, "", principal,
+							)
+							if persistErr != nil {
+								return receipt, turn, observation, provider.TurnResult{}, persistErr
+							}
+							return receipt, turn, observation, provider.TurnResult{}, errors.New("Provider Turn terminal state awaits complete Usage evidence")
+						}
+						observation, err := c.recordTurnObservation(
+							ctx, job.ID, turn.ID, lookup.Status, usage.Tokens, usage.EvidenceSHA256, principal,
+						)
+						if err != nil {
+							unknown, persistErr := c.recordTurnObservation(
+								ctx, job.ID, turn.ID, domain.PlanningTurnUnknown, 0, "", principal,
+							)
+							if persistErr != nil {
+								return receipt, turn, unknown, provider.TurnResult{}, errors.Join(err, persistErr)
+							}
+							return receipt, turn, unknown, provider.TurnResult{}, err
+						}
+						return receipt, turn, observation, provider.TurnResult{
+							OperationID: turn.OperationID, TurnID: turn.ID, SessionID: turn.ProviderSessionID,
+							ReceiptID: lookup.ReceiptID, Status: lookup.Status, TokensUsed: usage.Tokens,
+							EvidenceSHA256: usage.EvidenceSHA256,
+						}, nil
+					}
+					observation, persistErr := c.recordTurnObservation(
+						ctx, job.ID, turn.ID, domain.PlanningTurnUnknown, 0, "", principal,
+					)
+					if persistErr != nil {
+						return receipt, turn, observation, provider.TurnResult{}, persistErr
+					}
+					return receipt, turn, observation, provider.TurnResult{}, errors.New("Provider Turn lookup has not confirmed a terminal result")
+				}
+			} else if !canRetry {
 				observation, persistErr := c.recordTurnObservation(
 					ctx, job.ID, turn.ID, domain.PlanningTurnUnknown, 0, "", principal,
 				)
 				if persistErr != nil {
 					return receipt, turn, observation, provider.TurnResult{}, persistErr
 				}
-				return receipt, turn, observation, provider.TurnResult{}, errors.New("Provider Turn lookup has not confirmed a terminal result")
+				return receipt, turn, observation, provider.TurnResult{}, provider.ErrUnsupportedCapability
 			}
-		} else if !canRetry {
-			observation, persistErr := c.recordTurnObservation(
-				ctx, job.ID, turn.ID, domain.PlanningTurnUnknown, 0, "", principal,
-			)
-			if persistErr != nil {
-				return receipt, turn, observation, provider.TurnResult{}, persistErr
-			}
-			return receipt, turn, observation, provider.TurnResult{}, provider.ErrUnsupportedCapability
-		}
 	}
 	current, _, grant, _, err := c.providerObservationTarget(
 		ctx, job.ID, turn.RoleExecutionID, turn.ProviderSessionID, turn.ID, principal,
