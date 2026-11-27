@@ -380,11 +380,11 @@ func (b ReadOnlyContextBoundary) Validate() error {
 }
 
 type TurnRequest struct {
-	OperationID      string
-	TurnID           string
-	SessionID        string
-	PromptSHA256     string
-	Prompt           string
+	OperationID            string
+	TurnID                 string
+	SessionID              string
+	PromptSHA256           string
+	Prompt                 string
 	ReadOnlyBoundary       ReadOnlyContextBoundary
 	RequireSendIdempotency bool
 	MaxTokens              uint64
