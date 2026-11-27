@@ -1264,7 +1264,7 @@ func TestJobQuestionTurnControllerSerializesUnresolvedTurnsAcrossQuestionGrants(
 	if err != nil {
 		t.Fatalf("NewJobQuestionAuthorizationController: %v", err)
 	}
-	_, secondGrant, err := authorizations.Authorize(ctx, f.jobID, question.Message.ID,
+	_, secondGrant, err := authorizations.Authorize(ctx, f.jobID, question.ID,
 		"cmd_b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3",
 		domain.PlanningBudget{MaxTurns: 1, MaxTokens: 10}, firstGrant.Deadline)
 	if err != nil {
