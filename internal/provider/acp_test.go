@@ -1238,7 +1238,6 @@ func TestACPAdapterConcurrentCloseReapsLateTrackedProcess(t *testing.T) {
 	}
 }
 
-
 func TestACPAdapterCloseTracksDetachedProcesses(t *testing.T) {
 	t.Setenv("TAXION_ACP_HELPER", "1")
 	adapter := newACPTestAdapter(t)
