@@ -160,6 +160,7 @@ func copilotProfileEnvironment(profile string) []string {
 	blocked := map[string]struct{}{
 		"HOME": {}, "XDG_CONFIG_HOME": {}, "XDG_CACHE_HOME": {}, "XDG_DATA_HOME": {},
 		"COPILOT_GITHUB_TOKEN": {}, "GH_TOKEN": {}, "GITHUB_TOKEN": {},
+		"DBUS_SESSION_BUS_ADDRESS": {}, "XDG_RUNTIME_DIR": {}, "SSH_AUTH_SOCK": {},
 	}
 	environment := make([]string, 0, len(os.Environ())+4)
 	for _, entry := range os.Environ() {
