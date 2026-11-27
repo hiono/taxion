@@ -652,7 +652,7 @@ func TestACPAdapterPreservesSessionWhenSendIsCancelledBeforeDispatch(t *testing.
 	start, err := adapter.Start(ctx, StartRequest{
 		OperationID: "operation_pre_cancel_start", JobID: "job_1",
 		RoleExecutionID: "role_execution_pre_cancel",
-		RequestSHA256: strings.Repeat("a", 64), PromptSHA256: sha256Hex(prompt),
+		RequestSHA256:   strings.Repeat("a", 64), PromptSHA256: sha256Hex(prompt),
 		Prompt: prompt, MaxTurns: 2, MaxTokens: 1000, Deadline: time.Now().Add(4 * time.Second),
 	}, nil)
 	if err != nil {
