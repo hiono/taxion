@@ -972,14 +972,23 @@ func (j Job) Validate() error {
 				continue
 			}
 			previous := observations[i-1]
-			if previous.Status != PlanningTurnUnknown || observation.Status == PlanningTurnUnknown ||
-				!observation.ReconcilesUnknown || observation.CreatedRevision <= previous.CreatedRevision ||
+			if observation.CreatedRevision <= previous.CreatedRevision ||
 				observation.CreatedAt.Before(previous.CreatedAt) {
-				return fmt.Errorf("%w: invalid PlanningTurnObservation reconciliation sequence", ErrInvalidJob)
+				return fmt.Errorf("%w: PlanningTurnObservation append order is invalid", ErrInvalidJob)
 			}
-		}
-		if len(observations) > 2 || (len(observations) == 2 && observations[0].Status != PlanningTurnUnknown) {
-			return fmt.Errorf("%w: invalid PlanningTurnObservation history for %s", ErrInvalidJob, turnID)
+			switch previous.Status {
+			case PlanningTurnUnknown:
+				if observation.Status == PlanningTurnUnknown || observation.Status == PlanningTurnNotDispatched ||
+					!observation.ReconcilesUnknown {
+					return fmt.Errorf("%w: invalid UNKNOWN PlanningTurnObservation reconciliation sequence", ErrInvalidJob)
+				}
+			case PlanningTurnNotDispatched:
+				if observation.ReconcilesUnknown {
+					return fmt.Errorf("%w: NOT_DISPATCHED PlanningTurnObservation retry cannot reconcile UNKNOWN", ErrInvalidJob)
+				}
+			default:
+				return fmt.Errorf("%w: PlanningTurnObservation follows a terminal result for %s", ErrInvalidJob, turnID)
+			}
 		}
 	}
 	seenEffects := make(map[string]struct{}, len(j.PlanningEffectDecisions))
