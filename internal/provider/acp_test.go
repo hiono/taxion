@@ -1726,3 +1726,53 @@ func TestACPAdapterDeclaresOnlySyntheticReadOnlyEnforcement(t *testing.T) {
 		}
 	}
 }
+
+func TestACPAdapterPreservesPrivateConfiguredHomeDirectory(t *testing.T) {
+	profile := filepath.Join(t.TempDir(), "copilot-profile")
+	adapter, err := NewACPAdapter(ACPConfig{
+		Command: os.Args[0], Args: []string{"-test.run=TestACPHelperProcess"},
+		WorkingDirectory: t.TempDir(), HomeDirectory: profile, Identity: testIdentity(),
+	})
+	if err != nil {
+		t.Fatalf("NewACPAdapter: %v", err)
+	}
+	info, err := os.Stat(profile)
+	if err != nil {
+		t.Fatalf("stat profile: %v", err)
+	}
+	if info.Mode().Perm() != 0700 {
+		t.Fatalf("profile permissions = %o, want 700", info.Mode().Perm())
+	}
+	if err := os.MkdirAll(filepath.Join(profile, ".copilot"), 0700); err != nil {
+		t.Fatalf("create profile data: %v", err)
+	}
+	credentialFile := filepath.Join(profile, ".copilot", "config.json")
+	if err := os.WriteFile(credentialFile, []byte("local-test-profile"), 0600); err != nil {
+		t.Fatalf("write profile data: %v", err)
+	}
+	if err := adapter.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if _, err := os.Stat(credentialFile); err != nil {
+		t.Fatalf("persistent profile data was removed: %v", err)
+	}
+}
+
+func TestACPAdapterRejectsSymlinkHomeDirectory(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "target")
+	if err := os.Mkdir(target, 0700); err != nil {
+		t.Fatalf("mkdir target: %v", err)
+	}
+	link := filepath.Join(root, "profile")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	_, err := NewACPAdapter(ACPConfig{
+		Command: os.Args[0], Args: []string{"-test.run=TestACPHelperProcess"},
+		WorkingDirectory: root, HomeDirectory: link, Identity: testIdentity(),
+	})
+	if err == nil {
+		t.Fatal("NewACPAdapter accepted a symlink home directory")
+	}
+}
