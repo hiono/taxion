@@ -720,7 +720,7 @@ func TestProviderControllerReconcilesUnknownTurnWithLookupAndCompleteUsage(t *te
 	if err != nil || receipt.Revision == 0 || reconciledTurn.ID != turn.ID ||
 		completed.Status != domain.PlanningTurnCompleted || !completed.ReconcilesUnknown ||
 		result.Status != domain.PlanningTurnCompleted || result.TokensUsed != 18 ||
-		runtime.sendCalls != 1 || runtime.lookupCalls != 2 || runtime.usageCalls != 1 {
+		runtime.sendCalls != 1 || runtime.lookupCalls != 1 || runtime.usageCalls != 1 {
 		t.Fatalf("same-Turn reconciliation failed: %#v %#v %#v calls(send=%d lookup=%d usage=%d) err=%v",
 			receipt, reconciledTurn, completed, runtime.sendCalls, runtime.lookupCalls, runtime.usageCalls, err)
 	}
@@ -1334,7 +1334,7 @@ func TestProviderControllerDispatchesTaskCoderStartWithDurableIntentAndReconcile
 	}
 	retryObservation, retryResult, err := controller.DispatchTaskExecution(ctx, jobID, execution.ID, permission.ID, permissionRequest)
 	if err != nil || retryObservation.ID != observation.ID || retryResult != result ||
-		runtime.lookupCalls != 1 || runtime.startCalls != 1 {
+		runtime.lookupCalls != 0 || runtime.startCalls != 1 {
 		t.Fatalf("exact Task Start replay changed terminal evidence or redispatched: %#v %#v %v", retryObservation, retryResult, err)
 	}
 }
@@ -1409,7 +1409,7 @@ func TestProviderControllerReconcilesTaskCoderStartUnknownBySameOperationID(t *t
 	executionController.now = func() time.Time { return request.ExpiresAt.Add(time.Second) }
 	accepted, result, err := controller.DispatchTaskExecution(ctx, jobID, execution.ID, permission.ID, request)
 	if err != nil || accepted.Status != domain.ProviderStartAccepted || !accepted.ReconcilesUnknown ||
-		result.OperationID != intent.ID || runtime.startCalls != 1 || runtime.lookupCalls != 2 {
+		result.OperationID != intent.ID || runtime.startCalls != 1 || runtime.lookupCalls != 1 {
 		t.Fatalf("UNKNOWN Task Start was not reconciled by same OperationID Lookup: %#v %#v starts=%d lookups=%d err=%v",
 			accepted, result, runtime.startCalls, runtime.lookupCalls, err)
 	}
