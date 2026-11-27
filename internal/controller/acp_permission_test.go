@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -115,11 +116,49 @@ func TestACPExecutionPermissionAuthorizerRevalidatesExactTaskAuthority(t *testin
 	if err != nil {
 		t.Fatalf("StartTaskExecution: %v", err)
 	}
+
+	unboundJob, err := database.GetJob(context.Background(), jobID)
+	if err != nil {
+		t.Fatalf("GetJob before Worktree binding: %v", err)
+	}
+	invalidPath := filepath.Join(t.TempDir(), string([]byte{0xff}))
+	for _, field := range []string{"repository", "worktree"} {
+		candidate := domain.WorktreeAssignment{
+			ID: domain.WorktreeAssignmentID(jobID, task.ID, revision.Contract.TargetRepositories[0]),
+			JobID: jobID, TaskID: task.ID, RepositoryID: revision.Contract.TargetRepositories[0],
+			RepositoryPath: t.TempDir(), WorktreePath: t.TempDir(),
+			BaselineCommit: strings.Repeat("a", 40), OwnerRoleExecutionID: execution.ID,
+		}
+		if field == "repository" {
+			candidate.RepositoryPath = invalidPath
+		} else {
+			candidate.WorktreePath = invalidPath
+		}
+		if _, err := domain.NewWorktreeAssignmentBinding(unboundJob, execution.ID, candidate, now); err == nil {
+			t.Fatalf("NewWorktreeAssignmentBinding accepted invalid UTF-8 %s path", field)
+		}
+	}
+
 	execution, intent, assignment := bindACPTestWorktree(
 		t, database, executionController, jobID,
 		"cmd_b1111111111111111111111111111111",
 		revision.Contract.TargetRepositories[0], execution,
 	)
+	persistedJob, err := database.GetJob(context.Background(), jobID)
+	if err != nil {
+		t.Fatalf("GetJob after Worktree binding: %v", err)
+	}
+	for _, field := range []string{"repository", "worktree"} {
+		candidate := assignment
+		if field == "repository" {
+			candidate.RepositoryPath = invalidPath
+		} else {
+			candidate.WorktreePath = invalidPath
+		}
+		if err := candidate.Validate(persistedJob); err == nil {
+			t.Fatalf("WorktreeAssignment.Validate accepted invalid UTF-8 %s path", field)
+		}
+	}
 	evaluator := &fakeACPToolCallEvaluator{effect: permission.Effect, resource: permission.Resource}
 	authorizer, err := NewACPExecutionPermissionAuthorizer(database, evaluator)
 	if err != nil {
