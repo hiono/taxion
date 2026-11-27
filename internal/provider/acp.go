@@ -48,24 +48,24 @@ var allowedACPEnvironment = map[string]struct{}{
 }
 
 type ACPAdapter struct {
-	config       ACPConfig
-	mu           sync.Mutex
-	closed       bool
-	closeDone    chan struct{}
-	closeErr     error
-	byRole       map[string]*acpSession
-	byID         map[string]*acpSession
-	detached     map[string]*acpSession
-	byOp         map[string]StartResult
-	retiredOps   map[string]struct{}
-	startingRole map[string]*acpStartReservation
-	startingOp   map[string]*acpStartReservation
-	processes            map[*acpProcess]struct{}
-	resultCache          map[string]acpResultCacheEntry
-	resultCacheBytes     int64
-	resultCacheLimit     int64
+	config                ACPConfig
+	mu                    sync.Mutex
+	closed                bool
+	closeDone             chan struct{}
+	closeErr              error
+	byRole                map[string]*acpSession
+	byID                  map[string]*acpSession
+	detached              map[string]*acpSession
+	byOp                  map[string]StartResult
+	retiredOps            map[string]struct{}
+	startingRole          map[string]*acpStartReservation
+	startingOp            map[string]*acpStartReservation
+	processes             map[*acpProcess]struct{}
+	resultCache           map[string]acpResultCacheEntry
+	resultCacheBytes      int64
+	resultCacheLimit      int64
 	resultCacheEntryLimit int
-	resultRetention      time.Duration
+	resultRetention       time.Duration
 }
 
 type acpResultCacheEntry struct {
@@ -181,14 +181,14 @@ func NewACPAdapter(config ACPConfig) (*ACPAdapter, error) {
 	}
 	config.WorkingDirectory = absolute
 	return &ACPAdapter{
-		config:       config,
-		byRole:       make(map[string]*acpSession),
-		byID:         make(map[string]*acpSession),
-		detached:     make(map[string]*acpSession),
-		byOp:         make(map[string]StartResult),
-		retiredOps:   make(map[string]struct{}),
-		startingRole: make(map[string]*acpStartReservation),
-		startingOp:   make(map[string]*acpStartReservation),
+		config:                config,
+		byRole:                make(map[string]*acpSession),
+		byID:                  make(map[string]*acpSession),
+		detached:              make(map[string]*acpSession),
+		byOp:                  make(map[string]StartResult),
+		retiredOps:            make(map[string]struct{}),
+		startingRole:          make(map[string]*acpStartReservation),
+		startingOp:            make(map[string]*acpStartReservation),
 		processes:             make(map[*acpProcess]struct{}),
 		resultCache:           make(map[string]acpResultCacheEntry),
 		resultCacheLimit:      maxACPResultCacheBytes,
@@ -751,7 +751,6 @@ func (a *ACPAdapter) send(ctx context.Context, session *acpSession, request Turn
 	a.cacheTurnResult(session, result)
 	return result, nil
 }
-
 
 func acpResultCacheKey(sessionID, operationID string) string {
 	return sessionID + "\x00" + operationID
