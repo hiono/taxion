@@ -798,6 +798,11 @@ func TestACPAdapterKeepsRoleReservedUntilProcessExit(t *testing.T) {
 	replacement.OperationID = "operation_start_replacement"
 	if _, err := adapter.Start(context.Background(), replacement, nil); err == nil {
 		t.Fatal("Start launched a replacement CLI before the prior process exited")
+	} else {
+		var operationErr *OperationError
+		if !errors.As(err, &operationErr) || operationErr.Class != FailureAmbiguous {
+			t.Fatalf("Start while prior process is stopping = %v, want ambiguous reservation error", err)
+		}
 	}
 	adapter.mu.Lock()
 	reserved := adapter.byRole[session.roleExecutionID] == session
