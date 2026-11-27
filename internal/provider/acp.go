@@ -70,11 +70,29 @@ type acpSession struct {
 	process          *acpProcess
 	turnGate         chan struct{}
 	stopping         atomic.Bool
-	promptMu         sync.Mutex
+	promptGate       chan struct{}
 	promptCtx        context.Context
 	promptCancelled  bool
 	mu               sync.RWMutex
 	turns            map[string]TurnResult
+}
+
+func (s *acpSession) lockPrompt(ctx context.Context) (func(), error) {
+	if s == nil || s.promptGate == nil {
+		return nil, errors.New("ACP session prompt gate is unavailable")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	select {
+	case <-s.promptGate:
+		var once sync.Once
+		return func() {
+			once.Do(func() { s.promptGate <- struct{}{} })
+		}, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 }
 
 type acpProcess struct {
@@ -297,12 +315,15 @@ func (a *ACPAdapter) Start(ctx context.Context, request StartRequest, _ Credenti
 	}
 	turnGate := make(chan struct{}, 1)
 	turnGate <- struct{}{}
+	promptGate := make(chan struct{}, 1)
+	promptGate <- struct{}{}
 	session := &acpSession{
 		roleExecutionID:  request.RoleExecutionID,
 		sessionID:        sessionID,
 		startOperationID: request.OperationID,
 		process:          process,
 		turnGate:         turnGate,
+		promptGate:       promptGate,
 		turns:            make(map[string]TurnResult),
 	}
 	if request.TaskID != "" && request.ExecutionPermissionID != "" && a.config.PermissionAuthorizer != nil {
@@ -317,11 +338,14 @@ func (a *ACPAdapter) Start(ctx context.Context, request StartRequest, _ Credenti
 				bytes.Equal(bytes.TrimSpace(permissionRequest.ToolCall), []byte("null")) {
 				return false, nil
 			}
-			session.promptMu.Lock()
+			unlockPrompt, lockErr := session.lockPrompt(ctx)
+			if lockErr != nil {
+				return false, nil
+			}
 			promptCtx := session.promptCtx
 			active := promptCtx != nil && !session.promptCancelled && promptCtx.Err() == nil &&
 				!session.stopping.Load()
-			session.promptMu.Unlock()
+			unlockPrompt()
 			if !active {
 				return false, nil
 			}
@@ -337,15 +361,18 @@ func (a *ACPAdapter) Start(ctx context.Context, request StartRequest, _ Credenti
 				ToolCall:         append([]byte(nil), permissionRequest.ToolCall...),
 			})
 			cancel()
-			session.promptMu.Lock()
+			unlockPrompt, lockErr = session.lockPrompt(promptCtx)
+			if lockErr != nil {
+				return false, nil
+			}
 			active = session.promptCtx == promptCtx && !session.promptCancelled &&
 				promptCtx.Err() == nil && !session.stopping.Load()
 			if err == nil && active {
-				// Keep the prompt lock until the permission response is written.
-				// Cancellation takes the same lock before marking the prompt cancelled.
-				return true, session.promptMu.Unlock
+				// Keep the prompt gate until the permission response is written.
+				// Stop can time out while waiting for this bounded response write.
+				return true, unlockPrompt
 			}
-			return false, session.promptMu.Unlock
+			return false, unlockPrompt
 		})
 	}
 	result := StartResult{
@@ -614,17 +641,23 @@ func (a *ACPAdapter) send(ctx context.Context, session *acpSession, request Turn
 		output.WriteString(chunk)
 		return nil
 	}
-	session.promptMu.Lock()
+	unlockPrompt, lockErr := session.lockPrompt(context.Background())
+	if lockErr != nil {
+		return TurnResult{}, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown}
+	}
 	session.promptCtx = operationCtx
 	session.promptCancelled = false
-	session.promptMu.Unlock()
+	unlockPrompt()
 	defer func() {
-		session.promptMu.Lock()
+		unlockPrompt, lockErr := session.lockPrompt(context.Background())
+		if lockErr != nil {
+			return
+		}
 		if session.promptCtx == operationCtx {
 			session.promptCtx = nil
 			session.promptCancelled = false
 		}
-		session.promptMu.Unlock()
+		unlockPrompt()
 	}()
 	response, err := session.process.callForSession(operationCtx, session, "session/prompt", map[string]any{
 		"sessionId": request.SessionID,
@@ -638,9 +671,7 @@ func (a *ACPAdapter) send(ctx context.Context, session *acpSession, request Turn
 			return TurnResult{}, err
 		}
 		if operationCtx.Err() != nil {
-			session.promptMu.Lock()
-			session.promptCancelled = true
-			session.promptMu.Unlock()
+			session.stopping.Store(true)
 			cancelCtx, cancelNotify := context.WithTimeout(context.Background(), 100*time.Millisecond)
 			_ = session.process.notify(cancelCtx, "session/cancel", map[string]string{"sessionId": request.SessionID})
 			cancelNotify()
@@ -707,17 +738,19 @@ func (a *ACPAdapter) Stop(ctx context.Context, request StopRequest, _ Credential
 	if session == nil {
 		return StopResult{}, &OperationError{Class: FailureDefinitive, Code: OperationCodeNotFound}
 	}
-	// Serialize Stop with the permission handler's final authorization check
-	// and response write. If an allow_once response already owns promptMu, it
-	// is written before cancellation; otherwise Stop marks the prompt cancelled
-	// before any later permission response can be approved.
-	session.promptMu.Lock()
-	session.promptCancelled = true
+	// Mark stopping before waiting for the permission-response gate so no
+	// later permission can be approved. Gate acquisition honors the Stop deadline.
 	session.stopping.Store(true)
+	unlockPrompt, lockErr := session.lockPrompt(ctx)
+	if lockErr != nil {
+		session.process.terminate()
+		return StopResult{}, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown}
+	}
+	session.promptCancelled = true
 	cancelCtx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
 	_ = session.process.notify(cancelCtx, "session/cancel", map[string]string{"sessionId": request.SessionID})
 	cancel()
-	session.promptMu.Unlock()
+	unlockPrompt()
 	session.process.terminate()
 	// Cancellation is not proof that tools or child processes are quiescent.
 	return StopResult{}, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown}
