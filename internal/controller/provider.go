@@ -576,6 +576,18 @@ func (c *ProviderController) DispatchTaskExecution(
 	if c.runtime.Identity() != identity {
 		return domain.ProviderStartObservation{}, provider.StartResult{}, errors.New("Provider Runtime identity changed before dispatch")
 	}
+	// Persist the dispatch attempt before crossing the Provider boundary. If the
+	// process exits after this write, replay must reconcile UNKNOWN rather than
+	// issuing a second Start with no evidence that the first attempt did not run.
+	attempt, err := c.recordTaskStartObservation(
+		ctx, job.ID, intent.ID, domain.ProviderStartUnknown, "", "", "", false,
+	)
+	if err != nil {
+		return domain.ProviderStartObservation{}, provider.StartResult{}, fmt.Errorf("persist Task Provider Start attempt: %w", err)
+	}
+	if _, err := c.execution.ValidatePermission(ctx, permissionID, permissionRequest); err != nil {
+		return attempt, provider.StartResult{}, err
+	}
 	result, startErr := c.runtime.Start(ctx, request)
 	if startErr != nil {
 		status, evidence := domain.ProviderStartUnknown, ""
