@@ -158,12 +158,16 @@ func TestACPHelperProcess(t *testing.T) {
 				updates, _ = strconv.Atoi(configured)
 			}
 			for index := 0; index < updates; index++ {
+				update := map[string]any{
+					"sessionUpdate": "agent_message_chunk",
+					"content":       map[string]string{"type": "text", "text": "fixed ACP response"},
+				}
+				if acpHelperSetting("child") != "" {
+					update["_meta"] = map[string]any{"opencode/child-session": map[string]any{"id": "child-session"}}
+				}
 				write(map[string]any{
 					"jsonrpc": "2.0", "method": "session/update",
-					"params": map[string]any{"sessionId": "fake-session", "update": map[string]any{
-						"sessionUpdate": "agent_message_chunk",
-						"content":       map[string]string{"type": "text", "text": "fixed ACP response"},
-					}},
+					"params": map[string]any{"sessionId": "fake-session", "update": update},
 				})
 			}
 			stopReason := "end_turn"
@@ -180,10 +184,18 @@ func TestACPHelperProcess(t *testing.T) {
 				if err := child.Start(); err != nil {
 					os.Exit(18)
 				}
-				write(map[string]any{"jsonrpc": "2.0", "id": request.ID, "result": map[string]string{"stopReason": stopReason}})
+				promptResult := map[string]any{"stopReason": stopReason}
+				if acpHelperSetting("usage") != "missing" {
+					promptResult["usage"] = map[string]uint64{"inputTokens": 10, "outputTokens": 5, "totalTokens": 15}
+				}
+				write(map[string]any{"jsonrpc": "2.0", "id": request.ID, "result": promptResult})
 				os.Exit(0)
 			}
-			write(map[string]any{"jsonrpc": "2.0", "id": request.ID, "result": map[string]string{"stopReason": stopReason}})
+			promptResult := map[string]any{"stopReason": stopReason}
+			if acpHelperSetting("usage") != "missing" {
+				promptResult["usage"] = map[string]uint64{"inputTokens": 10, "outputTokens": 5, "totalTokens": 15}
+			}
+			write(map[string]any{"jsonrpc": "2.0", "id": request.ID, "result": promptResult})
 		case "session/cancel":
 			// Cancellation is a notification and has no response.
 		}
