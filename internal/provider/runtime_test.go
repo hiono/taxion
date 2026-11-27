@@ -602,6 +602,19 @@ func TestRuntimeResultAllowsOmittedTurnIDForInitialTurn(t *testing.T) {
 	}
 }
 
+func TestRuntimeResultRejectsMismatchedNonemptyTurnID(t *testing.T) {
+	adapter := newTestAdapter(CapabilityFinalOutput)
+	adapter.resultTurnID = "turn_other"
+	broker := &testBroker{secret: []byte("runtime-test-secret")}
+	runtime, err := newTestRuntime(adapter, broker)
+	if err != nil {
+		t.Fatalf("NewRuntime: %v", err)
+	}
+	if _, err := runtime.Result(context.Background(), validResultRequest()); !errors.Is(err, ErrProviderInvalidResult) {
+		t.Fatalf("Result with mismatched nonempty TurnID = %v; want ErrProviderInvalidResult", err)
+	}
+}
+
 func TestRuntimeRejectsNonFinalResult(t *testing.T) {
 	adapter := newTestAdapter(CapabilityFinalOutput)
 	adapter.resultFinal = false
