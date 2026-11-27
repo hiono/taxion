@@ -1041,7 +1041,7 @@ func TestOrchestratorStopsAfterPerTurnDeadlineWithUnknownSession(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetJob: %v", err)
 	}
-	_, secondQuestion, err := f.database.AddJobMessage(context.Background(), f.jobID, job.Revision,
+	_, _, err = f.database.AddJobMessage(context.Background(), f.jobID, job.Revision,
 		"cmd_b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6", domain.JobMessageRequest{
 			Sender:    domain.ActorRef{Kind: domain.ActorCoder, ID: f.coderID},
 			Recipient: domain.ActorRef{Kind: domain.ActorPlanner, ID: f.plannerID},
