@@ -162,7 +162,7 @@ func TestACPHelperProcess(t *testing.T) {
 					"sessionUpdate": "agent_message_chunk",
 					"content":       map[string]string{"type": "text", "text": "fixed ACP response"},
 				}
-				if acpHelperSetting("child") != "" {
+				if acpHelperSetting("child") != "" && promptText == "continue" {
 					update["_meta"] = map[string]any{"opencode/child-session": map[string]any{"id": "child-session"}}
 				}
 				write(map[string]any{
@@ -185,7 +185,7 @@ func TestACPHelperProcess(t *testing.T) {
 					os.Exit(18)
 				}
 				promptResult := map[string]any{"stopReason": stopReason}
-				if acpHelperSetting("usage") != "missing" {
+				if acpHelperSetting("usage") != "missing" || promptText != "continue" {
 					promptResult["usage"] = map[string]uint64{"inputTokens": 10, "outputTokens": 5, "totalTokens": 15}
 				}
 				write(map[string]any{"jsonrpc": "2.0", "id": request.ID, "result": promptResult})
@@ -1391,12 +1391,19 @@ func TestACPAdapterConcurrentCloseReapsLateTrackedProcess(t *testing.T) {
 	default:
 		t.Fatal("Close returned before the late-tracked process exited")
 	}
-	adapter.mu.Lock()
-	remaining := len(adapter.processes)
-	reservations := len(adapter.startingRole) + len(adapter.startingOp)
-	adapter.mu.Unlock()
-	if remaining != 0 || reservations != 0 {
-		t.Fatalf("Close left processes=%d reservations=%d", remaining, reservations)
+	deadline = time.Now().Add(time.Second)
+	for {
+		adapter.mu.Lock()
+		remaining := len(adapter.processes)
+		reservations := len(adapter.startingRole) + len(adapter.startingOp)
+		adapter.mu.Unlock()
+		if remaining == 0 && reservations == 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("Close left processes=%d reservations=%d", remaining, reservations)
+		}
+		time.Sleep(time.Millisecond)
 	}
 }
 
