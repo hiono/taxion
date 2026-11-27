@@ -124,7 +124,7 @@ func runACPProvider(ctx context.Context, args []string, stdout, stderr io.Writer
 	}
 	result, resultErr := adapter.Result(ctx, provider.ResultRequest{
 		OperationID: start.OperationID, SessionID: start.SessionID,
-	})
+}, nil)
 	closeErr := adapter.Close()
 	if resultErr != nil {
 		return report(stderr, resultErr)
