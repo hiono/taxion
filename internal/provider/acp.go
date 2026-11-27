@@ -18,7 +18,12 @@ import (
 	"time"
 )
 
-const maxACPOutputBytes = 4 * 1024 * 1024
+const (
+	maxACPOutputBytes        = 4 * 1024 * 1024
+	maxACPResultCacheBytes   = 64 * 1024 * 1024
+	maxACPResultCacheEntries = 256
+	maxACPResultRetention    = 15 * time.Minute
+)
 
 var errACPWriteNotDispatched = errors.New("ACP request was cancelled before dispatch")
 
@@ -55,7 +60,19 @@ type ACPAdapter struct {
 	retiredOps   map[string]struct{}
 	startingRole map[string]*acpStartReservation
 	startingOp   map[string]*acpStartReservation
-	processes    map[*acpProcess]struct{}
+	processes            map[*acpProcess]struct{}
+	resultCache          map[string]acpResultCacheEntry
+	resultCacheBytes     int64
+	resultCacheLimit     int64
+	resultCacheEntryLimit int
+	resultRetention      time.Duration
+}
+
+type acpResultCacheEntry struct {
+	session     *acpSession
+	operationID string
+	storedAt    time.Time
+	bytes       int64
 }
 
 type acpStartReservation struct {
@@ -75,6 +92,8 @@ type acpSession struct {
 	promptCancelled  bool
 	mu               sync.RWMutex
 	turns            map[string]TurnResult
+	turnStoredAt     map[string]time.Time
+	retiredTurns     map[string]struct{}
 }
 
 func (s *acpSession) lockPrompt(ctx context.Context) (func(), error) {
@@ -170,7 +189,11 @@ func NewACPAdapter(config ACPConfig) (*ACPAdapter, error) {
 		retiredOps:   make(map[string]struct{}),
 		startingRole: make(map[string]*acpStartReservation),
 		startingOp:   make(map[string]*acpStartReservation),
-		processes:    make(map[*acpProcess]struct{}),
+		processes:             make(map[*acpProcess]struct{}),
+		resultCache:           make(map[string]acpResultCacheEntry),
+		resultCacheLimit:      maxACPResultCacheBytes,
+		resultCacheEntryLimit: maxACPResultCacheEntries,
+		resultRetention:       maxACPResultRetention,
 	}, nil
 }
 
@@ -325,6 +348,8 @@ func (a *ACPAdapter) Start(ctx context.Context, request StartRequest, _ Credenti
 		turnGate:         turnGate,
 		promptGate:       promptGate,
 		turns:            make(map[string]TurnResult),
+		turnStoredAt:     make(map[string]time.Time),
+		retiredTurns:     make(map[string]struct{}),
 	}
 	if request.TaskID != "" && request.ExecutionPermissionID != "" && a.config.PermissionAuthorizer != nil {
 		process.setPermissionHandler(func(ctx context.Context, raw json.RawMessage) (bool, func()) {
@@ -563,6 +588,7 @@ func (a *ACPAdapter) send(ctx context.Context, session *acpSession, request Turn
 	operationCtx, cancel := context.WithDeadline(ctx, request.Deadline)
 	defer cancel()
 	a.mu.Lock()
+	a.evictResultCacheLocked(time.Now())
 	owned := !a.closed && a.byID[session.sessionID] == session &&
 		a.byRole[session.roleExecutionID] == session
 	a.mu.Unlock()
@@ -571,9 +597,13 @@ func (a *ACPAdapter) send(ctx context.Context, session *acpSession, request Turn
 	}
 	session.mu.RLock()
 	existing, cached := session.turns[request.OperationID]
+	_, retired := session.retiredTurns[request.OperationID]
 	session.mu.RUnlock()
 	if cached {
 		return existing, nil
+	}
+	if retired {
+		return TurnResult{}, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown}
 	}
 	select {
 	case <-session.turnGate:
@@ -588,6 +618,7 @@ func (a *ACPAdapter) send(ctx context.Context, session *acpSession, request Turn
 		return TurnResult{}, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown}
 	}
 	a.mu.Lock()
+	a.evictResultCacheLocked(time.Now())
 	owned = !a.closed && a.byID[session.sessionID] == session &&
 		a.byRole[session.roleExecutionID] == session
 	a.mu.Unlock()
@@ -599,9 +630,13 @@ func (a *ACPAdapter) send(ctx context.Context, session *acpSession, request Turn
 	}
 	session.mu.RLock()
 	existing, cached = session.turns[request.OperationID]
+	_, retired = session.retiredTurns[request.OperationID]
 	session.mu.RUnlock()
 	if cached {
 		return existing, nil
+	}
+	if retired {
+		return TurnResult{}, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown}
 	}
 
 	var output strings.Builder
@@ -713,10 +748,109 @@ func (a *ACPAdapter) send(ctx context.Context, session *acpSession, request Turn
 		Status: status, TokensUsed: promptReply.Usage.TotalTokens, Output: turnOutput,
 		EvidenceSHA256: sha256Hex(string(response) + "\n" + output.String()),
 	}
-	session.mu.Lock()
-	session.turns[request.OperationID] = result
-	session.mu.Unlock()
+	a.cacheTurnResult(session, result)
 	return result, nil
+}
+
+
+func acpResultCacheKey(sessionID, operationID string) string {
+	return sessionID + "\x00" + operationID
+}
+
+// cacheTurnResult bounds retained output across active and detached Sessions.
+// Operation tombstones remain in the Session after output eviction, preventing a
+// replayed OperationID from being sent again merely because its result expired.
+func (a *ACPAdapter) cacheTurnResult(session *acpSession, result TurnResult) {
+	if a == nil || session == nil || result.OperationID == "" {
+		return
+	}
+	now := time.Now().UTC()
+	key := acpResultCacheKey(result.SessionID, result.OperationID)
+	a.mu.Lock()
+	if a.resultCache == nil {
+		a.resultCache = make(map[string]acpResultCacheEntry)
+	}
+	if previous, found := a.resultCache[key]; found {
+		a.resultCacheBytes -= previous.bytes
+		delete(a.resultCache, key)
+	}
+	session.mu.Lock()
+	if session.turns == nil {
+		session.turns = make(map[string]TurnResult)
+	}
+	if session.turnStoredAt == nil {
+		session.turnStoredAt = make(map[string]time.Time)
+	}
+	if session.retiredTurns == nil {
+		session.retiredTurns = make(map[string]struct{})
+	}
+	session.turns[result.OperationID] = result
+	session.turnStoredAt[result.OperationID] = now
+	session.retiredTurns[result.OperationID] = struct{}{}
+	session.mu.Unlock()
+	resultBytes := int64(len(result.Output))
+	if resultBytes == 0 {
+		resultBytes = 1
+	}
+	a.resultCache[key] = acpResultCacheEntry{
+		session: session, operationID: result.OperationID, storedAt: now, bytes: resultBytes,
+	}
+	a.resultCacheBytes += resultBytes
+	a.evictResultCacheLocked(now)
+	a.mu.Unlock()
+}
+
+func (a *ACPAdapter) evictResultCacheLocked(now time.Time) {
+	if a.resultCache == nil {
+		return
+	}
+	retention := a.resultRetention
+	if retention <= 0 {
+		retention = maxACPResultRetention
+	}
+	for key, entry := range a.resultCache {
+		if now.Sub(entry.storedAt) >= retention {
+			a.removeCachedResultLocked(key, entry)
+		}
+	}
+	byteLimit := a.resultCacheLimit
+	if byteLimit <= 0 {
+		byteLimit = maxACPResultCacheBytes
+	}
+	entryLimit := a.resultCacheEntryLimit
+	if entryLimit <= 0 {
+		entryLimit = maxACPResultCacheEntries
+	}
+	for a.resultCacheBytes > byteLimit || len(a.resultCache) > entryLimit {
+		oldestKey := ""
+		var oldest acpResultCacheEntry
+		for key, entry := range a.resultCache {
+			if oldestKey == "" || entry.storedAt.Before(oldest.storedAt) {
+				oldestKey, oldest = key, entry
+			}
+		}
+		if oldestKey == "" {
+			return
+		}
+		a.removeCachedResultLocked(oldestKey, oldest)
+	}
+}
+
+func (a *ACPAdapter) removeCachedResultLocked(key string, entry acpResultCacheEntry) {
+	delete(a.resultCache, key)
+	a.resultCacheBytes -= entry.bytes
+	if a.resultCacheBytes < 0 {
+		a.resultCacheBytes = 0
+	}
+	if entry.session == nil {
+		return
+	}
+	entry.session.mu.Lock()
+	if storedAt, found := entry.session.turnStoredAt[entry.operationID]; found && storedAt.Equal(entry.storedAt) {
+		delete(entry.session.turns, entry.operationID)
+		delete(entry.session.turnStoredAt, entry.operationID)
+	}
+	entry.session.mu.Unlock()
 }
 
 func (a *ACPAdapter) detachSession(session *acpSession) {
@@ -772,6 +906,7 @@ func (a *ACPAdapter) Result(ctx context.Context, request ResultRequest, _ Creden
 		return Result{}, err
 	}
 	a.mu.Lock()
+	a.evictResultCacheLocked(time.Now())
 	session := a.byID[request.SessionID]
 	if session == nil {
 		session = a.detached[request.SessionID]
@@ -781,16 +916,14 @@ func (a *ACPAdapter) Result(ctx context.Context, request ResultRequest, _ Creden
 		return Result{}, ErrUnsupportedCapability
 	}
 	session.mu.RLock()
-	defer session.mu.RUnlock()
-	for _, turn := range session.turns {
-		if turn.Status == "COMPLETED" && turn.OperationID == request.OperationID &&
-			(request.TurnID == "" || turn.TurnID == request.TurnID) {
-			return Result{
-				OperationID: turn.OperationID, SessionID: turn.SessionID, TurnID: turn.TurnID,
-				Content: turn.Output, ResultSHA256: sha256Hex(turn.Output), Final: true,
-				EvidenceSHA256: turn.EvidenceSHA256,
-			}, nil
-		}
+	turn, found := session.turns[request.OperationID]
+	session.mu.RUnlock()
+	if found && turn.Status == "COMPLETED" && (request.TurnID == "" || turn.TurnID == request.TurnID) {
+		return Result{
+			OperationID: turn.OperationID, SessionID: turn.SessionID, TurnID: turn.TurnID,
+			Content: turn.Output, ResultSHA256: sha256Hex(turn.Output), Final: true,
+			EvidenceSHA256: turn.EvidenceSHA256,
+		}, nil
 	}
 	return Result{}, ErrUnsupportedCapability
 }
