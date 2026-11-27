@@ -229,14 +229,8 @@ func questionHasTurnIntent(job domain.Job, questionMessageID string) bool {
 }
 
 func questionHasPlannerReply(job domain.Job, question domain.JobMessage) bool {
-	for _, message := range job.JobMessages {
-		if message.ReplyToMessageID == question.ID &&
-			message.Sender == (domain.ActorRef{Kind: domain.ActorPlanner, ID: question.Recipient.ID}) &&
-			message.Recipient == question.Sender {
-			return true
-		}
-	}
-	return false
+	_, found := existingPlannerReply(job, question)
+	return found
 }
 
 func latestQuestionTurnIntentForAuthorization(
