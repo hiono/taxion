@@ -755,8 +755,14 @@ func (a *ACPAdapter) send(ctx context.Context, session *acpSession, request Turn
 		} `json:"usage"`
 	}
 	if json.Unmarshal(response, &promptReply) != nil || promptReply.StopReason != "end_turn" ||
-		output.Len() == 0 || promptReply.Usage == nil || promptReply.Usage.TotalTokens == 0 || childSessionSeen.Load() {
+		output.Len() == 0 || childSessionSeen.Load() {
 		return TurnResult{}, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown}
+	}
+	// ACP peers may omit usage entirely. Preserve the completed response and
+	// report zero known tokens; this adapter does not claim Usage capability.
+	var tokensUsed uint64
+	if promptReply.Usage != nil {
+		tokensUsed = promptReply.Usage.TotalTokens
 	}
 	a.mu.Lock()
 	owned = !a.closed && a.byID[session.sessionID] == session &&
@@ -767,14 +773,14 @@ func (a *ACPAdapter) send(ctx context.Context, session *acpSession, request Turn
 	}
 	status := "COMPLETED"
 	turnOutput := output.String()
-	if promptReply.Usage.TotalTokens > request.MaxTokens {
+	if tokensUsed > request.MaxTokens {
 		status = "FAILED"
 		turnOutput = ""
 	}
 	result := TurnResult{
 		OperationID: request.OperationID, TurnID: request.TurnID,
 		SessionID: request.SessionID, ReceiptID: acpReceiptID("acp-turn-", request.TurnID),
-		Status: status, TokensUsed: promptReply.Usage.TotalTokens, Output: turnOutput,
+		Status: status, TokensUsed: tokensUsed, Output: turnOutput,
 		EvidenceSHA256: sha256Hex(string(response) + "\n" + output.String()),
 	}
 	a.cacheTurnResult(session, result)
