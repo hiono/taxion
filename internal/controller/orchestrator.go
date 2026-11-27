@@ -15,7 +15,6 @@ type OrchestratorStore interface {
 
 type OrchestratorMessageOutcome struct {
 	Message         CommunicationOutcome
-	QuestionTurns   []JobQuestionTurnOutcome
 	ResumedContexts []RoleExecutionContext
 }
 
@@ -47,7 +46,8 @@ func NewOrchestratorController(
 	}, nil
 }
 
-// SendRoleMessage persists a natural-language message and routes it to the recipient Role.
+// SendRoleMessage persists and routes a natural-language message.
+// Provider execution is requested separately through ProcessPlannerQuestions.
 func (c *OrchestratorController) SendRoleMessage(
 	ctx context.Context,
 	request RoleMessageRequest,
@@ -60,81 +60,6 @@ func (c *OrchestratorController) SendRoleMessage(
 	outcome.Message = message
 
 	switch request.Recipient.Kind {
-	case domain.ActorPlanner:
-		outcome.QuestionTurns, err = c.ProcessPlannerInbox(ctx, request.JobID, request.Recipient.ID)
-		contexts := make(map[domain.ActorRef]RoleExecutionContext)
-		order := make([]domain.ActorRef, 0, len(outcome.QuestionTurns)+1)
-		ordered := make(map[domain.ActorRef]bool)
-		var restoreErrors []error
-		for _, turn := range outcome.QuestionTurns {
-			reply := turn.Reply.Message
-			if reply.ID == "" {
-				continue
-			}
-			recipient := reply.Recipient
-			if _, restored := contexts[recipient]; restored {
-				continue
-			}
-			if !ordered[recipient] {
-				order = append(order, recipient)
-				ordered[recipient] = true
-			}
-			resumed, contextErr := c.communication.ContextForMessage(ctx, request.JobID, reply.ID)
-			if contextErr != nil {
-				restoreErrors = append(restoreErrors, fmt.Errorf("restore original Role context after Planner reply: %w", contextErr))
-				if ctx.Err() != nil {
-					break
-				}
-				continue
-			}
-			contexts[recipient] = resumed
-		}
-
-		replyContextRestored := false
-		for _, resumed := range contexts {
-			for _, reply := range resumed.Messages {
-				if reply.ReplyToMessageID == message.Message.ID &&
-					reply.Sender == (domain.ActorRef{Kind: domain.ActorPlanner, ID: request.Recipient.ID}) &&
-					reply.Recipient == message.Message.Sender {
-					replyContextRestored = true
-					break
-				}
-			}
-			if replyContextRestored {
-				break
-			}
-		}
-		if !replyContextRestored && ctx.Err() == nil {
-			resumed, found, contextErr := c.contextForPlannerReply(ctx, request.JobID, message.Message.ID)
-			if contextErr != nil {
-				restoreErrors = append(restoreErrors, contextErr)
-			} else if found {
-				actorKind, actorErr := actorKindForRole(resumed.RoleExecution.Role)
-				if actorErr != nil {
-					restoreErrors = append(restoreErrors, actorErr)
-				} else {
-					actor := domain.ActorRef{Kind: actorKind, ID: resumed.RoleExecution.ID}
-					if !ordered[actor] {
-						order = append(order, actor)
-						ordered[actor] = true
-					}
-					// The fallback reads the latest Job; replace any older context for this Actor.
-					contexts[actor] = resumed
-				}
-			}
-		}
-		for _, actor := range order {
-			if resumed, found := contexts[actor]; found {
-				outcome.ResumedContexts = append(outcome.ResumedContexts, resumed)
-			}
-		}
-		if err != nil {
-			restoreErrors = append(restoreErrors, err)
-		}
-		if ctx.Err() != nil {
-			restoreErrors = append(restoreErrors, ctx.Err())
-		}
-		return outcome, errors.Join(restoreErrors...)
 	case domain.ActorCoder, domain.ActorReviewer:
 		resumed, contextErr := c.communication.ContextForMessage(ctx, request.JobID, message.Message.ID)
 		if contextErr != nil {
@@ -145,44 +70,20 @@ func (c *OrchestratorController) SendRoleMessage(
 	return outcome, nil
 }
 
-func (c *OrchestratorController) contextForPlannerReply(
-	ctx context.Context,
-	jobID, questionMessageID string,
-) (RoleExecutionContext, bool, error) {
-	job, err := c.store.GetJob(ctx, jobID)
-	if err != nil {
-		return RoleExecutionContext{}, false, err
-	}
-	for _, message := range job.JobMessages {
-		if message.ReplyToMessageID != questionMessageID ||
-			message.Sender.Kind != domain.ActorPlanner {
-			continue
-		}
-		resumed, err := c.communication.ContextForMessage(ctx, jobID, message.ID)
-		return resumed, err == nil, err
-	}
-	return RoleExecutionContext{}, false, nil
-}
-
-// ProcessPlannerInbox routes persisted Coder / Reviewer questions to the same
-// Taskless Planner execution and returns the answer to each original sender.
-func (c *OrchestratorController) ProcessPlannerInbox(
+// ProcessPlannerQuestions executes only the explicitly selected Planner questions.
+// Ordinary JobMessage delivery never starts a Provider operation implicitly.
+func (c *OrchestratorController) ProcessPlannerQuestions(
 	ctx context.Context,
 	jobID, plannerRoleExecutionID string,
+	questionMessageIDs ...string,
 ) ([]JobQuestionTurnOutcome, error) {
-	if ctx == nil || jobID == "" || plannerRoleExecutionID == "" {
-		return nil, errors.New("Planner inbox processing requires Job and RoleExecution identities")
+	if ctx == nil || jobID == "" || plannerRoleExecutionID == "" || len(questionMessageIDs) == 0 {
+		return nil, errors.New("Planner question processing requires Job, Planner, and Question identities")
 	}
-	inbox, err := c.communication.InboxForRole(ctx, jobID, plannerRoleExecutionID)
-	if err != nil {
-		return nil, err
-	}
-	outcomes := make([]JobQuestionTurnOutcome, 0, len(inbox))
+	outcomes := make([]JobQuestionTurnOutcome, 0, len(questionMessageIDs))
 	var processingErrors []error
-	for _, question := range inbox {
-		if question.Sender.Kind != domain.ActorCoder && question.Sender.Kind != domain.ActorReviewer {
-			continue
-		}
+	sessionBlocked := false
+	for _, questionMessageID := range questionMessageIDs {
 		job, err := c.store.GetJob(ctx, jobID)
 		if err != nil {
 			return outcomes, err
@@ -190,9 +91,56 @@ func (c *OrchestratorController) ProcessPlannerInbox(
 		if err := job.Validate(); err != nil {
 			return outcomes, fmt.Errorf("validate Job before routing Planner question: %w", err)
 		}
-		if questionHasPlannerReply(job, question) && !questionHasTurnIntent(job, question.ID) {
+		question, found := findJobMessage(job, questionMessageID)
+		if !found {
+			return outcomes, fmt.Errorf("Planner question %s was not found", questionMessageID)
+		}
+		if question.Recipient != (domain.ActorRef{Kind: domain.ActorPlanner, ID: plannerRoleExecutionID}) ||
+			(question.Sender.Kind != domain.ActorCoder && question.Sender.Kind != domain.ActorReviewer) {
+			return outcomes, fmt.Errorf("JobMessage %s is not a Coder / Reviewer question addressed to this Planner", questionMessageID)
+		}
+
+		intent, hasIntent := latestQuestionTurnIntentForMessage(job, question.ID)
+		if questionHasPlannerReply(job, question) && !hasIntent {
+			reply, _ := existingPlannerReply(job, question)
+			outcomes = append(outcomes, JobQuestionTurnOutcome{Reply: CommunicationOutcome{Message: reply}})
 			continue
 		}
+		if hasIntent {
+			if observation, observed := latestJobQuestionTurnObservation(job, intent.ID); observed &&
+				observation.Status == domain.JobQuestionTurnFailed {
+				continue
+			}
+			if sessionBlocked {
+				if observation, observed := latestJobQuestionTurnObservation(job, intent.ID); !observed ||
+					observation.Status != domain.JobQuestionTurnCompleted {
+					continue
+				}
+			}
+			outcome, err := c.questionTurn.Send(
+				ctx, jobID, intent.JobQuestionAuthorizationID, intent.CommandID, intent.ReservedTokens,
+			)
+			outcomes = append(outcomes, outcome)
+			if err != nil {
+				if ctx.Err() != nil {
+					return outcomes, ctx.Err()
+				}
+				processingErrors = append(processingErrors, fmt.Errorf("process Planner question %s: %w", question.ID, err))
+				if outcome.Observation.Status == domain.JobQuestionTurnUnknown {
+					sessionBlocked = true
+				}
+			}
+			continue
+		}
+		if sessionBlocked {
+			continue
+		}
+		if questionHasPlannerReply(job, question) {
+			reply, _ := existingPlannerReply(job, question)
+			outcomes = append(outcomes, JobQuestionTurnOutcome{Reply: CommunicationOutcome{Message: reply}})
+			continue
+		}
+
 		grant, found := questionAuthorizationForMessage(job, question.ID)
 		if !found {
 			deadline, err := questionAuthorizationDeadline(job, plannerRoleExecutionID)
@@ -212,16 +160,7 @@ func (c *OrchestratorController) ProcessPlannerInbox(
 			}
 		}
 		commandID := orchestratorQuestionTurnCommandID(grant.ID)
-		reservedTokens := grant.Budget.MaxTokens
-		if intent, exists := latestQuestionTurnIntentForAuthorization(job, grant.ID); exists {
-			if observation, observed := latestJobQuestionTurnObservation(job, intent.ID); observed &&
-				observation.Status == domain.JobQuestionTurnFailed {
-				continue
-			}
-			commandID = intent.CommandID
-			reservedTokens = intent.ReservedTokens
-		}
-		outcome, err := c.questionTurn.Send(ctx, jobID, grant.ID, commandID, reservedTokens)
+		outcome, err := c.questionTurn.Send(ctx, jobID, grant.ID, commandID, grant.Budget.MaxTokens)
 		outcomes = append(outcomes, outcome)
 		if err != nil {
 			if ctx.Err() != nil {
@@ -229,12 +168,26 @@ func (c *OrchestratorController) ProcessPlannerInbox(
 			}
 			processingErrors = append(processingErrors, fmt.Errorf("process Planner question %s: %w", question.ID, err))
 			if outcome.Observation.Status == domain.JobQuestionTurnUnknown {
-				break
+				sessionBlocked = true
 			}
-			continue
 		}
 	}
 	return outcomes, errors.Join(processingErrors...)
+}
+
+func latestQuestionTurnIntentForMessage(
+	job domain.Job,
+	questionMessageID string,
+) (domain.JobQuestionTurnIntent, bool) {
+	var latest domain.JobQuestionTurnIntent
+	found := false
+	for _, intent := range job.JobQuestionTurnIntents {
+		if intent.QuestionMessageID == questionMessageID &&
+			(!found || intent.CreatedRevision > latest.CreatedRevision) {
+			latest, found = intent, true
+		}
+	}
+	return latest, found
 }
 
 func questionAuthorizationForMessage(
@@ -250,15 +203,6 @@ func questionAuthorizationForMessage(
 		}
 	}
 	return latest, found
-}
-
-func questionHasTurnIntent(job domain.Job, questionMessageID string) bool {
-	for _, intent := range job.JobQuestionTurnIntents {
-		if intent.QuestionMessageID == questionMessageID {
-			return true
-		}
-	}
-	return false
 }
 
 func questionHasPlannerReply(job domain.Job, question domain.JobMessage) bool {
