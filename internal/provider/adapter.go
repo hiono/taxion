@@ -34,7 +34,8 @@ const (
 	CapabilityStartIdempotency  Capability = "start.idempotency"
 	CapabilityStartLookup       Capability = "start.lookup"
 	CapabilitySendIdempotency   Capability = "send.idempotency"
-	CapabilitySendLookup        Capability = "send.lookup"
+	CapabilitySendLookup                 Capability = "send.lookup"
+	CapabilityReadOnlyContextEnforcement Capability = "send.read_only_context_enforcement"
 	CapabilitySessionReattach   Capability = "session.cross_process_reattachment"
 	CapabilityEventReplay       Capability = "event.replay"
 	CapabilityStopProof         Capability = "stop.proof"
@@ -67,6 +68,7 @@ type Capabilities struct {
 	StartLookup                 bool
 	SendIdempotency             bool
 	SendLookup                  bool
+	ReadOnlyContextEnforcement  bool
 	CrossProcessSessionReattach bool
 	EventReplay                 bool
 	StopProof                   bool
@@ -126,6 +128,8 @@ func (c Capabilities) Has(capability Capability) bool {
 		return c.SendIdempotency
 	case CapabilitySendLookup:
 		return c.SendLookup
+	case CapabilityReadOnlyContextEnforcement:
+		return c.ReadOnlyContextEnforcement
 	case CapabilitySessionReattach:
 		return c.CrossProcessSessionReattach
 	case CapabilityEventReplay:
@@ -218,6 +222,8 @@ func setCapability(capabilities *Capabilities, capability Capability) {
 		capabilities.SendIdempotency = true
 	case CapabilitySendLookup:
 		capabilities.SendLookup = true
+	case CapabilityReadOnlyContextEnforcement:
+		capabilities.ReadOnlyContextEnforcement = true
 	case CapabilitySessionReattach:
 		capabilities.CrossProcessSessionReattach = true
 	case CapabilityEventReplay:
@@ -291,7 +297,7 @@ func (c Capabilities) Validate(expected Identity) error {
 
 var allCapabilities = []Capability{
 	CapabilityStartIdempotency, CapabilityStartLookup,
-	CapabilitySendIdempotency, CapabilitySendLookup,
+	CapabilitySendIdempotency, CapabilitySendLookup, CapabilityReadOnlyContextEnforcement,
 	CapabilitySessionReattach, CapabilityEventReplay,
 	CapabilityStopProof, CapabilityFinalOutput,
 	CapabilityUsageIdentity, CapabilityUsageCompleteness,
