@@ -43,8 +43,11 @@ type ACPAdapter struct {
 	config       ACPConfig
 	mu           sync.Mutex
 	closed       bool
+	closeDone    chan struct{}
+	closeErr     error
 	byRole       map[string]*acpSession
 	byID         map[string]*acpSession
+	detached     map[string]*acpSession
 	byOp         map[string]StartResult
 	startingRole map[string]*acpStartReservation
 	startingOp   map[string]*acpStartReservation
@@ -136,6 +139,7 @@ func NewACPAdapter(config ACPConfig) (*ACPAdapter, error) {
 		config:       config,
 		byRole:       make(map[string]*acpSession),
 		byID:         make(map[string]*acpSession),
+		detached:     make(map[string]*acpSession),
 		byOp:         make(map[string]StartResult),
 		startingRole: make(map[string]*acpStartReservation),
 		startingOp:   make(map[string]*acpStartReservation),
@@ -194,9 +198,18 @@ func (a *ACPAdapter) Start(ctx context.Context, request StartRequest, _ Credenti
 		return StartResult{}, &OperationError{Class: FailureDefinitive, Code: OperationCodeUnavailable}
 	}
 	if existing, ok := a.byOp[request.OperationID]; ok {
-		a.mu.Unlock()
-		cancel()
-		return existing, nil
+		if session := a.byID[existing.SessionID]; session != nil {
+			select {
+			case <-session.process.done:
+				a.retireSessionLocked(session)
+			default:
+				a.mu.Unlock()
+				cancel()
+				return existing, nil
+			}
+		} else {
+			delete(a.byOp, request.OperationID)
+		}
 	}
 	if a.byRole[request.RoleExecutionID] != nil || a.startingRole[request.RoleExecutionID] != nil ||
 		a.startingOp[request.OperationID] != nil {
@@ -349,23 +362,47 @@ func (a *ACPAdapter) trackProcess(process *acpProcess) error {
 		return errors.New("ACP process tracking requires an adapter and process")
 	}
 	a.mu.Lock()
-	if a.closed {
-		a.mu.Unlock()
-		closeErr := process.close(context.Background())
-		return errors.Join(errors.New("ACP adapter is closed"), closeErr)
-	}
 	if a.processes == nil {
 		a.processes = make(map[*acpProcess]struct{})
 	}
 	a.processes[process] = struct{}{}
+	closed := a.closed
 	a.mu.Unlock()
 	go func() {
 		<-process.done
 		a.mu.Lock()
 		delete(a.processes, process)
+		for _, session := range a.byID {
+			if session.process == process {
+				a.retireSessionLocked(session)
+			}
+		}
 		a.mu.Unlock()
 	}()
+	if closed {
+		// Close waits for the Start reservation and then takes a second process
+		// snapshot, so a process launched after its first snapshot is still reaped.
+		return errors.New("ACP adapter is closed")
+	}
 	return nil
+}
+
+func (a *ACPAdapter) retireSessionLocked(session *acpSession) {
+	if session == nil {
+		return
+	}
+	if a.byID[session.sessionID] == session {
+		delete(a.byID, session.sessionID)
+		a.detached[session.sessionID] = session
+	}
+	if a.byRole[session.roleExecutionID] == session {
+		delete(a.byRole, session.roleExecutionID)
+	}
+	for operationID, result := range a.byOp {
+		if result.SessionID == session.sessionID {
+			delete(a.byOp, operationID)
+		}
+	}
 }
 
 func (a *ACPAdapter) releaseStartReservation(roleExecutionID, operationID string, reservation *acpStartReservation) {
@@ -528,20 +565,7 @@ func (a *ACPAdapter) detachSession(session *acpSession) {
 		return
 	}
 	a.mu.Lock()
-	owned := a.byID[session.sessionID] == session
-	if owned {
-		delete(a.byID, session.sessionID)
-	}
-	if a.byRole[session.roleExecutionID] == session {
-		delete(a.byRole, session.roleExecutionID)
-	}
-	if owned {
-		for operationID, result := range a.byOp {
-			if result.SessionID == session.sessionID {
-				delete(a.byOp, operationID)
-			}
-		}
-	}
+	a.retireSessionLocked(session)
 	a.mu.Unlock()
 }
 
@@ -582,6 +606,9 @@ func (a *ACPAdapter) Result(ctx context.Context, request ResultRequest, _ Creden
 	}
 	a.mu.Lock()
 	session := a.byID[request.SessionID]
+	if session == nil {
+		session = a.detached[request.SessionID]
+	}
 	a.mu.Unlock()
 	if session == nil {
 		return Result{}, ErrUnsupportedCapability
@@ -614,17 +641,24 @@ func (a *ACPAdapter) Close() error {
 		return nil
 	}
 	a.mu.Lock()
-	if a.closed && len(a.processes) == 0 && len(a.startingRole) == 0 && len(a.startingOp) == 0 {
+	if a.closeDone != nil {
+		done := a.closeDone
 		a.mu.Unlock()
-		return nil
+		<-done
+		a.mu.Lock()
+		err := a.closeErr
+		a.mu.Unlock()
+		return err
 	}
 	a.closed = true
+	a.closeDone = make(chan struct{})
+	closeDone := a.closeDone
 	for _, session := range a.byID {
 		session.stopping.Store(true)
 	}
-	processes := make([]*acpProcess, 0, len(a.processes))
+	processes := make(map[*acpProcess]struct{}, len(a.processes))
 	for process := range a.processes {
-		processes = append(processes, process)
+		processes[process] = struct{}{}
 	}
 	reservations := make(map[*acpStartReservation]struct{}, len(a.startingRole)+len(a.startingOp))
 	for _, reservation := range a.startingRole {
@@ -636,33 +670,52 @@ func (a *ACPAdapter) Close() error {
 	for reservation := range reservations {
 		reservation.cancel()
 	}
-	a.startingRole = make(map[string]*acpStartReservation)
-	a.startingOp = make(map[string]*acpStartReservation)
 	a.byID = make(map[string]*acpSession)
 	a.byRole = make(map[string]*acpSession)
+	a.detached = make(map[string]*acpSession)
 	a.byOp = make(map[string]StartResult)
 	a.mu.Unlock()
 
-	var wait sync.WaitGroup
-	errorsCh := make(chan error, len(processes))
-	for _, process := range processes {
-		wait.Add(1)
-		go func(process *acpProcess) {
-			defer wait.Done()
-			if err := process.close(context.Background()); err != nil {
-				errorsCh <- err
-			}
-		}(process)
-	}
-	wait.Wait()
-	close(errorsCh)
 	var joined error
-	for err := range errorsCh {
-		joined = errors.Join(joined, err)
+	closeProcesses := func(candidates map[*acpProcess]struct{}) {
+		var wait sync.WaitGroup
+		errorsCh := make(chan error, len(candidates))
+		for process := range candidates {
+			wait.Add(1)
+			go func(process *acpProcess) {
+				defer wait.Done()
+				if err := process.close(context.Background()); err != nil {
+					errorsCh <- err
+				}
+			}(process)
+		}
+		wait.Wait()
+		close(errorsCh)
+		for err := range errorsCh {
+			joined = errors.Join(joined, err)
+		}
 	}
+	closeProcesses(processes)
 	for reservation := range reservations {
 		<-reservation.done
 	}
+
+	// A Start may have launched its process after the first snapshot. All
+	// reservations are complete now, so this second snapshot is exhaustive.
+	a.mu.Lock()
+	lateProcesses := make(map[*acpProcess]struct{})
+	for process := range a.processes {
+		if _, alreadyClosed := processes[process]; !alreadyClosed {
+			lateProcesses[process] = struct{}{}
+		}
+	}
+	a.mu.Unlock()
+	closeProcesses(lateProcesses)
+
+	a.mu.Lock()
+	a.closeErr = joined
+	close(closeDone)
+	a.mu.Unlock()
 	return joined
 }
 
