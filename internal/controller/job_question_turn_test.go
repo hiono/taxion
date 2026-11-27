@@ -1113,8 +1113,8 @@ func TestJobQuestionTurnReturnsExistingPlannerReplyBeforeExpiredGrantRecovery(t 
 	}
 	_, err = communication.SendFromRole(context.Background(), RoleMessageRequest{
 		JobID: f.jobID, RoleExecutionID: f.plannerID, ProviderSessionID: f.sessionID,
-		CommandID: "cmd_b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5",
-		Recipient: domain.ActorRef{Kind: domain.ActorCoder, ID: f.coderID},
+		CommandID:        "cmd_b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5",
+		Recipient:        domain.ActorRef{Kind: domain.ActorCoder, ID: f.coderID},
 		ReplyToMessageID: f.questionID, Body: "ordinary Planner reply",
 	})
 	if err != nil {
