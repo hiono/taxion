@@ -9,9 +9,10 @@ import (
 )
 
 const (
-	ProviderStartAccepted = "ACCEPTED"
-	ProviderStartFailed   = "FAILED"
-	ProviderStartUnknown  = "UNKNOWN"
+	ProviderStartAccepted      = "ACCEPTED"
+	ProviderStartFailed        = "FAILED"
+	ProviderStartUnknown       = "UNKNOWN"
+	ProviderStartNotDispatched = "NOT_DISPATCHED"
 )
 
 type ProviderStartObservation struct {
@@ -84,6 +85,10 @@ func NewProviderStartObservation(
 		if providerSessionID != "" || !validSHA256(evidenceSHA256) {
 			return ProviderStartObservation{}, errors.New("failed Provider Start observation requires terminal evidence and no Session")
 		}
+	case ProviderStartNotDispatched:
+		if providerSessionID != "" || receiptID != "" || !validSHA256(evidenceSHA256) || reconcilesUnknown {
+			return ProviderStartObservation{}, errors.New("NOT_DISPATCHED Provider Start observation contains Provider dispatch claims")
+		}
 	default:
 		return ProviderStartObservation{}, errors.New("unsupported Provider Start observation status")
 	}
@@ -98,14 +103,19 @@ func NewProviderStartObservation(
 		if reconcilesUnknown {
 			return ProviderStartObservation{}, errors.New("first Provider Start observation cannot reconcile UNKNOWN")
 		}
-	} else if previous.Status != ProviderStartUnknown {
-		return ProviderStartObservation{}, errors.New("terminal Provider Start observation cannot be replaced")
-	} else if status == ProviderStartUnknown {
-		if reconcilesUnknown {
-			return ProviderStartObservation{}, errors.New("UNKNOWN Provider Start observation cannot claim terminal reconciliation")
+	} else {
+		switch previous.Status {
+		case ProviderStartUnknown:
+			if status == ProviderStartUnknown || status == ProviderStartNotDispatched || !reconcilesUnknown {
+				return ProviderStartObservation{}, errors.New("only terminal evidence may reconcile UNKNOWN Provider Start")
+			}
+		case ProviderStartNotDispatched:
+			if reconcilesUnknown {
+				return ProviderStartObservation{}, errors.New("NOT_DISPATCHED Provider Start retry cannot reconcile UNKNOWN")
+			}
+		default:
+			return ProviderStartObservation{}, errors.New("terminal Provider Start observation cannot be replaced")
 		}
-	} else if !reconcilesUnknown {
-		return ProviderStartObservation{}, errors.New("terminal Provider Start observation must reconcile prior UNKNOWN")
 	}
 	if job.Revision >= uint64(^uint64(0)>>1) {
 		return ProviderStartObservation{}, errors.New("Job revision exhausted")
@@ -193,6 +203,10 @@ func (o ProviderStartObservation) Validate(job Job, start ProviderStartIntent) e
 		if o.ProviderSessionID != "" || !validSHA256(o.EvidenceSHA256) {
 			return errors.New("failed Provider Start observation evidence is invalid")
 		}
+	case ProviderStartNotDispatched:
+		if o.ProviderSessionID != "" || o.ReceiptID != "" || !validSHA256(o.EvidenceSHA256) || o.ReconcilesUnknown {
+			return errors.New("NOT_DISPATCHED Provider Start observation contains Provider dispatch claims")
+		}
 	default:
 		return errors.New("Provider Start observation status is invalid")
 	}
@@ -227,6 +241,11 @@ func validateProviderStartSession(job Job, start ProviderStartIntent, sessionID 
 		return &PlanningBoundaryError{
 			Boundary: PlanningBoundaryTurn, ReasonCode: "provider_start_unknown",
 			Cause: errors.New("Provider Start is unresolved; reconcile the same OperationID before starting a turn"),
+		}
+	case ProviderStartNotDispatched:
+		return &PlanningBoundaryError{
+			Boundary: PlanningBoundaryTurn, ReasonCode: "provider_start_not_dispatched",
+			Cause: errors.New("Provider Start was not dispatched; retry the same OperationID"),
 		}
 	case ProviderStartFailed:
 		return &PlanningBoundaryError{
