@@ -1069,7 +1069,6 @@ func (a *ACPAdapter) startProcess() (*acpProcess, error) {
 		return nil, errors.New("prepare persistent ACP home failed")
 	}
 	for _, directory := range []string{".config", ".cache", ".local/share"} {
-	for _, directory := range []string{".config", ".cache", ".local/share"} {
 		if err := os.MkdirAll(filepath.Join(homeDir, directory), 0700); err != nil {
 			cleanupHome()
 			return nil, errors.New("prepare ACP home failed")
