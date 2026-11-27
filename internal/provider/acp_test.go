@@ -270,6 +270,9 @@ func TestACPAdapterUsesOneProcessPerRoleAndDeniesToolRequests(t *testing.T) {
 		capabilities.Has(CapabilityStartLookup) || capabilities.Has(CapabilitySendLookup) {
 		t.Fatal("ACP transport was allowed to claim unverified recovery capabilities")
 	}
+	if !capabilities.HasEvidenceAtLeast(CapabilityReadOnlyContextEnforcement, EvidenceSynthetic) {
+		t.Fatal("ACP Taskless sessions did not report their default-deny tool permission boundary")
+	}
 
 	if _, err := adapter.Start(ctx, start, nil); err != nil {
 		t.Fatalf("same in-process Start operation was not reused: %v", err)
