@@ -280,26 +280,50 @@ func TestACPAdapterUsesOneProcessPerRoleAndDeniesToolRequests(t *testing.T) {
 	}
 }
 
-func TestACPAdapterFailsClosedWhenUsageIsMissingOrIncomplete(t *testing.T) {
-	for _, helperSetting := range []string{"1;usage=missing", "1;child=1"} {
-		t.Run(helperSetting, func(t *testing.T) {
-			t.Setenv("TAXION_ACP_HELPER", helperSetting)
-			adapter := newACPTestAdapter(t)
-			defer adapter.Close()
-			started, err := adapter.Start(context.Background(), newACPTestStartRequest("start", "role_execution_usage"), nil)
-			if err != nil {
-				t.Fatalf("Start: %v", err)
-			}
-			prompt := "continue"
-			_, err = adapter.Send(context.Background(), TurnRequest{
-				OperationID: "operation_turn_usage", TurnID: "turn_usage", SessionID: started.SessionID,
-				PromptSHA256: sha256Hex(prompt), Prompt: prompt, MaxTokens: 1000, Deadline: time.Now().Add(8 * time.Second),
-			}, nil)
-			var operationErr *OperationError
-			if !errors.As(err, &operationErr) || operationErr.Class != FailureAmbiguous || operationErr.Code != OperationCodeUnknown {
-				t.Fatalf("Send error = %v, want ambiguous unknown when usage is incomplete", err)
-			}
-		})
+func TestACPAdapterKeepsCompletedOutputWhenUsageIsMissing(t *testing.T) {
+	t.Setenv("TAXION_ACP_HELPER", "1;usage=missing")
+	adapter := newACPTestAdapter(t)
+	defer adapter.Close()
+	started, err := adapter.Start(context.Background(), newACPTestStartRequest("start", "role_execution_usage"), nil)
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	prompt := "continue"
+	turn, err := adapter.Send(context.Background(), TurnRequest{
+		OperationID: "operation_turn_usage", TurnID: "turn_usage", SessionID: started.SessionID,
+		PromptSHA256: sha256Hex(prompt), Prompt: prompt, MaxTokens: 1000, Deadline: time.Now().Add(8 * time.Second),
+	}, nil)
+	if err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	if turn.Status != "COMPLETED" || turn.TokensUsed != 0 || turn.Output != "fixed ACP response" {
+		t.Fatalf("Turn = %#v, want completed output with unknown usage represented as zero known tokens", turn)
+	}
+	capabilities, err := adapter.Capabilities(context.Background())
+	if err != nil {
+		t.Fatalf("Capabilities: %v", err)
+	}
+	if capabilities.Has(CapabilityUsageIdentity) || capabilities.Has(CapabilityUsageCompleteness) {
+		t.Fatal("ACP adapter claimed usage capabilities without Provider evidence")
+	}
+}
+
+func TestACPAdapterFailsClosedWhenChildSessionOutputIsDetected(t *testing.T) {
+	t.Setenv("TAXION_ACP_HELPER", "1;child=1")
+	adapter := newACPTestAdapter(t)
+	defer adapter.Close()
+	started, err := adapter.Start(context.Background(), newACPTestStartRequest("start", "role_execution_child"), nil)
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	prompt := "continue"
+	_, err = adapter.Send(context.Background(), TurnRequest{
+		OperationID: "operation_turn_child", TurnID: "turn_child", SessionID: started.SessionID,
+		PromptSHA256: sha256Hex(prompt), Prompt: prompt, MaxTokens: 1000, Deadline: time.Now().Add(8 * time.Second),
+	}, nil)
+	var operationErr *OperationError
+	if !errors.As(err, &operationErr) || operationErr.Class != FailureAmbiguous || operationErr.Code != OperationCodeUnknown {
+		t.Fatalf("Send error = %v, want ambiguous unknown for child-session output", err)
 	}
 }
 
