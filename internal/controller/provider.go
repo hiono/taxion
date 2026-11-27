@@ -374,9 +374,12 @@ func (c *ProviderController) DispatchTaskExecution(
 	if execution.Role != domain.RoleCoder {
 		return domain.ProviderStartObservation{}, provider.StartResult{}, errors.New("Reviewer Provider dispatch requires an immutable Worktree snapshot and enforced read-only boundary")
 	}
-	if execution.ExecutionPermissionID != permissionID || execution.TaskID == "" ||
-		execution.WorktreeAssignmentID == "" || execution.WorktreePath == "" {
+	if execution.ExecutionPermissionID != permissionID || execution.TaskID == "" {
 		return domain.ProviderStartObservation{}, provider.StartResult{}, errors.New("Task Provider dispatch permission or Task binding mismatch")
+	}
+	worktreeBound := execution.WorktreeAssignmentID != "" && execution.WorktreePath != ""
+	if (execution.WorktreeAssignmentID == "") != (execution.WorktreePath == "") {
+		return domain.ProviderStartObservation{}, provider.StartResult{}, errors.New("Task Provider dispatch has a partial Worktree binding")
 	}
 	var intent domain.ProviderStartIntent
 	intentFound := false
@@ -391,17 +394,19 @@ func (c *ProviderController) DispatchTaskExecution(
 		return domain.ProviderStartObservation{}, provider.StartResult{}, errors.New("Task Provider dispatch requires the persisted matching ProviderStartIntent")
 	}
 	var worktreeAssignment domain.WorktreeAssignment
-	worktreeAssignmentFound := false
-	for _, candidate := range job.WorktreeAssignments {
-		if candidate.ID == execution.WorktreeAssignmentID {
-			worktreeAssignment, worktreeAssignmentFound = candidate, true
-			break
+	if worktreeBound {
+		worktreeAssignmentFound := false
+		for _, candidate := range job.WorktreeAssignments {
+			if candidate.ID == execution.WorktreeAssignmentID {
+				worktreeAssignment, worktreeAssignmentFound = candidate, true
+				break
+			}
 		}
-	}
-	if !worktreeAssignmentFound || worktreeAssignment.OwnerRoleExecutionID != execution.ID ||
-		worktreeAssignment.TaskID != execution.TaskID || worktreeAssignment.WorktreePath != execution.WorktreePath ||
-		worktreeAssignment.Validate(job) != nil {
-		return domain.ProviderStartObservation{}, provider.StartResult{}, errors.New("Task Provider dispatch requires a valid persisted Job Worktree assignment")
+		if !worktreeAssignmentFound || worktreeAssignment.OwnerRoleExecutionID != execution.ID ||
+			worktreeAssignment.TaskID != execution.TaskID || worktreeAssignment.WorktreePath != execution.WorktreePath ||
+			worktreeAssignment.Validate(job) != nil {
+			return domain.ProviderStartObservation{}, provider.StartResult{}, errors.New("Task Provider dispatch requires a valid persisted Job Worktree assignment")
+		}
 	}
 	if err := intent.Validate(job, execution); err != nil {
 		return domain.ProviderStartObservation{}, provider.StartResult{}, fmt.Errorf("validate Task Provider Start intent: %w", err)
@@ -453,23 +458,17 @@ func (c *ProviderController) DispatchTaskExecution(
 	if err != nil {
 		return domain.ProviderStartObservation{}, provider.StartResult{}, err
 	}
-	request := provider.StartRequest{
-		OperationID: intent.ID, JobID: job.ID, RoleExecutionID: execution.ID,
-		TaskID: execution.TaskID, ExecutionPermissionID: permission.ID,
-		WorktreeAssignmentID: worktreeAssignment.ID, WorktreePath: worktreeAssignment.WorktreePath,
-		RequestSHA256: permission.RequestSHA256, Prompt: prompt, PromptSHA256: sha256String(prompt),
-		MaxTurns: permission.ReservedTurns, MaxTokens: permission.ReservedTokens, Deadline: intent.Deadline,
-	}
-	if err := request.Validate(); err != nil {
-		return domain.ProviderStartObservation{}, provider.StartResult{}, err
-	}
-	if previous, found := latestStartObservation(job, intent.ID); found {
+	previous, previousFound := latestStartObservation(job, intent.ID)
+	if previousFound {
 		switch previous.Status {
 		case domain.ProviderStartAccepted:
 			return previous, startResultFromObservation(previous), nil
 		case domain.ProviderStartFailed:
 			return previous, provider.StartResult{}, errors.New("Task Provider Start was definitively rejected")
 		}
+	}
+	if !worktreeBound && !previousFound {
+		return domain.ProviderStartObservation{}, provider.StartResult{}, errors.New("Task Provider Start requires a Worktree binding before its first dispatch")
 	}
 	capabilities, err := c.runtime.Capabilities(ctx)
 	if err != nil {
@@ -529,6 +528,19 @@ func (c *ProviderController) DispatchTaskExecution(
 			}
 		}
 	}
+	if !worktreeBound {
+		return previous, provider.StartResult{}, errors.New("Task Provider Start lookup did not confirm an existing session; retry is blocked without a Worktree binding")
+	}
+	request := provider.StartRequest{
+		OperationID: intent.ID, JobID: job.ID, RoleExecutionID: execution.ID,
+		TaskID: execution.TaskID, ExecutionPermissionID: permission.ID,
+		WorktreeAssignmentID: worktreeAssignment.ID, WorktreePath: worktreeAssignment.WorktreePath,
+		RequestSHA256: permission.RequestSHA256, Prompt: prompt, PromptSHA256: sha256String(prompt),
+		MaxTurns: permission.ReservedTurns, MaxTokens: permission.ReservedTokens, Deadline: intent.Deadline,
+	}
+	if err := request.Validate(); err != nil {
+		return domain.ProviderStartObservation{}, provider.StartResult{}, err
+	}
 	// Lookup NOT_FOUND, or a verified Start idempotency capability, permits only
 	// the same immutable OperationID. Revalidate authority after the external lookup.
 	if _, err := c.execution.ValidatePermission(ctx, permissionID, permissionRequest); err != nil {
@@ -553,8 +565,10 @@ func (c *ProviderController) DispatchTaskExecution(
 		}
 	}
 	if currentExecution.ID == "" || currentIntent.ID != intent.ID ||
-		currentExecution.ExecutionPermissionID != permissionID || currentIntent.ExecutionPermissionID != permissionID ||
-		currentIntent.Validate(current, currentExecution) != nil {
+		currentExecution.ExecutionPermissionID != permissionID ||
+		currentExecution.WorktreeAssignmentID != execution.WorktreeAssignmentID ||
+		currentExecution.WorktreePath != execution.WorktreePath ||
+		currentIntent.ExecutionPermissionID != permissionID || currentIntent.Validate(current, currentExecution) != nil {
 		return domain.ProviderStartObservation{}, provider.StartResult{}, errors.New("Task Provider Start intent changed before dispatch")
 	}
 	if c.runtime.Identity() != identity {
