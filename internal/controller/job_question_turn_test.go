@@ -204,6 +204,14 @@ func newJobQuestionTurnFixtureAtPath(t *testing.T, databasePath string) jobQuest
 
 func TestJobQuestionTurnControllerSendsReadOnlyTurnAndRepliesToOriginalRole(t *testing.T) {
 	f := newJobQuestionTurnFixture(t)
+	f.runtime.capabilities.SendIdempotency = false
+	filteredEvidence := f.runtime.capabilities.Evidence[:0]
+	for _, evidence := range f.runtime.capabilities.Evidence {
+		if evidence.Capability != provider.CapabilitySendIdempotency {
+			filteredEvidence = append(filteredEvidence, evidence)
+		}
+	}
+	f.runtime.capabilities.Evidence = filteredEvidence
 	persisted := false
 	f.runtime.sendHook = func(ctx context.Context, request provider.TurnRequest) error {
 		job, err := f.database.GetJob(ctx, f.jobID)

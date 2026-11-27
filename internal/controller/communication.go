@@ -277,6 +277,11 @@ func acceptedRoleSession(job domain.Job, execution domain.RoleExecution) (string
 	if latest == nil || latest.Status != domain.ProviderStartAccepted || latest.ProviderSessionID == "" {
 		return "", false
 	}
+	for _, stop := range job.ProviderStopIntents {
+		if stop.RoleExecutionID == execution.ID && stop.SessionID == latest.ProviderSessionID {
+			return "", false
+		}
+	}
 	return latest.ProviderSessionID, true
 }
 

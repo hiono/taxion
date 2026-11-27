@@ -101,6 +101,7 @@ func (c *JobQuestionTurnController) Send(
 	reply, hasReply := existingPlannerReply(job, question)
 	prompt := jobQuestionTurnPrompt(question.Body)
 	promptSHA256 := sha256String(prompt)
+	var capabilities provider.Capabilities
 
 	intent, existing := findJobQuestionTurnIntentByCommand(job, commandID)
 	if existing {
@@ -123,7 +124,7 @@ func (c *JobQuestionTurnController) Send(
 		if err := grant.ValidateFor(job, question.ID, grant.PlannerRoleExecutionID, grant.ProviderSessionID, now); err != nil {
 			return outcome, err
 		}
-		capabilities, err := c.verifiedCapabilities(ctx, grant)
+		capabilities, err = c.verifiedCapabilities(ctx, grant)
 		if err != nil {
 			return outcome, err
 		}
@@ -139,6 +140,9 @@ func (c *JobQuestionTurnController) Send(
 		if err != nil {
 			return outcome, err
 		}
+		// A replayed intent is not permission to dispatch again. The receipt revision
+		// identifies whether this call atomically created the intent.
+		existing = receipt.Revision != job.Revision+1
 		outcome.IntentReceipt, outcome.Intent = receipt, created
 		intent = created
 		job, err = c.store.GetJob(ctx, jobID)
@@ -168,10 +172,6 @@ func (c *JobQuestionTurnController) Send(
 
 	now := c.now().UTC().Round(0)
 	if err := grant.ValidateFor(job, question.ID, grant.PlannerRoleExecutionID, grant.ProviderSessionID, now); err != nil {
-		return outcome, err
-	}
-	capabilities, err := c.verifiedCapabilities(ctx, grant)
-	if err != nil {
 		return outcome, err
 	}
 	return c.dispatch(ctx, outcome, grant, question, intent, capabilities)
@@ -522,7 +522,9 @@ func (c *JobQuestionTurnController) verifiedCapabilities(
 		identity.ConfigurationSHA256 != grant.ConfigurationSHA256 {
 		return provider.Capabilities{}, errors.New("Provider identity differs from JobQuestionAuthorization")
 	}
-	capabilities, err := c.runtime.Capabilities(ctx)
+	capabilityCtx, cancel := context.WithTimeout(ctx, plannerQuestionRecoveryCallTimeout)
+	defer cancel()
+	capabilities, err := c.runtime.Capabilities(capabilityCtx)
 	if err != nil {
 		return provider.Capabilities{}, err
 	}

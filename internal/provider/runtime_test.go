@@ -477,6 +477,22 @@ func TestRuntimeSendRejectsMissingReadOnlyEnforcementBeforeCredentialAcquisition
 	}
 }
 
+func TestRuntimeSendAllowsBoundedFirstDispatchWithReadOnlyEvidenceOnly(t *testing.T) {
+	adapter := newTestAdapter(CapabilityReadOnlyContextEnforcement)
+	broker := &testBroker{secret: []byte("runtime-test-secret")}
+	runtime, err := newTestRuntime(adapter, broker)
+	if err != nil {
+		t.Fatalf("newTestRuntime: %v", err)
+	}
+	if _, err := runtime.Send(context.Background(), validTurnRequest()); err != nil {
+		t.Fatalf("bounded first Send without recovery capabilities: %v", err)
+	}
+	if adapter.sendCalls != 1 || broker.acquires != 1 || broker.closed != 1 {
+		t.Fatalf("bounded first Send did not reach Adapter exactly once: sends=%d acquires=%d closed=%d",
+			adapter.sendCalls, broker.acquires, broker.closed)
+	}
+}
+
 func TestRuntimeSendPreservesUnknownAndRejectsCredentialBearingOutput(t *testing.T) {
 	adapter := newTestAdapter(CapabilitySendIdempotency, CapabilityReadOnlyContextEnforcement)
 	adapter.sendResult = TurnResult{Status: "UNKNOWN"}

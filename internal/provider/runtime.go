@@ -122,10 +122,10 @@ func (r *Runtime) Send(ctx context.Context, request TurnRequest) (TurnResult, er
 		!capabilities.HasEvidenceAtLeast(CapabilityReadOnlyContextEnforcement, r.minimumEvidence) {
 		return TurnResult{}, ErrUnsupportedCapability
 	}
-	if !capabilities.HasEvidenceAtLeast(CapabilitySendIdempotency, r.minimumEvidence) &&
-		!capabilities.HasEvidenceAtLeast(CapabilitySendLookup, r.minimumEvidence) {
-		return TurnResult{}, ErrUnsupportedCapability
-	}
+	// The controller owns first-dispatch versus recovery decisions because only it
+	// can compare the request with the persisted operation state. Runtime enforces
+	// the read-only boundary here; controllers must require Lookup or idempotency
+	// evidence before redispatching an UNKNOWN operation.
 	result, err := withCredential(ctx, r.broker, r.identity, func(lease CredentialLease) (TurnResult, error) {
 		result, err := r.adapter.Send(ctx, request, lease)
 		if err != nil {
