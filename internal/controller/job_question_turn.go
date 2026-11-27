@@ -113,6 +113,9 @@ func (c *JobQuestionTurnController) Send(
 		if hasReply {
 			outcome.Reply = CommunicationOutcome{Message: reply}
 			outcome.Observation, _ = latestJobQuestionTurnObservation(job, intent.ID)
+			if !c.now().UTC().Before(grant.Deadline) {
+				return outcome, nil
+			}
 		}
 	} else {
 		if hasReply {
