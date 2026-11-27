@@ -999,6 +999,12 @@ func providerStopDefinitiveFailureEvidence(operationID string, err error) (strin
 		string(operationError.Class) + ":" + operationError.Code), true
 }
 
+func providerOperationNotDispatched(err error) bool {
+	var operationError *provider.OperationError
+	return errors.As(err, &operationError) && operationError != nil &&
+		operationError.Class == provider.FailureNotDispatched
+}
+
 func providerOperationMayHaveStarted(err error) bool {
 	var operationError *provider.OperationError
 	if errors.As(err, &operationError) && operationError != nil {
