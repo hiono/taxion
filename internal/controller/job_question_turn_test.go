@@ -1116,7 +1116,7 @@ func TestJobQuestionTurnDoesNotDuplicateAnOrdinaryPlannerReply(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetJob: %v", err)
 	}
-	_, question := findJobMessage(job, f.questionID)
+	question, _ := findJobMessage(job, f.questionID)
 	_, _, err = f.database.AddJobMessage(context.Background(), f.jobID, job.Revision,
 		"cmd_b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7", domain.JobMessageRequest{
 			Sender:           domain.ActorRef{Kind: domain.ActorPlanner, ID: f.plannerID},
