@@ -910,7 +910,6 @@ func TestDevProviderRunRequiresPrompt(t *testing.T) {
 	}
 }
 
-
 func TestCopilotProfileEnvironmentUsesAllowlist(t *testing.T) {
 	profile := filepath.Join(t.TempDir(), "private-profile")
 	t.Setenv("PATH", "/trusted/bin")
@@ -938,9 +937,9 @@ func TestCopilotProfileEnvironmentUsesAllowlist(t *testing.T) {
 	}
 
 	for name, want := range map[string]string{
-		"PATH":             "/trusted/bin",
-		"TMPDIR":           "/tmp/taxion",
-		"LANG":             "C.UTF-8",
+		"PATH":            "/trusted/bin",
+		"TMPDIR":          "/tmp/taxion",
+		"LANG":            "C.UTF-8",
 		"LC_ALL":           "C.UTF-8",
 		"TERM":             "dumb",
 		"HOME":             profile,
