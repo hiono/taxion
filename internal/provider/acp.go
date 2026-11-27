@@ -585,7 +585,7 @@ func (a *ACPAdapter) send(ctx context.Context, session *acpSession, request Turn
 			Params struct {
 				SessionID string `json:"sessionId"`
 				Update    struct {
-					SessionUpdate string                     `json:"sessionUpdate"`
+					SessionUpdate string `json:"sessionUpdate"`
 					Content       struct {
 						Type string `json:"type"`
 						Text string `json:"text"`
