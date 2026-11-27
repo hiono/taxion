@@ -182,6 +182,7 @@ type fakePlanningProviderRuntime struct {
 	lookupCalls  int
 	lookupResult provider.LookupResult
 	lookupErr    error
+	lookupHook   func(context.Context, provider.LookupRequest) error
 	sendResult   provider.TurnResult
 	sendErr      error
 	sendCalls    int
@@ -235,8 +236,13 @@ func (f *fakePlanningProviderRuntime) Start(ctx context.Context, request provide
 	return result, nil
 }
 
-func (f *fakePlanningProviderRuntime) Lookup(_ context.Context, request provider.LookupRequest) (provider.LookupResult, error) {
+func (f *fakePlanningProviderRuntime) Lookup(ctx context.Context, request provider.LookupRequest) (provider.LookupResult, error) {
 	f.lookupCalls++
+	if f.lookupHook != nil {
+		if err := f.lookupHook(ctx, request); err != nil {
+			return provider.LookupResult{}, err
+		}
+	}
 	if f.lookupErr != nil {
 		return provider.LookupResult{}, f.lookupErr
 	}
