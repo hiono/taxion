@@ -192,7 +192,7 @@ func TestACPHelperProcess(t *testing.T) {
 				os.Exit(0)
 			}
 			promptResult := map[string]any{"stopReason": stopReason}
-			if acpHelperSetting("usage") != "missing" {
+			if acpHelperSetting("usage") != "missing" || promptText != "continue" {
 				promptResult["usage"] = map[string]uint64{"inputTokens": 10, "outputTokens": 5, "totalTokens": 15}
 			}
 			write(map[string]any{"jsonrpc": "2.0", "id": request.ID, "result": promptResult})
