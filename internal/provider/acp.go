@@ -566,7 +566,10 @@ func (a *ACPAdapter) send(ctx context.Context, session *acpSession, request Turn
 	}, onUpdate)
 	if err != nil {
 		if errors.Is(err, errACPWriteNotDispatched) {
-			return TurnResult{}, operationCtx.Err()
+			if contextErr := operationCtx.Err(); contextErr != nil {
+				return TurnResult{}, contextErr
+			}
+			return TurnResult{}, err
 		}
 		if operationCtx.Err() != nil {
 			session.promptMu.Lock()
