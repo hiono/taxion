@@ -782,8 +782,43 @@ func TestACPAdapterAcceptsFinalResponseBeforePeerEOF(t *testing.T) {
 	t.Setenv("TAXION_ACP_HELPER", "1;exit=exit")
 	adapter := newACPTestAdapter(t)
 	defer adapter.Close()
-	if _, err := adapter.Start(context.Background(), newACPTestStartRequest("exit", "role_execution_1"), nil); err != nil {
+	request := newACPTestStartRequest("exit", "role_execution_1")
+	started, err := adapter.Start(context.Background(), request, nil)
+	if err != nil {
 		t.Fatalf("Start lost final response sent before peer EOF: %v", err)
+	}
+	adapter.mu.Lock()
+	session := adapter.byID[started.SessionID]
+	if session == nil {
+		session = adapter.detached[started.SessionID]
+	}
+	adapter.mu.Unlock()
+	if session == nil {
+		t.Fatal("final-response Session was not retained for result retrieval")
+	}
+	select {
+	case <-session.process.done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("ACP process did not reach EOF after final response")
+	}
+	adapter.mu.Lock()
+	_, attached := adapter.byID[started.SessionID]
+	_, roleAttached := adapter.byRole[request.RoleExecutionID]
+	_, cachedStart := adapter.byOp[request.OperationID]
+	_, retained := adapter.detached[started.SessionID]
+	adapter.mu.Unlock()
+	if attached || roleAttached || cachedStart || !retained {
+		t.Fatalf("dead peer attachment state: attached=%v roleAttached=%v cachedStart=%v retainedResult=%v",
+			attached, roleAttached, cachedStart, retained)
+	}
+	result, err := adapter.Result(context.Background(), ResultRequest{
+		OperationID: request.OperationID, SessionID: started.SessionID,
+	}, nil)
+	if err != nil {
+		t.Fatalf("Result after peer EOF: %v", err)
+	}
+	if !result.Final || result.Content != "fixed ACP response" || result.TurnID == "" {
+		t.Fatalf("final output was not retained after peer EOF: %#v", result)
 	}
 }
 
