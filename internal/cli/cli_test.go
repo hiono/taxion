@@ -909,3 +909,54 @@ func TestDevProviderRunRequiresPrompt(t *testing.T) {
 		t.Fatalf("stderr = %q, want prompt guidance", stderr.String())
 	}
 }
+
+
+func TestCopilotProfileEnvironmentUsesAllowlist(t *testing.T) {
+	profile := filepath.Join(t.TempDir(), "private-profile")
+	t.Setenv("PATH", "/trusted/bin")
+	t.Setenv("TMPDIR", "/tmp/taxion")
+	t.Setenv("LANG", "C.UTF-8")
+	t.Setenv("LC_ALL", "C.UTF-8")
+	t.Setenv("TERM", "dumb")
+	t.Setenv("HOME", "/host/home")
+	t.Setenv("XDG_CONFIG_HOME", "/host/config")
+	t.Setenv("GH_TOKEN", "gh-secret")
+	t.Setenv("GITHUB_TOKEN", "github-secret")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "cloud-secret")
+	t.Setenv("UNRELATED_SETTING", "must-not-leak")
+
+	got := make(map[string]string)
+	for _, entry := range copilotProfileEnvironment(profile) {
+		name, value, ok := strings.Cut(entry, "=")
+		if !ok {
+			t.Fatalf("environment entry %q has no separator", entry)
+		}
+		if _, exists := got[name]; exists {
+			t.Fatalf("environment contains duplicate %q", name)
+		}
+		got[name] = value
+	}
+
+	for name, want := range map[string]string{
+		"PATH":             "/trusted/bin",
+		"TMPDIR":           "/tmp/taxion",
+		"LANG":             "C.UTF-8",
+		"LC_ALL":           "C.UTF-8",
+		"TERM":             "dumb",
+		"HOME":             profile,
+		"XDG_CONFIG_HOME":  filepath.Join(profile, ".config"),
+		"XDG_CACHE_HOME":   filepath.Join(profile, ".cache"),
+		"XDG_DATA_HOME":    filepath.Join(profile, ".local", "share"),
+	} {
+		if got[name] != want {
+			t.Errorf("%s = %q, want %q", name, got[name], want)
+		}
+	}
+	for _, name := range []string{
+		"GH_TOKEN", "GITHUB_TOKEN", "AWS_SECRET_ACCESS_KEY", "UNRELATED_SETTING",
+	} {
+		if _, exists := got[name]; exists {
+			t.Errorf("environment unexpectedly contains %s", name)
+		}
+	}
+}
