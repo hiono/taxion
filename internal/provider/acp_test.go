@@ -258,8 +258,8 @@ func TestACPAdapterUsesOneProcessPerRoleAndDeniesToolRequests(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Send: %v", err)
 	}
-	if turn.Output != "fixed ACP response" || turn.SessionID != result.SessionID {
-		t.Fatalf("unexpected Turn result: %#v", turn)
+	if turn.Output != "fixed ACP response" || turn.SessionID != result.SessionID || turn.TokensUsed != 15 {
+		t.Fatalf("unexpected Turn result or usage: %#v", turn)
 	}
 
 	capabilities, err := adapter.Capabilities(ctx)
@@ -273,6 +273,50 @@ func TestACPAdapterUsesOneProcessPerRoleAndDeniesToolRequests(t *testing.T) {
 
 	if _, err := adapter.Start(ctx, start, nil); err != nil {
 		t.Fatalf("same in-process Start operation was not reused: %v", err)
+	}
+}
+
+func TestACPAdapterFailsClosedWhenUsageIsMissingOrIncomplete(t *testing.T) {
+	for _, helperSetting := range []string{"1;usage=missing", "1;child=1"} {
+		t.Run(helperSetting, func(t *testing.T) {
+			t.Setenv("TAXION_ACP_HELPER", helperSetting)
+			adapter := newACPTestAdapter(t)
+			defer adapter.Close()
+			started, err := adapter.Start(context.Background(), newACPTestStartRequest("start", "role_execution_usage"), nil)
+			if err != nil {
+				t.Fatalf("Start: %v", err)
+			}
+			prompt := "continue"
+			_, err = adapter.Send(context.Background(), TurnRequest{
+				OperationID: "operation_turn_usage", TurnID: "turn_usage", SessionID: started.SessionID,
+				PromptSHA256: sha256Hex(prompt), Prompt: prompt, MaxTokens: 1000, Deadline: time.Now().Add(8 * time.Second),
+			}, nil)
+			var operationErr *OperationError
+			if !errors.As(err, &operationErr) || operationErr.Class != FailureAmbiguous || operationErr.Code != OperationCodeUnknown {
+				t.Fatalf("Send error = %v, want ambiguous unknown when usage is incomplete", err)
+			}
+		})
+	}
+}
+
+func TestACPAdapterReportsOverBudgetUsageAsFailed(t *testing.T) {
+	t.Setenv("TAXION_ACP_HELPER", "1")
+	adapter := newACPTestAdapter(t)
+	defer adapter.Close()
+	started, err := adapter.Start(context.Background(), newACPTestStartRequest("start", "role_execution_budget"), nil)
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	prompt := "continue"
+	turn, err := adapter.Send(context.Background(), TurnRequest{
+		OperationID: "operation_turn_budget", TurnID: "turn_budget", SessionID: started.SessionID,
+		PromptSHA256: sha256Hex(prompt), Prompt: prompt, MaxTokens: 5, Deadline: time.Now().Add(8 * time.Second),
+	}, nil)
+	if err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	if turn.Status != "FAILED" || turn.TokensUsed != 15 || turn.Output != "" {
+		t.Fatalf("over-budget turn = %#v, want failed with actual usage and no output", turn)
 	}
 }
 
