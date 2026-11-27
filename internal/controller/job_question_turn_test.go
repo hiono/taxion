@@ -803,6 +803,14 @@ func TestJobQuestionTurnControllerRecoversExistingIntentAfterGrantDeadline(t *te
 	capabilities := f.runtime.capabilities
 	capabilities.SendLookup, capabilities.UsageIdentity = true, true
 	capabilities.UsageCompleteness, capabilities.FinalOutputRetrieval = true, true
+	capabilities.ReadOnlyContextEnforcement = false
+	retainedEvidence := capabilities.Evidence[:0]
+	for _, evidence := range capabilities.Evidence {
+		if evidence.Capability != provider.CapabilityReadOnlyContextEnforcement {
+			retainedEvidence = append(retainedEvidence, evidence)
+		}
+	}
+	capabilities.Evidence = retainedEvidence
 	capabilities.Evidence = append(capabilities.Evidence,
 		provider.CapabilityEvidence{Capability: provider.CapabilitySendLookup, Identity: f.runtime.identity, TestID: "question-lookup", EvidenceSHA256: strings.Repeat("c", 64), EvidenceLevel: provider.EvidenceSynthetic, VerifiedAt: now},
 		provider.CapabilityEvidence{Capability: provider.CapabilityUsageIdentity, Identity: f.runtime.identity, TestID: "question-usage-id", EvidenceSHA256: strings.Repeat("d", 64), EvidenceLevel: provider.EvidenceSynthetic, VerifiedAt: now},
