@@ -779,7 +779,7 @@ func TestACPAdapterKeepsRoleReservedUntilProcessExit(t *testing.T) {
 	adapter := newACPTestAdapter(t)
 	defer adapter.Close()
 
-	process := &acpProcess{done: make(chan struct{})}
+	process := &acpProcess{done: make(chan struct{}), stop: make(chan struct{})}
 	session := &acpSession{
 		roleExecutionID: "role_execution_stopping", sessionID: "session_stopping",
 		startOperationID: "operation_start_stopping", process: process,
@@ -888,7 +888,7 @@ func TestACPAdapterCloseInvalidatesStartCacheAndRejectsNewStarts(t *testing.T) {
 
 func TestACPAdapterCloseCanConfirmAfterUnconfirmedExit(t *testing.T) {
 	adapter := newACPTestAdapter(t)
-	process := &acpProcess{done: make(chan struct{})}
+	process := &acpProcess{done: make(chan struct{}), stop: make(chan struct{})}
 	if err := adapter.trackProcess(process); err != nil {
 		t.Fatalf("trackProcess: %v", err)
 	}
