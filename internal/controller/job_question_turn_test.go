@@ -23,6 +23,25 @@ func (r fixedQuestionTurnContextResolver) ResolveReadOnlyBoundary(
 	return r.context, nil
 }
 
+type failQuestionReplyOnceStore struct {
+	JobQuestionTurnStore
+	replyToMessageID string
+}
+
+func (s *failQuestionReplyOnceStore) AddJobMessage(
+	ctx context.Context,
+	jobID string,
+	expectedRevision uint64,
+	commandID string,
+	request domain.JobMessageRequest,
+) (store.CommandReceipt, domain.JobMessage, error) {
+	if request.ReplyToMessageID == s.replyToMessageID {
+		s.replyToMessageID = ""
+		return store.CommandReceipt{}, domain.JobMessage{}, errors.New("simulated Planner reply persistence failure")
+	}
+	return s.JobQuestionTurnStore.AddJobMessage(ctx, jobID, expectedRevision, commandID, request)
+}
+
 type jobQuestionTurnFixture struct {
 	controller                                                                      *JobQuestionTurnController
 	runtime                                                                         *fakePlanningProviderRuntime
@@ -1437,5 +1456,95 @@ func TestJobQuestionTurnRetriesAfterConfirmedPreDispatchFailureWithoutSendIdempo
 		f.runtime.sendCalls != 2 || requireIdempotency {
 		t.Fatalf("safe one-shot retry failed: outcome=%#v sends=%d requireIdempotency=%v",
 			second, f.runtime.sendCalls, requireIdempotency)
+	}
+}
+
+func TestOrchestratorDeliversLaterCompletedReplyAfterEarlierUnknown(t *testing.T) {
+	f := newJobQuestionTurnFixture(t)
+	ctx := context.Background()
+	job, err := f.database.GetJob(ctx, f.jobID)
+	if err != nil {
+		t.Fatalf("GetJob: %v", err)
+	}
+	_, secondQuestion, err := f.database.AddJobMessage(ctx, f.jobID, job.Revision,
+		"cmd_c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5", domain.JobMessageRequest{
+			Sender: domain.ActorRef{Kind: domain.ActorCoder, ID: f.coderID},
+			Recipient: domain.ActorRef{Kind: domain.ActorPlanner, ID: f.plannerID},
+			Body: "Please clarify a second constraint.",
+		})
+	if err != nil {
+		t.Fatalf("AddJobMessage second question: %v", err)
+	}
+	job, err = f.database.GetJob(ctx, f.jobID)
+	if err != nil {
+		t.Fatalf("GetJob after second question: %v", err)
+	}
+	firstGrant, found := findJobQuestionAuthorization(job, f.authorizationID)
+	if !found {
+		t.Fatal("first JobQuestionAuthorization not found")
+	}
+	authorizer, err := NewJobQuestionAuthorizationController(f.database, fixedQuestionTurnContextResolver{
+		context: QuestionReadOnlyContext{RepositoryID: firstGrant.RepositoryID, Boundary: firstGrant.ReadOnlyBoundary},
+	})
+	if err != nil {
+		t.Fatalf("NewJobQuestionAuthorizationController: %v", err)
+	}
+	_, secondGrant, err := authorizer.Authorize(ctx, f.jobID, secondQuestion.ID,
+		orchestratorQuestionAuthorizationCommandID(secondQuestion.ID),
+		domain.PlanningBudget{MaxTurns: 1, MaxTokens: 100}, firstGrant.Deadline)
+	if err != nil {
+		t.Fatalf("Authorize second question: %v", err)
+	}
+
+	failingStore := &failQuestionReplyOnceStore{
+		JobQuestionTurnStore: f.database, replyToMessageID: secondQuestion.ID,
+	}
+	f.controller.store = failingStore
+	f.controller.communication, err = NewCommunicationController(failingStore)
+	if err != nil {
+		t.Fatalf("NewCommunicationController with failing store: %v", err)
+	}
+	second, err := f.controller.Send(ctx, f.jobID, secondGrant.ID,
+		orchestratorQuestionTurnCommandID(secondGrant.ID), secondGrant.Budget.MaxTokens)
+	if err == nil || second.Observation.Status != domain.JobQuestionTurnCompleted {
+		t.Fatalf("second question did not retain its completed Provider result after reply persistence failure: %#v err=%v", second, err)
+	}
+	f.controller.store = f.database
+	f.controller.communication, err = NewCommunicationController(f.database)
+	if err != nil {
+		t.Fatalf("restore CommunicationController: %v", err)
+	}
+
+	f.runtime.sendHook = func(context.Context, provider.TurnRequest) error {
+		return &provider.OperationError{Class: provider.FailureAmbiguous, Code: provider.OperationCodeUnknown}
+	}
+	orchestrator, err := NewOrchestratorController(
+		f.database, f.controller.communication, authorizer, f.controller,
+		domain.PlanningBudget{MaxTurns: 1, MaxTokens: 100},
+	)
+	if err != nil {
+		t.Fatalf("NewOrchestratorController: %v", err)
+	}
+	outcomes, err := orchestrator.ProcessPlannerQuestions(ctx, f.jobID, f.plannerID, f.questionID, secondQuestion.ID)
+	if err == nil {
+		t.Fatal("first UNKNOWN question error was not returned")
+	}
+	if len(outcomes) != 2 || outcomes[0].Observation.Status != domain.JobQuestionTurnUnknown ||
+		outcomes[1].Reply.Message.Body != "turn output" || f.runtime.sendCalls != 2 {
+		t.Fatalf("later completed reply was blocked by earlier UNKNOWN: outcomes=%#v sends=%d err=%v",
+			outcomes, f.runtime.sendCalls, err)
+	}
+	job, err = f.database.GetJob(ctx, f.jobID)
+	if err != nil {
+		t.Fatalf("GetJob after Planner question processing: %v", err)
+	}
+	replyCount := 0
+	for _, message := range job.JobMessages {
+		if message.ReplyToMessageID == secondQuestion.ID {
+			replyCount++
+		}
+	}
+	if replyCount != 1 {
+		t.Fatalf("completed second question reply count=%d, want exactly one", replyCount)
 	}
 }
