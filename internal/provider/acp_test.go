@@ -546,7 +546,7 @@ func TestACPProcessCloseHonorsContextDeadline(t *testing.T) {
 func newACPTestStartRequest(prompt, roleExecutionID string) StartRequest {
 	return StartRequest{
 		OperationID: "operation_start_1", JobID: "job_1", RoleExecutionID: roleExecutionID,
-		RequestSHA256: strings.Repeat("a", 64), PromptSHA256: sha256Hex(prompt),
+		RequestSHA256:   strings.Repeat("a", 64), PromptSHA256: sha256Hex(prompt),
 		Prompt: prompt, MaxTurns: 2, MaxTokens: 1000, Deadline: time.Now().Add(8 * time.Second),
 	}
 }
