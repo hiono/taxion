@@ -19,6 +19,8 @@ import (
 )
 
 const maxACPOutputBytes = 4 * 1024 * 1024
+
+var errACPWriteNotDispatched = errors.New("ACP request was cancelled before dispatch")
 const maxACPQueuedUpdateBytes = 8 * 1024 * 1024
 
 // ACPConfig selects one Copilot CLI ACP process for each RoleExecution.
@@ -562,6 +564,9 @@ func (a *ACPAdapter) send(ctx context.Context, session *acpSession, request Turn
 		"prompt":    []map[string]string{{"type": "text", "text": request.Prompt}},
 	}, onUpdate)
 	if err != nil {
+		if errors.Is(err, errACPWriteNotDispatched) {
+			return TurnResult{}, operationCtx.Err()
+		}
 		if operationCtx.Err() != nil {
 			session.promptMu.Lock()
 			session.promptCancelled = true
@@ -1255,7 +1260,7 @@ func (p *acpProcess) write(ctx context.Context, message any, session ...*acpSess
 	select {
 	case <-p.writeGate:
 	case <-ctx.Done():
-		return ctx.Err()
+		return errors.Join(errACPWriteNotDispatched, ctx.Err())
 	case <-p.failed:
 		return errors.New("ACP transport failed")
 	case <-p.stop:
@@ -1265,10 +1270,10 @@ func (p *acpProcess) write(ctx context.Context, message any, session ...*acpSess
 	}
 	defer func() { p.writeGate <- struct{}{} }()
 	if err := ctx.Err(); err != nil {
-		return err
+		return errors.Join(errACPWriteNotDispatched, err)
 	}
 	if len(session) > 0 && session[0] != nil && session[0].stopping.Load() {
-		return errors.New("ACP Session is stopping")
+		return errors.Join(errACPWriteNotDispatched, errors.New("ACP Session is stopping"))
 	}
 	if p.failure() != nil {
 		return errors.New("ACP transport failed")
