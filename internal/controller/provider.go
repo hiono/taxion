@@ -425,7 +425,15 @@ func (c *ProviderController) DispatchTaskExecution(
 	result, startErr := c.runtime.Start(ctx, request)
 	if startErr != nil {
 		status, evidence := domain.ProviderStartUnknown, ""
-		if failureEvidence, definitive := providerDefinitiveFailureEvidence(intent.ID, startErr); definitive {
+		if providerOperationNotDispatched(startErr) {
+			status = domain.ProviderStartNotDispatched
+			var operationError *provider.OperationError
+			code := provider.OperationCodeUnavailable
+			if errors.As(startErr, &operationError) && operationError != nil && operationError.Code != "" {
+				code = operationError.Code
+			}
+			evidence = sha256String("taxion:task-provider-start:not-dispatched:" + intent.ID + ":" + code)
+		} else if failureEvidence, definitive := providerDefinitiveFailureEvidence(intent.ID, startErr); definitive {
 			status, evidence = domain.ProviderStartFailed, failureEvidence
 		}
 		observation, persistErr := c.recordTaskStartObservation(ctx, job.ID, intent.ID, status, "", "", evidence, false)
@@ -486,14 +494,19 @@ func (c *ProviderController) recordTaskStartObservation(
 		return domain.ProviderStartObservation{}, err
 	}
 	if previous, found := latestStartObservation(job, operationID); found {
-		if previous.Status == status && status == domain.ProviderStartUnknown &&
-			previous.ProviderSessionID == sessionID && previous.ReceiptID == receiptID &&
-			previous.EvidenceSHA256 == evidenceSHA256 {
+		if previous.Status == status && previous.ProviderSessionID == sessionID &&
+			previous.ReceiptID == receiptID && previous.EvidenceSHA256 == evidenceSHA256 {
 			return previous, nil
 		}
-		if previous.Status == domain.ProviderStartUnknown && status != domain.ProviderStartUnknown {
+		switch previous.Status {
+		case domain.ProviderStartUnknown:
+			if status == domain.ProviderStartUnknown {
+				return previous, nil
+			}
 			reconcilesUnknown = true
-		} else if previous.Status != domain.ProviderStartUnknown {
+		case domain.ProviderStartNotDispatched:
+			reconcilesUnknown = false
+		default:
 			return domain.ProviderStartObservation{}, errors.New("Task Provider Start observation is already terminal")
 		}
 	}
