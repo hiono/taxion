@@ -348,7 +348,7 @@ func (c *JobQuestionTurnController) dispatch(
 		},
 		RequireSendIdempotency: requireSendIdempotency,
 		MaxTokens:              intent.ReservedTokens,
-		Deadline:  intent.Deadline,
+		Deadline:               intent.Deadline,
 	}
 	if err := request.Validate(); err != nil {
 		return outcome, fmt.Errorf("validate bounded Planner question Provider Turn: %w", err)
