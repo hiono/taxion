@@ -78,6 +78,31 @@ jobs:
       - name: Build
         run: go build ./...
 
+  local-e4-binary:
+    name: Package Linux amd64 binary for local E4
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Build standalone binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o dist/taxion ./cmd/taxion
+          chmod 0755 dist/taxion
+          sha256sum dist/taxion > dist/SHA256SUMS
+      - name: Upload local E4 binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: taxion-linux-amd64-${{ github.sha }}
+          path: dist/
+          if-no-files-found: error
+          retention-days: 14
+
   windows:
     if: github.event_name == 'workflow_dispatch'
     runs-on: windows-latest
