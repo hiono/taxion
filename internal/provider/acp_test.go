@@ -931,10 +931,13 @@ func TestACPAdapterStopSerializesWithPermissionResponse(t *testing.T) {
 		t.Fatal("Start did not publish its Session")
 	}
 
-	// The permission handler holds promptMu from its final authorization check
+	// The permission handler holds the prompt gate from its final authorization check
 	// until its allow/deny response is written. Stop must not send cancellation
 	// or terminate the process ahead of that response.
-	session.promptMu.Lock()
+	unlockPrompt, err := session.lockPrompt(context.Background())
+	if err != nil {
+		t.Fatalf("lockPrompt: %v", err)
+	}
 	session.promptCtx = context.Background()
 	stopStarted := make(chan struct{})
 	stopDone := make(chan error, 1)
@@ -948,10 +951,10 @@ func TestACPAdapterStopSerializesWithPermissionResponse(t *testing.T) {
 	<-stopStarted
 	select {
 	case err := <-stopDone:
-		t.Fatalf("Stop returned while permission response owned promptMu: %v", err)
+		t.Fatalf("Stop returned while permission response owned prompt gate: %v", err)
 	case <-time.After(25 * time.Millisecond):
 	}
-	session.promptMu.Unlock()
+	unlockPrompt()
 
 	select {
 	case err := <-stopDone:
@@ -960,7 +963,7 @@ func TestACPAdapterStopSerializesWithPermissionResponse(t *testing.T) {
 			t.Fatalf("Stop error = %v, want ambiguous outcome", err)
 		}
 	case <-time.After(2 * time.Second):
-		t.Fatal("Stop did not finish after permission response released promptMu")
+		t.Fatal("Stop did not finish after permission response released prompt gate")
 	}
 	select {
 	case <-session.process.done:
