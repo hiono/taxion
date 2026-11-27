@@ -21,6 +21,7 @@ import (
 const maxACPOutputBytes = 4 * 1024 * 1024
 
 var errACPWriteNotDispatched = errors.New("ACP request was cancelled before dispatch")
+
 const maxACPQueuedUpdateBytes = 8 * 1024 * 1024
 
 // ACPConfig selects one Copilot CLI ACP process for each RoleExecution.
