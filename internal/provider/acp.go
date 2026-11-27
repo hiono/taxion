@@ -395,9 +395,26 @@ func (a *ACPAdapter) trackProcess(process *acpProcess) error {
 	go func() {
 		<-process.done
 		a.mu.Lock()
-		delete(a.processes, process)
+		var sessions []*acpSession
 		for _, session := range a.byID {
 			if session.process == process {
+				sessions = append(sessions, session)
+			}
+		}
+		a.mu.Unlock()
+		// Let any in-flight turn consume its final response and persist its
+		// output before detaching the dead process from the session indexes.
+		for _, session := range sessions {
+			if session.turnGate == nil {
+				continue
+			}
+			<-session.turnGate
+			session.turnGate <- struct{}{}
+		}
+		a.mu.Lock()
+		delete(a.processes, process)
+		for _, session := range sessions {
+			if a.byID[session.sessionID] == session {
 				a.retireSessionLocked(session)
 			}
 		}
