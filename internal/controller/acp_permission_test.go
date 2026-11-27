@@ -124,7 +124,7 @@ func TestACPExecutionPermissionAuthorizerRevalidatesExactTaskAuthority(t *testin
 	invalidPath := filepath.Join(t.TempDir(), string([]byte{0xff}))
 	for _, field := range []string{"repository", "worktree"} {
 		candidate := domain.WorktreeAssignment{
-			ID: domain.WorktreeAssignmentID(jobID, task.ID, revision.Contract.TargetRepositories[0]),
+			ID:    domain.WorktreeAssignmentID(jobID, task.ID, revision.Contract.TargetRepositories[0]),
 			JobID: jobID, TaskID: task.ID, RepositoryID: revision.Contract.TargetRepositories[0],
 			RepositoryPath: t.TempDir(), WorktreePath: t.TempDir(),
 			BaselineCommit: strings.Repeat("a", 40), OwnerRoleExecutionID: execution.ID,
