@@ -56,16 +56,12 @@ func bindACPTestWorktree(
 }
 
 type fakeACPToolCallEvaluator struct {
-	effect        string
-	resource      string
-	err           error
-	afterEvaluate func()
+	effect   string
+	resource string
+	err      error
 }
 
 func (e *fakeACPToolCallEvaluator) Evaluate(_ context.Context, _ provider.ACPToolPermissionRequest) (string, string, error) {
-	if e.afterEvaluate != nil {
-		e.afterEvaluate()
-	}
 	return e.effect, e.resource, e.err
 }
 
@@ -153,7 +149,6 @@ func TestACPExecutionPermissionAuthorizerRevalidatesExactTaskAuthority(t *testin
 	}
 	revokingEvaluator := &fakeACPToolCallEvaluator{
 		effect: permission.Effect, resource: permission.Resource,
-		afterEvaluate: func() {},
 	}
 	revokingAuthorizer, err := NewACPExecutionPermissionAuthorizer(revokedStore, revokingEvaluator)
 	if err != nil {
