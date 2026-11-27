@@ -318,6 +318,11 @@ func NewWorktreeAssignmentBinding(
 		execution.WorktreeAssignmentID != "" || execution.WorktreePath != "" {
 		return WorktreeAssignment{}, errors.New("Worktree binding requires an unbound Coder RoleExecution")
 	}
+	for _, observation := range job.ProviderStartObservations {
+		if observation.RoleExecutionID == execution.ID {
+			return WorktreeAssignment{}, errors.New("Worktree binding cannot be added after a Provider Start attempt")
+		}
+	}
 	permission, found := executionPermissionByID(job, execution.ExecutionPermissionID)
 	if !found || assignment.RepositoryID != permission.Resource {
 		return WorktreeAssignment{}, errors.New("Worktree repository must equal the exact approved ExecutionPermission resource")
