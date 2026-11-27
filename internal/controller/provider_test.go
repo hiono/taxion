@@ -1317,6 +1317,10 @@ func TestProviderControllerDispatchesTaskCoderStartWithDurableIntentAndReconcile
 			persisted.ProviderStartIntents[len(persisted.ProviderStartIntents)-1].ID != request.OperationID {
 			return errors.New("Task Provider Start was called before intent persistence")
 		}
+		attempt, found := latestStartObservation(persisted, request.OperationID)
+		if !found || attempt.Status != domain.ProviderStartUnknown || attempt.ReconcilesUnknown {
+			return errors.New("Task Provider Start was called before its one-shot attempt marker was persisted")
+		}
 		if request.RoleExecutionID != execution.ID || request.RequestSHA256 != permission.RequestSHA256 ||
 			request.PromptSHA256 != sha256String(request.Prompt) || !strings.Contains(request.Prompt, task.Title) {
 			return errors.New("Task Provider Start request is not derived from the persisted Task and permission")
@@ -1327,8 +1331,8 @@ func TestProviderControllerDispatchesTaskCoderStartWithDurableIntentAndReconcile
 	if err != nil {
 		t.Fatalf("DispatchTaskExecution: %v", err)
 	}
-	if observation.Status != domain.ProviderStartAccepted || result.OperationID != intent.ID ||
-		result.SessionID == "" || runtime.lookupCalls != 0 || runtime.startCalls != 1 {
+	if observation.Status != domain.ProviderStartAccepted || !observation.ReconcilesUnknown ||
+		result.OperationID != intent.ID || result.SessionID == "" || runtime.lookupCalls != 0 || runtime.startCalls != 1 {
 		t.Fatalf("Task Provider Start was not accepted exactly once: observation=%#v result=%#v lookups=%d starts=%d",
 			observation, result, runtime.lookupCalls, runtime.startCalls)
 	}
@@ -1383,6 +1387,24 @@ func TestProviderControllerReconcilesTaskCoderStartUnknownBySameOperationID(t *t
 		},
 		startErr: &provider.OperationError{Class: provider.FailureAmbiguous, Code: provider.OperationCodeTimeout},
 	}
+	runtime.capabilities = provider.Capabilities{Identity: runtime.identity}
+	controller, err := NewProviderControllerWithExecution(database, runtime, executionController)
+	if err != nil {
+		t.Fatalf("NewProviderControllerWithExecution: %v", err)
+	}
+	// Simulate a process exit after the durable attempt marker but before the
+	// Provider call. Without Lookup or idempotency evidence, replay must not Start.
+	if _, err := controller.recordTaskStartObservation(
+		ctx, jobID, intent.ID, domain.ProviderStartUnknown, "", "", "", false,
+	); err != nil {
+		t.Fatalf("persist simulated pre-dispatch attempt marker: %v", err)
+	}
+	blocked, _, err := controller.DispatchTaskExecution(ctx, jobID, execution.ID, permission.ID, request)
+	if !errors.Is(err, provider.ErrUnsupportedCapability) || blocked.Status != domain.ProviderStartUnknown ||
+		runtime.startCalls != 0 || runtime.lookupCalls != 0 {
+		t.Fatalf("replay without recovery evidence repeated Task Start: %#v starts=%d lookups=%d err=%v",
+			blocked, runtime.startCalls, runtime.lookupCalls, err)
+	}
 	runtime.capabilities = provider.Capabilities{
 		Identity: runtime.identity, StartLookup: true,
 		Evidence: []provider.CapabilityEvidence{{
@@ -1390,10 +1412,6 @@ func TestProviderControllerReconcilesTaskCoderStartUnknownBySameOperationID(t *t
 			TestID: "task-start-test", EvidenceSHA256: strings.Repeat("d", 64),
 			EvidenceLevel: provider.EvidenceSynthetic, VerifiedAt: now,
 		}},
-	}
-	controller, err := NewProviderControllerWithExecution(database, runtime, executionController)
-	if err != nil {
-		t.Fatalf("NewProviderControllerWithExecution: %v", err)
 	}
 	unknown, _, err := controller.DispatchTaskExecution(ctx, jobID, execution.ID, permission.ID, request)
 	if err == nil || unknown.Status != domain.ProviderStartUnknown || runtime.startCalls != 1 {
