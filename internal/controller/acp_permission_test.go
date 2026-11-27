@@ -122,7 +122,7 @@ func TestACPExecutionPermissionAuthorizerRevalidatesExactTaskAuthority(t *testin
 		t.Fatalf("GetJob before Worktree binding: %v", err)
 	}
 	worktreeCandidate := domain.WorktreeAssignment{
-		ID: domain.WorktreeAssignmentID(jobID, task.ID, revision.Contract.TargetRepositories[0]),
+		ID:    domain.WorktreeAssignmentID(jobID, task.ID, revision.Contract.TargetRepositories[0]),
 		JobID: jobID, TaskID: task.ID, RepositoryID: revision.Contract.TargetRepositories[0],
 		RepositoryPath: t.TempDir(), WorktreePath: t.TempDir(),
 		BaselineCommit: strings.Repeat("a", 40), OwnerRoleExecutionID: execution.ID,
