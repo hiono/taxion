@@ -1106,10 +1106,13 @@ func TestACPAdapterStopDoesNotWaitForBlockedWrite(t *testing.T) {
 	defer reader.Close()
 	process := newACPProcess(nil, writer)
 	<-process.writeGate // Simulate a concurrent write holding the transport gate.
+	promptGate := make(chan struct{}, 1)
+	promptGate <- struct{}{}
 	session := &acpSession{
 		roleExecutionID: "role_execution_1",
 		sessionID:       "session_1",
 		process:         process,
+		promptGate:      promptGate,
 	}
 	adapter := &ACPAdapter{
 		byRole: map[string]*acpSession{session.roleExecutionID: session},
@@ -1130,6 +1133,50 @@ func TestACPAdapterStopDoesNotWaitForBlockedWrite(t *testing.T) {
 	if !session.stopping.Load() || adapter.byID[session.sessionID] != session ||
 		adapter.byRole[session.roleExecutionID] != session {
 		t.Fatal("Stop released RoleExecution ownership before process exit was confirmed")
+	}
+}
+
+func TestACPAdapterStopHonorsDeadlineWhilePermissionReplyHoldsGate(t *testing.T) {
+	reader, writer := io.Pipe()
+	defer reader.Close()
+	process := newACPProcess(nil, writer)
+	promptGate := make(chan struct{}, 1)
+	promptGate <- struct{}{}
+	session := &acpSession{
+		roleExecutionID: "role_execution_stop_deadline",
+		sessionID:       "session_stop_deadline",
+		process:         process,
+		promptGate:      promptGate,
+	}
+	adapter := &ACPAdapter{
+		byRole: map[string]*acpSession{session.roleExecutionID: session},
+		byID:   map[string]*acpSession{session.sessionID: session},
+		byOp:   make(map[string]StartResult),
+	}
+	unlockPrompt, err := session.lockPrompt(context.Background())
+	if err != nil {
+		t.Fatalf("lockPrompt: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	started := time.Now()
+	_, err = adapter.Stop(ctx, StopRequest{OperationID: "operation_stop_deadline", SessionID: session.sessionID}, nil)
+	elapsed := time.Since(started)
+	unlockPrompt()
+	var operationErr *OperationError
+	if !errors.As(err, &operationErr) || operationErr.Class != FailureAmbiguous {
+		t.Fatalf("Stop error = %v, want ambiguous outcome", err)
+	}
+	if elapsed > 100*time.Millisecond {
+		t.Fatalf("Stop exceeded its 20ms deadline while waiting for permission gate: %s", elapsed)
+	}
+	if !session.stopping.Load() {
+		t.Fatal("Stop deadline did not prevent further permission approvals")
+	}
+	select {
+	case <-process.stop:
+	default:
+		t.Fatal("Stop deadline did not terminate the blocked ACP process")
 	}
 }
 
