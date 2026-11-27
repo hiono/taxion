@@ -160,6 +160,7 @@ func (c *ProviderController) StartPlanning(
 	request.OperationID = intent.ID
 	request.RoleExecutionID = execution.ID
 
+	retryNotDispatched := false
 	if observation, exists := latestStartObservation(current, intent.ID); exists {
 		switch observation.Status {
 		case domain.ProviderStartAccepted:
@@ -168,10 +169,12 @@ func (c *ProviderController) StartPlanning(
 			return receipt, execution, intent, provider.StartResult{}, errors.New("Provider Start was definitively rejected")
 		case domain.ProviderStartUnknown:
 			return c.reconcileStart(ctx, receipt, execution, intent, request, currentGrant, principal)
+		case domain.ProviderStartNotDispatched:
+			retryNotDispatched = true
 		}
 	}
 
-	if receipt.Revision != initialRevision+1 {
+	if receipt.Revision != initialRevision+1 && !retryNotDispatched {
 		return c.reconcileStart(ctx, receipt, execution, intent, request, currentGrant, principal)
 	}
 	if err := currentGrant.ValidateFor(current, principal.PrincipalID(), c.now()); err != nil {
@@ -179,7 +182,17 @@ func (c *ProviderController) StartPlanning(
 	}
 	result, err := c.runtime.Start(ctx, request)
 	if err != nil {
-		if providerOperationMayHaveStarted(err) {
+		if providerOperationNotDispatched(err) {
+			var operationError *provider.OperationError
+			code := provider.OperationCodeUnavailable
+			if errors.As(err, &operationError) && operationError != nil && operationError.Code != "" {
+				code = operationError.Code
+			}
+			evidence := sha256String("taxion:provider-start:not-dispatched:" + intent.ID + ":" + code)
+			if persistErr := c.recordStartObservation(ctx, jobID, intent.ID, domain.ProviderStartNotDispatched, "", "", evidence, false, principal); persistErr != nil {
+				return receipt, execution, intent, provider.StartResult{}, errors.Join(err, fmt.Errorf("persist NOT_DISPATCHED Provider Start observation: %w", persistErr))
+			}
+		} else if providerOperationMayHaveStarted(err) {
 			if persistErr := c.recordStartObservation(ctx, jobID, intent.ID, domain.ProviderStartUnknown, "", "", "", false, principal); persistErr != nil {
 				return receipt, execution, intent, provider.StartResult{}, errors.Join(err, fmt.Errorf("persist UNKNOWN Provider Start observation: %w", persistErr))
 			}
@@ -881,14 +894,19 @@ func (c *ProviderController) recordStartObservation(
 		return err
 	}
 	if previous, found := latestStartObservation(job, operationID); found {
-		if previous.Status == status && status == domain.ProviderStartUnknown &&
-			previous.ProviderSessionID == sessionID && previous.ReceiptID == receiptID &&
-			previous.EvidenceSHA256 == evidenceSHA256 {
+		if previous.Status == status && previous.ProviderSessionID == sessionID &&
+			previous.ReceiptID == receiptID && previous.EvidenceSHA256 == evidenceSHA256 {
 			return nil
 		}
-		if previous.Status == domain.ProviderStartUnknown && status != domain.ProviderStartUnknown {
+		switch previous.Status {
+		case domain.ProviderStartUnknown:
+			if status == domain.ProviderStartUnknown {
+				return nil
+			}
 			reconcilesUnknown = true
-		} else if previous.Status != domain.ProviderStartUnknown {
+		case domain.ProviderStartNotDispatched:
+			reconcilesUnknown = false
+		default:
 			return errors.New("Provider Start observation is already terminal")
 		}
 	}
