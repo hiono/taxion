@@ -1413,3 +1413,103 @@ func TestProviderControllerRejectsTaskReviewerStartWithoutReadOnlyWorktreeBounda
 		t.Fatalf("Reviewer dispatch invoked Provider: starts=%d lookups=%d", runtime.startCalls, runtime.lookupCalls)
 	}
 }
+
+func TestProviderControllerRetriesStartAfterConfirmedPreDispatchFailure(t *testing.T) {
+	runtime := &fakePlanningProviderRuntime{
+		startErr: errors.Join(provider.ErrCredentialUnavailable, &provider.OperationError{
+			Class: provider.FailureNotDispatched, Code: provider.OperationCodeUnavailable,
+		}),
+	}
+	controller, database, principal, jobID, grantID, documents := newProviderControllerFixture(t, runtime)
+	runtime.capabilities.StartIdempotency = false
+	runtime.capabilities.StartLookup = true
+	runtime.capabilities.Evidence = append(runtime.capabilities.Evidence,
+		provider.CapabilityEvidence{
+			Capability: provider.CapabilityStartLookup, Identity: runtime.identity,
+			TestID: "start-lookup", EvidenceSHA256: strings.Repeat("a", 64),
+			EvidenceLevel: provider.EvidenceLive, VerifiedAt: time.Now().UTC(),
+		},
+	)
+	const commandID = "cmd_c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2"
+	first, _, intent, _, err := controller.StartPlanning(
+		context.Background(), jobID, grantID, commandID, documents, principal,
+	)
+	if err == nil {
+		t.Fatal("pre-dispatch Start failure was not returned")
+	}
+	job, getErr := database.GetJob(context.Background(), jobID)
+	if getErr != nil {
+		t.Fatalf("GetJob after pre-dispatch Start: %v", getErr)
+	}
+	if first.Revision == 0 || len(job.ProviderStartObservations) != 1 ||
+		job.ProviderStartObservations[0].Status != domain.ProviderStartNotDispatched {
+		t.Fatalf("pre-dispatch Start was not recorded: receipt=%#v observations=%#v", first, job.ProviderStartObservations)
+	}
+
+	runtime.startErr = nil
+	_, _, retriedIntent, result, err := controller.StartPlanning(
+		context.Background(), jobID, grantID, commandID, documents, principal,
+	)
+	if err != nil {
+		t.Fatalf("retry after confirmed pre-dispatch Start: %v", err)
+	}
+	if retriedIntent.ID != intent.ID || runtime.startCalls != 2 || runtime.lookupCalls != 0 ||
+		result.SessionID == "" {
+		t.Fatalf("same OperationID was not safely retried: intent=%#v calls(start=%d lookup=%d) result=%#v",
+			retriedIntent, runtime.startCalls, runtime.lookupCalls, result)
+	}
+}
+
+func TestProviderControllerRetriesPlanningTurnAfterConfirmedPreDispatchFailure(t *testing.T) {
+	runtime := &fakePlanningProviderRuntime{}
+	controller, database, principal, jobID, grantID, documents := newProviderControllerFixture(t, runtime)
+	now := time.Now().UTC()
+	runtime.capabilities.SendIdempotency = false
+	runtime.capabilities.SendLookup = true
+	runtime.capabilities.Evidence = append(runtime.capabilities.Evidence,
+		provider.CapabilityEvidence{
+			Capability: provider.CapabilitySendLookup, Identity: runtime.identity,
+			TestID: "turn-lookup", EvidenceSHA256: strings.Repeat("a", 64),
+			EvidenceLevel: provider.EvidenceLive, VerifiedAt: now,
+		},
+	)
+	_, execution, _, _, err := controller.StartPlanning(
+		context.Background(), jobID, grantID, "cmd_c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3", documents, principal,
+	)
+	if err != nil {
+		t.Fatalf("StartPlanning: %v", err)
+	}
+	commandID := "cmd_c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4"
+	operationID := domain.PlanningTurnOperationID(commandID)
+	turnID := domain.PlanningTurnIntentID(commandID)
+	runtime.lookupResult = provider.LookupResult{
+		Found: false, OperationID: operationID, Status: provider.LookupStatusNotFound,
+		SessionID: "session_1", TurnID: turnID, EvidenceSHA256: strings.Repeat("b", 64),
+	}
+	runtime.sendErr = errors.Join(provider.ErrCredentialUnavailable, &provider.OperationError{
+		Class: provider.FailureNotDispatched, Code: provider.OperationCodeUnavailable,
+	})
+	_, turn, observation, _, err := controller.SendPlanning(
+		context.Background(), jobID, execution.ID, "session_1", commandID,
+		"inspect the accepted repository snapshot", 100, principal,
+	)
+	if err == nil || observation.Status != domain.PlanningTurnNotDispatched || runtime.sendCalls != 1 {
+		t.Fatalf("pre-dispatch Turn failure was not recorded: turn=%#v observation=%#v sends=%d err=%v",
+			turn, observation, runtime.sendCalls, err)
+	}
+
+	runtime.sendErr = nil
+	_, retriedTurn, completed, result, err := controller.SendPlanning(
+		context.Background(), jobID, execution.ID, "session_1", commandID,
+		"inspect the accepted repository snapshot", 100, principal,
+	)
+	if err != nil {
+		t.Fatalf("retry after confirmed pre-dispatch Turn: %v", err)
+	}
+	if retriedTurn.ID != turn.ID || completed.Status != domain.PlanningTurnCompleted ||
+		runtime.sendCalls != 2 || runtime.lookupCalls != 1 || result.Status != domain.PlanningTurnCompleted {
+		t.Fatalf("same Turn was not safely retried: turn=%#v observation=%#v result=%#v calls(send=%d lookup=%d)",
+			retriedTurn, completed, result, runtime.sendCalls, runtime.lookupCalls)
+	}
+	_ = database
+}
