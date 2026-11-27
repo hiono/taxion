@@ -368,7 +368,19 @@ func (a *ACPAdapter) Start(ctx context.Context, request StartRequest, _ Credenti
 		return StartResult{}, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown}
 	}
 	a.mu.Lock()
-	if a.closed || a.byID[session.sessionID] != session {
+	if a.closed || session.stopping.Load() {
+		a.mu.Unlock()
+		session.process.terminate()
+		return StartResult{}, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown}
+	}
+	if a.byID[session.sessionID] != session {
+		if a.detached[session.sessionID] == session {
+			// The peer may exit immediately after returning the final Start
+			// response. Preserve that successful operation result without
+			// publishing a dead Session as an attached Start cache entry.
+			a.mu.Unlock()
+			return result, nil
+		}
 		a.mu.Unlock()
 		session.process.terminate()
 		return StartResult{}, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown}
