@@ -106,7 +106,11 @@ func NewProviderStartObservation(
 	} else {
 		switch previous.Status {
 		case ProviderStartUnknown:
-			if status == ProviderStartUnknown || status == ProviderStartNotDispatched || !reconcilesUnknown {
+			if status == ProviderStartUnknown {
+				if reconcilesUnknown {
+					return ProviderStartObservation{}, errors.New("UNKNOWN Provider Start observation cannot claim reconciliation")
+				}
+			} else if status == ProviderStartNotDispatched || !reconcilesUnknown {
 				return ProviderStartObservation{}, errors.New("only terminal evidence may reconcile UNKNOWN Provider Start")
 			}
 		case ProviderStartNotDispatched:
