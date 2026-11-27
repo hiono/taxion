@@ -1248,7 +1248,7 @@ func TestJobQuestionTurnControllerSerializesUnresolvedTurnsAcrossQuestionGrants(
 		t.Fatal("first JobQuestionAuthorization was not persisted")
 	}
 	_, question, err := f.database.AddJobMessage(ctx, f.jobID, job.Revision,
-		"cmd_22222222222222222222222222222222", domain.JobMessageRequest{
+		"cmd_0123456789abcdef0123456789abcdef", domain.JobMessageRequest{
 			Sender:    domain.ActorRef{Kind: domain.ActorCoder, ID: f.coderID},
 			Recipient: domain.ActorRef{Kind: domain.ActorPlanner, ID: f.plannerID},
 			Body:      "A second question for the same Planner Session.",
@@ -1299,7 +1299,7 @@ func TestJobQuestionTurnIntentReceiptDistinguishesCreationFromReplay(t *testing.
 	}
 	request := domain.JobQuestionTurnIntentRequest{
 		JobQuestionAuthorizationID: grant.ID,
-		CommandID:                  "cmd_11111111111111111111111111111111",
+		CommandID:                  "cmd_fedcba9876543210fedcba9876543210",
 		PromptSHA256:               sha256String(jobQuestionTurnPrompt(question.Body)),
 		ReservedTokens:             100,
 	}
