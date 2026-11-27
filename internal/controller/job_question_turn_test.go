@@ -1142,3 +1142,42 @@ func TestJobQuestionTurnDoesNotDuplicateAnOrdinaryPlannerReply(t *testing.T) {
 		t.Fatalf("ordinary reply was duplicated or lost: reply=%#v messages=%d", outcome.Message, len(job.JobMessages))
 	}
 }
+
+func TestJobQuestionTurnControllerBoundsUnknownLookupRecovery(t *testing.T) {
+	f := newJobQuestionTurnFixture(t)
+	const commandID = "cmd_b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7"
+	f.runtime.sendErr = &provider.OperationError{
+		Class: provider.FailureAmbiguous, Code: provider.OperationCodeUnknown,
+	}
+	if _, err := f.controller.Send(context.Background(), f.jobID, f.authorizationID, commandID, 100); err == nil {
+		t.Fatal("ambiguous initial Provider Send was not returned")
+	}
+
+	now := time.Now().UTC()
+	capabilities := f.runtime.capabilities
+	capabilities.SendLookup = true
+	capabilities.UsageIdentity = true
+	capabilities.UsageCompleteness = true
+	capabilities.Evidence = append(capabilities.Evidence,
+		provider.CapabilityEvidence{Capability: provider.CapabilitySendLookup, Identity: f.runtime.identity, TestID: "question-lookup-timeout", EvidenceSHA256: strings.Repeat("c", 64), EvidenceLevel: provider.EvidenceSynthetic, VerifiedAt: now},
+		provider.CapabilityEvidence{Capability: provider.CapabilityUsageIdentity, Identity: f.runtime.identity, TestID: "question-usage-timeout", EvidenceSHA256: strings.Repeat("d", 64), EvidenceLevel: provider.EvidenceSynthetic, VerifiedAt: now},
+		provider.CapabilityEvidence{Capability: provider.CapabilityUsageCompleteness, Identity: f.runtime.identity, TestID: "question-usage-complete-timeout", EvidenceSHA256: strings.Repeat("e", 64), EvidenceLevel: provider.EvidenceSynthetic, VerifiedAt: now},
+	)
+	f.runtime.capabilities = capabilities
+	f.runtime.lookupHook = func(ctx context.Context, _ provider.LookupRequest) error {
+		<-ctx.Done()
+		return ctx.Err()
+	}
+
+	started := time.Now()
+	_, err := f.controller.Send(context.Background(), f.jobID, f.authorizationID, commandID, 100)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("stalled Provider Lookup error = %v, want bounded deadline", err)
+	}
+	if elapsed := time.Since(started); elapsed > plannerQuestionRecoveryCallTimeout+time.Second {
+		t.Fatalf("Provider Lookup exceeded its recovery bound: elapsed=%s", elapsed)
+	}
+	if f.runtime.lookupCalls != 1 || f.runtime.sendCalls != 1 {
+		t.Fatalf("timed-out recovery dispatched another Provider operation: lookup=%d send=%d", f.runtime.lookupCalls, f.runtime.sendCalls)
+	}
+}
