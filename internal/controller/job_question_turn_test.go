@@ -1068,3 +1068,110 @@ func TestOrchestratorContinuesAfterPerTurnDeadlineWhileCallerContextIsActive(t *
 			outcomes, f.runtime.sendCalls, err)
 	}
 }
+
+
+type replyBeforeObservationStore struct {
+	*store.Store
+	jobID, plannerID, coderID, questionID string
+	inserted bool
+}
+
+func (s *replyBeforeObservationStore) AddJobQuestionTurnObservation(
+	ctx context.Context, jobID string, expectedRevision uint64, request domain.JobQuestionTurnObservationRequest,
+) (store.CommandReceipt, domain.JobQuestionTurnObservation, error) {
+	receipt, observation, err := s.Store.AddJobQuestionTurnObservation(ctx, jobID, expectedRevision, request)
+	if err != nil || request.Status != domain.JobQuestionTurnCompleted || s.inserted {
+		return receipt, observation, err
+	}
+	job, err := s.Store.GetJob(ctx, s.jobID)
+	if err != nil {
+		return receipt, observation, err
+	}
+	_, _, err = s.Store.AddJobMessage(ctx, s.jobID, job.Revision,
+		"cmd_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", domain.JobMessageRequest{
+			Sender: domain.ActorRef{Kind: domain.ActorPlanner, ID: s.plannerID},
+			Recipient: domain.ActorRef{Kind: domain.ActorCoder, ID: s.coderID},
+			ReplyToMessageID: s.questionID,
+			Body: "Planner answered through ordinary messaging",
+		})
+	if err != nil {
+		return receipt, observation, err
+	}
+	s.inserted = true
+	return receipt, observation, nil
+}
+
+func TestJobQuestionTurnReturnsExistingPlannerReplyBeforeExpiredGrantRecovery(t *testing.T) {
+	f := newJobQuestionTurnFixture(t)
+	const commandID = "cmd_b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4"
+	f.runtime.sendErr = errors.New("simulated failure before Provider acceptance")
+	if _, err := f.controller.Send(context.Background(), f.jobID, f.authorizationID, commandID, 100); err == nil {
+		t.Fatal("initial Provider failure was not returned")
+	}
+	communication, err := NewCommunicationController(f.database)
+	if err != nil {
+		t.Fatalf("NewCommunicationController: %v", err)
+	}
+	_, err = communication.SendFromRole(context.Background(), RoleMessageRequest{
+		JobID: f.jobID, RoleExecutionID: f.plannerID, ProviderSessionID: f.sessionID,
+		CommandID: "cmd_b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5",
+		Recipient: domain.ActorRef{Kind: domain.ActorCoder, ID: f.coderID},
+		ReplyToMessageID: f.questionID, Body: "ordinary Planner reply",
+	})
+	if err != nil {
+		t.Fatalf("SendFromRole: %v", err)
+	}
+	job, err := f.database.GetJob(context.Background(), f.jobID)
+	if err != nil {
+		t.Fatalf("GetJob: %v", err)
+	}
+	grant, found := findJobQuestionAuthorization(job, f.authorizationID)
+	if !found {
+		t.Fatal("JobQuestionAuthorization not found")
+	}
+	f.controller.now = func() time.Time { return grant.Deadline.Add(time.Second) }
+	outcome, err := f.controller.Send(context.Background(), f.jobID, f.authorizationID, commandID, 100)
+	if err != nil {
+		t.Fatalf("return existing Planner reply after grant deadline: %v", err)
+	}
+	if outcome.Reply.Message.Body != "ordinary Planner reply" || f.runtime.sendCalls != 1 ||
+		f.runtime.lookupCalls != 0 || f.runtime.resultCalls != 0 || f.runtime.usageCalls != 0 {
+		t.Fatalf("existing reply did not bypass Provider recovery: outcome=%#v calls(send=%d lookup=%d result=%d usage=%d)",
+			outcome, f.runtime.sendCalls, f.runtime.lookupCalls, f.runtime.resultCalls, f.runtime.usageCalls)
+	}
+}
+
+func TestJobQuestionTurnDoesNotDuplicateAnOrdinaryPlannerReply(t *testing.T) {
+	f := newJobQuestionTurnFixture(t)
+	replyStore := &replyBeforeObservationStore{
+		Store: f.database, jobID: f.jobID, plannerID: f.plannerID,
+		coderID: f.coderID, questionID: f.questionID,
+	}
+	controller, err := newJobQuestionTurnController(replyStore, f.runtime, provider.EvidenceSynthetic)
+	if err != nil {
+		t.Fatalf("NewJobQuestionTurnController: %v", err)
+	}
+	outcome, err := controller.Send(context.Background(), f.jobID, f.authorizationID,
+		"cmd_b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6", 100)
+	if err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	job, err := f.database.GetJob(context.Background(), f.jobID)
+	if err != nil {
+		t.Fatalf("GetJob: %v", err)
+	}
+	if !replyStore.inserted || outcome.Reply.Message.Body != "Planner answered through ordinary messaging" ||
+		f.runtime.sendCalls != 1 || len(job.JobMessages) != 2 {
+		t.Fatalf("ordinary reply was duplicated or lost: inserted=%t reply=%#v sends=%d messages=%d",
+			replyStore.inserted, outcome.Reply.Message, f.runtime.sendCalls, len(job.JobMessages))
+	}
+	var replies int
+	for _, message := range job.JobMessages {
+		if message.ReplyToMessageID == f.questionID {
+			replies++
+		}
+	}
+	if replies != 1 {
+		t.Fatalf("question has %d Planner replies, want exactly one", replies)
+	}
+}
