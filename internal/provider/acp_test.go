@@ -886,6 +886,36 @@ func TestACPAdapterCloseInvalidatesStartCacheAndRejectsNewStarts(t *testing.T) {
 	}
 }
 
+func TestACPAdapterCloseCanConfirmAfterUnconfirmedExit(t *testing.T) {
+	adapter := newACPTestAdapter(t)
+	process := &acpProcess{done: make(chan struct{})}
+	if err := adapter.trackProcess(process); err != nil {
+		t.Fatalf("trackProcess: %v", err)
+	}
+	firstErr := adapter.Close()
+	if firstErr == nil || !strings.Contains(firstErr.Error(), "exit unconfirmed") {
+		t.Fatalf("first Close error = %v, want unconfirmed exit", firstErr)
+	}
+
+	close(process.done)
+	cleanupDeadline := time.Now().Add(time.Second)
+	for {
+		adapter.mu.Lock()
+		remaining := len(adapter.processes)
+		adapter.mu.Unlock()
+		if remaining == 0 {
+			break
+		}
+		if time.Now().After(cleanupDeadline) {
+			t.Fatal("process registry did not drain after process.done")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if err := adapter.Close(); err != nil {
+		t.Fatalf("Close retry after confirmed process exit: %v", err)
+	}
+}
+
 func TestACPAdapterStopSerializesWithPermissionResponse(t *testing.T) {
 	t.Setenv("TAXION_ACP_HELPER", "1")
 	adapter := newACPTestAdapter(t)
