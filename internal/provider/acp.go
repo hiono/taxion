@@ -52,6 +52,7 @@ type ACPAdapter struct {
 	byID         map[string]*acpSession
 	detached     map[string]*acpSession
 	byOp         map[string]StartResult
+	retiredOps   map[string]struct{}
 	startingRole map[string]*acpStartReservation
 	startingOp   map[string]*acpStartReservation
 	processes    map[*acpProcess]struct{}
@@ -63,9 +64,10 @@ type acpStartReservation struct {
 }
 
 type acpSession struct {
-	roleExecutionID string
-	sessionID       string
-	process         *acpProcess
+	roleExecutionID  string
+	sessionID        string
+	startOperationID string
+	process          *acpProcess
 	turnGate        chan struct{}
 	stopping        atomic.Bool
 	promptMu        sync.Mutex
@@ -147,6 +149,7 @@ func NewACPAdapter(config ACPConfig) (*ACPAdapter, error) {
 		byID:         make(map[string]*acpSession),
 		detached:     make(map[string]*acpSession),
 		byOp:         make(map[string]StartResult),
+		retiredOps:   make(map[string]struct{}),
 		startingRole: make(map[string]*acpStartReservation),
 		startingOp:   make(map[string]*acpStartReservation),
 		processes:    make(map[*acpProcess]struct{}),
@@ -205,6 +208,11 @@ func (a *ACPAdapter) Start(ctx context.Context, request StartRequest, _ Credenti
 	}
 	if existing, ok := a.byOp[request.OperationID]; ok {
 		if session := a.byID[existing.SessionID]; session != nil {
+			if session.stopping.Load() {
+				a.mu.Unlock()
+				cancel()
+				return StartResult{}, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown}
+			}
 			select {
 			case <-session.process.done:
 				a.retireSessionLocked(session)
@@ -215,7 +223,16 @@ func (a *ACPAdapter) Start(ctx context.Context, request StartRequest, _ Credenti
 			}
 		} else {
 			delete(a.byOp, request.OperationID)
+			if a.retiredOps == nil {
+				a.retiredOps = make(map[string]struct{})
+			}
+			a.retiredOps[request.OperationID] = struct{}{}
 		}
+	}
+	if _, retired := a.retiredOps[request.OperationID]; retired {
+		a.mu.Unlock()
+		cancel()
+		return StartResult{}, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown}
 	}
 	if a.byRole[request.RoleExecutionID] != nil || a.startingRole[request.RoleExecutionID] != nil ||
 		a.startingOp[request.OperationID] != nil {
@@ -281,9 +298,10 @@ func (a *ACPAdapter) Start(ctx context.Context, request StartRequest, _ Credenti
 	turnGate := make(chan struct{}, 1)
 	turnGate <- struct{}{}
 	session := &acpSession{
-		roleExecutionID: request.RoleExecutionID,
-		sessionID:       sessionID,
-		process:         process,
+		roleExecutionID:  request.RoleExecutionID,
+		sessionID:        sessionID,
+		startOperationID: request.OperationID,
+		process:          process,
 		turnGate:        turnGate,
 		turns:           make(map[string]TurnResult),
 	}
@@ -378,6 +396,10 @@ func (a *ACPAdapter) Start(ctx context.Context, request StartRequest, _ Credenti
 			// The peer may exit immediately after returning the final Start
 			// response. Preserve that successful operation result without
 			// publishing a dead Session as an attached Start cache entry.
+			if a.retiredOps == nil {
+				a.retiredOps = make(map[string]struct{})
+			}
+			a.retiredOps[request.OperationID] = struct{}{}
 			a.mu.Unlock()
 			return result, nil
 		}
@@ -447,6 +469,12 @@ func (a *ACPAdapter) retireSessionLocked(session *acpSession) {
 	if a.detached == nil {
 		a.detached = make(map[string]*acpSession)
 	}
+	if a.retiredOps == nil {
+		a.retiredOps = make(map[string]struct{})
+	}
+	if session.startOperationID != "" {
+		a.retiredOps[session.startOperationID] = struct{}{}
+	}
 	if a.byID[session.sessionID] == session {
 		delete(a.byID, session.sessionID)
 		a.detached[session.sessionID] = session
@@ -457,6 +485,7 @@ func (a *ACPAdapter) retireSessionLocked(session *acpSession) {
 	for operationID, result := range a.byOp {
 		if result.SessionID == session.sessionID {
 			delete(a.byOp, operationID)
+			a.retiredOps[operationID] = struct{}{}
 		}
 	}
 }
@@ -660,7 +689,6 @@ func (a *ACPAdapter) Stop(ctx context.Context, request StopRequest, _ Credential
 		return StopResult{}, &OperationError{Class: FailureDefinitive, Code: OperationCodeNotFound}
 	}
 	session.stopping.Store(true)
-	a.detachSession(session)
 	cancelCtx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
 	_ = session.process.notify(cancelCtx, "session/cancel", map[string]string{"sessionId": request.SessionID})
 	cancel()
@@ -754,6 +782,7 @@ func (a *ACPAdapter) Close() error {
 	a.byRole = make(map[string]*acpSession)
 	a.detached = make(map[string]*acpSession)
 	a.byOp = make(map[string]StartResult)
+	a.retiredOps = make(map[string]struct{})
 	a.mu.Unlock()
 
 	var joined error
