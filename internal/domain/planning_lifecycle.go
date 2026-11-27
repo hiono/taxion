@@ -8,9 +8,10 @@ import (
 )
 
 const (
-	PlanningTurnUnknown    = "UNKNOWN"
-	PlanningTurnCompleted  = "COMPLETED"
-	PlanningTurnFailed     = "FAILED"
+	PlanningTurnUnknown       = "UNKNOWN"
+	PlanningTurnNotDispatched = "NOT_DISPATCHED"
+	PlanningTurnCompleted     = "COMPLETED"
+	PlanningTurnFailed        = "FAILED"
 	PlanningEffectAllow    = "ALLOW"
 	PlanningEffectDeny     = "DENY"
 	PlanningBoundaryTurn   = "turn"
@@ -309,7 +310,6 @@ func NewPlanningTurnIntent(job Job, roleExecutionID, principalID, providerSessio
 		if previous.ProviderSessionID != providerSessionID {
 			return PlanningTurnIntent{}, &PlanningBoundaryError{Boundary: PlanningBoundaryTurn, ReasonCode: "provider_session_mismatch", Cause: errors.New("planning turn cannot change Provider Session identity")}
 		}
-		count++
 		observations := 0
 		lastStatus := ""
 		lastTokensUsed := uint64(0)
@@ -323,6 +323,10 @@ func NewPlanningTurnIntent(job Job, roleExecutionID, principalID, providerSessio
 		if observations == 0 || lastStatus == PlanningTurnUnknown {
 			return PlanningTurnIntent{}, &PlanningBoundaryError{Boundary: PlanningBoundaryTurn, ReasonCode: "previous_operation_unknown", Cause: errors.New("previous Provider turn is unresolved; reconcile the same OperationID before another turn")}
 		}
+		if lastStatus == PlanningTurnNotDispatched {
+			continue
+		}
+		count++
 		if ^uint64(0)-tokensUsed < lastTokensUsed {
 			return PlanningTurnIntent{}, errors.New("planning token usage overflow")
 		}
@@ -451,15 +455,23 @@ func NewPlanningTurnObservation(job Job, turnID, principalID, commandID, status 
 	if err != nil {
 		return PlanningTurnObservation{}, err
 	}
-	if status != PlanningTurnUnknown && status != PlanningTurnCompleted && status != PlanningTurnFailed {
+	if status != PlanningTurnUnknown && status != PlanningTurnNotDispatched &&
+		status != PlanningTurnCompleted && status != PlanningTurnFailed {
 		return PlanningTurnObservation{}, errors.New("unsupported Provider turn observation status")
 	}
-	if status == PlanningTurnUnknown {
+	switch status {
+	case PlanningTurnUnknown:
 		if tokensUsed != 0 || evidenceSHA256 != "" || reconcilesUnknown {
 			return PlanningTurnObservation{}, errors.New("UNKNOWN observation cannot claim token usage or terminal evidence")
 		}
-	} else if !validSHA256(evidenceSHA256) || tokensUsed > turn.ReservedTokens {
-		return PlanningTurnObservation{}, errors.New("terminal turn observation requires evidence and must fit its token reservation")
+	case PlanningTurnNotDispatched:
+		if tokensUsed != 0 || !validSHA256(evidenceSHA256) || reconcilesUnknown {
+			return PlanningTurnObservation{}, errors.New("NOT_DISPATCHED observation contains Provider operation claims")
+		}
+	default:
+		if !validSHA256(evidenceSHA256) || tokensUsed > turn.ReservedTokens {
+			return PlanningTurnObservation{}, errors.New("terminal turn observation requires evidence and must fit its token reservation")
+		}
 	}
 	var previous *PlanningTurnObservation
 	for i := range job.PlanningTurnObservations {
@@ -472,9 +484,19 @@ func NewPlanningTurnObservation(job Job, turnID, principalID, commandID, status 
 		if reconcilesUnknown {
 			return PlanningTurnObservation{}, errors.New("first turn observation cannot reconcile UNKNOWN")
 		}
-	} else if previous.Status != PlanningTurnUnknown || status == PlanningTurnUnknown ||
-		!reconcilesUnknown || !validSHA256(evidenceSHA256) {
-		return PlanningTurnObservation{}, errors.New("only UNKNOWN may be reconciled by same-turn evidence; blind replay is prohibited")
+	} else {
+		switch previous.Status {
+		case PlanningTurnUnknown:
+			if status == PlanningTurnUnknown || status == PlanningTurnNotDispatched || !reconcilesUnknown {
+				return PlanningTurnObservation{}, errors.New("only terminal evidence may reconcile UNKNOWN Provider Turn")
+			}
+		case PlanningTurnNotDispatched:
+			if reconcilesUnknown {
+				return PlanningTurnObservation{}, errors.New("NOT_DISPATCHED Provider Turn retry cannot reconcile UNKNOWN")
+			}
+		default:
+			return PlanningTurnObservation{}, errors.New("terminal PlanningTurnObservation cannot be replaced")
+		}
 	}
 	if job.Revision >= uint64(^uint64(0)>>1) {
 		return PlanningTurnObservation{}, errors.New("Job revision exhausted")
@@ -503,6 +525,12 @@ func (o PlanningTurnObservation) Validate(job Job, turn PlanningTurnIntent) erro
 	if o.Status == PlanningTurnUnknown {
 		if o.TokensUsed != 0 || o.EvidenceSHA256 != "" || o.ReconcilesUnknown {
 			return errors.New("UNKNOWN turn observation contains terminal claims")
+		}
+		return nil
+	}
+	if o.Status == PlanningTurnNotDispatched {
+		if o.TokensUsed != 0 || !validSHA256(o.EvidenceSHA256) || o.ReconcilesUnknown {
+			return errors.New("NOT_DISPATCHED PlanningTurnObservation contains Provider operation claims")
 		}
 		return nil
 	}
