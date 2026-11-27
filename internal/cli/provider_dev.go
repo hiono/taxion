@@ -34,7 +34,7 @@ func loginACPProvider(ctx context.Context, args []string, stdout, stderr io.Writ
 	if err != nil {
 		return report(stderr, err)
 	}
-	login := exec.CommandContext(ctx, commandPath, "login")
+	login := exec.CommandContext(ctx, commandPath, "login", "--device-code")
 	login.Stdin = os.Stdin
 	login.Stdout = stdout
 	login.Stderr = stderr
