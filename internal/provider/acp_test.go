@@ -1162,6 +1162,22 @@ func TestACPAdapterKeepsOperationIDReservedUntilInitialPromptCompletes(t *testin
 		_ = adapter.Close()
 		t.Fatalf("duplicate in-flight OperationID error = %v, want ambiguous", err)
 	}
+	negotiationDeadline := time.Now().Add(250 * time.Millisecond)
+	for {
+		data, readErr := os.ReadFile(signalPath)
+		if readErr != nil {
+			_ = adapter.Close()
+			t.Fatalf("ReadFile signal: %v", readErr)
+		}
+		if strings.Count(string(data), "initialize\n") != 1 {
+			_ = adapter.Close()
+			t.Fatalf("duplicate in-flight OperationID started another ACP peer: %q", string(data))
+		}
+		if time.Now().After(negotiationDeadline) {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
 	if err := adapter.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
