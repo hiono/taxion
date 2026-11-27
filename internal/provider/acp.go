@@ -688,10 +688,17 @@ func (a *ACPAdapter) Stop(ctx context.Context, request StopRequest, _ Credential
 	if session == nil {
 		return StopResult{}, &OperationError{Class: FailureDefinitive, Code: OperationCodeNotFound}
 	}
+	// Serialize Stop with the permission handler's final authorization check
+	// and response write. If an allow_once response already owns promptMu, it
+	// is written before cancellation; otherwise Stop marks the prompt cancelled
+	// before any later permission response can be approved.
+	session.promptMu.Lock()
+	session.promptCancelled = true
 	session.stopping.Store(true)
 	cancelCtx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
 	_ = session.process.notify(cancelCtx, "session/cancel", map[string]string{"sessionId": request.SessionID})
 	cancel()
+	session.promptMu.Unlock()
 	session.process.terminate()
 	// Cancellation is not proof that tools or child processes are quiescent.
 	return StopResult{}, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown}

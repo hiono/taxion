@@ -759,6 +759,59 @@ func TestACPAdapterCloseInvalidatesStartCacheAndRejectsNewStarts(t *testing.T) {
 	}
 }
 
+func TestACPAdapterStopSerializesWithPermissionResponse(t *testing.T) {
+	t.Setenv("TAXION_ACP_HELPER", "1")
+	adapter := newACPTestAdapter(t)
+	defer adapter.Close()
+	start, err := adapter.Start(context.Background(), newACPTestStartRequest("start", "role_execution_stop_permission"), nil)
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	adapter.mu.Lock()
+	session := adapter.byID[start.SessionID]
+	adapter.mu.Unlock()
+	if session == nil {
+		t.Fatal("Start did not publish its Session")
+	}
+
+	// The permission handler holds promptMu from its final authorization check
+	// until its allow/deny response is written. Stop must not send cancellation
+	// or terminate the process ahead of that response.
+	session.promptMu.Lock()
+	session.promptCtx = context.Background()
+	stopStarted := make(chan struct{})
+	stopDone := make(chan error, 1)
+	go func() {
+		close(stopStarted)
+		_, stopErr := adapter.Stop(context.Background(), StopRequest{
+			OperationID: "operation_stop_permission", SessionID: start.SessionID,
+		}, nil)
+		stopDone <- stopErr
+	}()
+	<-stopStarted
+	select {
+	case err := <-stopDone:
+		t.Fatalf("Stop returned while permission response owned promptMu: %v", err)
+	case <-time.After(25 * time.Millisecond):
+	}
+	session.promptMu.Unlock()
+
+	select {
+	case err := <-stopDone:
+		var operationErr *OperationError
+		if !errors.As(err, &operationErr) || operationErr.Class != FailureAmbiguous {
+			t.Fatalf("Stop error = %v, want ambiguous outcome", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Stop did not finish after permission response released promptMu")
+	}
+	select {
+	case <-session.process.done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Stop did not terminate the ACP process")
+	}
+}
+
 func TestACPAdapterStopInvalidatesStartCache(t *testing.T) {
 	t.Setenv("TAXION_ACP_HELPER", "1")
 	adapter := newACPTestAdapter(t)
