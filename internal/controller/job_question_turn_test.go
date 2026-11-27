@@ -1298,9 +1298,9 @@ func TestJobQuestionTurnIntentReceiptDistinguishesCreationFromReplay(t *testing.
 	}
 	request := domain.JobQuestionTurnIntentRequest{
 		JobQuestionAuthorizationID: grant.ID,
-		CommandID: "cmd_c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1",
-		PromptSHA256: sha256String(jobQuestionTurnPrompt(question.Body)),
-		ReservedTokens: 100,
+		CommandID:                  "cmd_c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1",
+		PromptSHA256:               sha256String(jobQuestionTurnPrompt(question.Body)),
+		ReservedTokens:             100,
 	}
 	first, _, err := f.database.AddJobQuestionTurnIntent(ctx, f.jobID, job.Revision, request)
 	if err != nil {
