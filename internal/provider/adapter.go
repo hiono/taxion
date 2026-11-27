@@ -696,8 +696,9 @@ type Adapter interface {
 type FailureClass string
 
 const (
-	FailureDefinitive FailureClass = "definitive"
-	FailureAmbiguous  FailureClass = "ambiguous"
+	FailureDefinitive    FailureClass = "definitive"
+	FailureAmbiguous     FailureClass = "ambiguous"
+	FailureNotDispatched FailureClass = "not_dispatched"
 )
 
 // OperationError carries only a constrained code. Raw Provider errors and response bodies
@@ -708,7 +709,7 @@ type OperationError struct {
 }
 
 func NewOperationError(class FailureClass, code string) (*OperationError, error) {
-	if (class != FailureDefinitive && class != FailureAmbiguous) || !validOperationCode(code) {
+	if (class != FailureDefinitive && class != FailureAmbiguous && class != FailureNotDispatched) || !validOperationCode(code) {
 		return nil, errors.New("Provider operation error requires a valid class and safe code")
 	}
 	return &OperationError{Class: class, Code: code}, nil
