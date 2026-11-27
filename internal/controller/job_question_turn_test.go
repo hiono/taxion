@@ -387,26 +387,37 @@ func TestJobQuestionTurnControllerRequiresLiveEvidenceOutsideSyntheticHarness(t 
 	}
 }
 
-func TestJobQuestionTurnControllerRejectsProviderWithoutSafeSend(t *testing.T) {
+func TestJobQuestionTurnControllerAllowsOneShotSendWithoutRecoveryCapability(t *testing.T) {
 	f := newJobQuestionTurnFixture(t)
 	now := time.Now().UTC()
 	f.runtime.capabilities = provider.Capabilities{
-		Identity: f.runtime.identity, SendLookup: true, ReadOnlyContextEnforcement: true,
-		Evidence: []provider.CapabilityEvidence{
-			{Capability: provider.CapabilitySendLookup, Identity: f.runtime.identity, TestID: "lookup-only", EvidenceSHA256: strings.Repeat("a", 64), EvidenceLevel: provider.EvidenceSynthetic, VerifiedAt: now},
-			{Capability: provider.CapabilityReadOnlyContextEnforcement, Identity: f.runtime.identity, TestID: "read-only-context", EvidenceSHA256: strings.Repeat("b", 64), EvidenceLevel: provider.EvidenceSynthetic, VerifiedAt: now},
-		},
+		Identity: f.runtime.identity, ReadOnlyContextEnforcement: true,
+		Evidence: []provider.CapabilityEvidence{{
+			Capability: provider.CapabilityReadOnlyContextEnforcement, Identity: f.runtime.identity,
+			TestID: "read-only-context", EvidenceSHA256: strings.Repeat("b", 64),
+			EvidenceLevel: provider.EvidenceSynthetic, VerifiedAt: now,
+		}},
 	}
-	if _, err := f.controller.Send(context.Background(), f.jobID, f.authorizationID,
-		"cmd_a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3", 100); !errors.Is(err, provider.ErrUnsupportedCapability) {
-		t.Fatalf("Send with lookup but without idempotency = %v, want ErrUnsupportedCapability", err)
+	f.runtime.sendErr = &provider.OperationError{Class: provider.FailureAmbiguous, Code: provider.OperationCodeUnknown}
+	const commandID = "cmd_a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3"
+	first, err := f.controller.Send(context.Background(), f.jobID, f.authorizationID, commandID, 100)
+	if err == nil || first.Observation.Status != domain.JobQuestionTurnUnknown || f.runtime.sendCalls != 1 {
+		t.Fatalf("initial one-shot Send was not retained as UNKNOWN: outcome=%#v sends=%d err=%v",
+			first, f.runtime.sendCalls, err)
+	}
+	second, err := f.controller.Send(context.Background(), f.jobID, f.authorizationID, commandID, 100)
+	if !errors.Is(err, provider.ErrUnsupportedCapability) || f.runtime.sendCalls != 1 {
+		t.Fatalf("UNKNOWN Send was retried without Lookup or idempotency evidence: outcome=%#v sends=%d err=%v",
+			second, f.runtime.sendCalls, err)
 	}
 	job, err := f.database.GetJob(context.Background(), f.jobID)
 	if err != nil {
 		t.Fatalf("GetJob: %v", err)
 	}
-	if len(job.JobQuestionTurnIntents) != 0 || f.runtime.sendCalls != 0 {
-		t.Fatalf("unsafe Provider Send created intent or ran Provider: %#v", job.JobQuestionTurnIntents)
+	if len(job.JobQuestionTurnIntents) != 1 || len(job.JobQuestionTurnObservations) != 1 ||
+		job.JobQuestionTurnObservations[0].Status != domain.JobQuestionTurnUnknown {
+		t.Fatalf("one-shot Send did not preserve a single UNKNOWN operation: intents=%d observations=%#v",
+			len(job.JobQuestionTurnIntents), job.JobQuestionTurnObservations)
 	}
 }
 
