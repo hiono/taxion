@@ -384,7 +384,29 @@ func (c *JobQuestionTurnController) dispatch(
 				ctx, intent.JobID, intent.ID, domain.JobQuestionTurnUnknown, 0, "", "", "",
 			)
 			if persistErr != nil {
-				return outcome, fmt.Errorf("persist UNKNOWN Planner question turn after ambiguous Send: %w", persistErr)
+				persistErr = fmt.Errorf("persist UNKNOWN Planner question turn after ambiguous Send: %w", persistErr)
+				latestJob, readErr := c.store.GetJob(ctx, intent.JobID)
+				if readErr != nil {
+					return outcome, errors.Join(persistErr, fmt.Errorf("reload Job after concurrent Provider Turn completion: %w", readErr))
+				}
+				if validationErr := latestJob.Validate(); validationErr != nil {
+					return outcome, errors.Join(persistErr, fmt.Errorf("validate Job after concurrent Provider Turn completion: %w", validationErr))
+				}
+				if latest, found := latestJobQuestionTurnObservation(latestJob, intent.ID); found {
+					outcome.Observation = latest
+					switch latest.Status {
+					case domain.JobQuestionTurnCompleted:
+						reply, replyErr := c.persistQuestionReply(ctx, intent.JobID, grant, question, intent, latest)
+						if replyErr != nil {
+							return outcome, replyErr
+						}
+						outcome.Reply = reply
+						return outcome, nil
+					case domain.JobQuestionTurnFailed:
+						return outcome, errors.New("Planner question Provider operation failed")
+					}
+				}
+				return outcome, persistErr
 			}
 			outcome.ObservationReceipt, outcome.Observation = receipt, observation
 			if observation.Status == domain.JobQuestionTurnCompleted {
