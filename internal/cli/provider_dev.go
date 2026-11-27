@@ -54,12 +54,11 @@ func runACPProvider(ctx context.Context, args []string, stdout, stderr io.Writer
 	command := flags.String("command", "copilot", "Copilot CLI executable")
 	workingDirectory := flags.String("working-directory", ".", "Provider working directory")
 	timeout := flags.Duration("timeout", 10*time.Minute, "Provider request timeout")
-	maxTokens := flags.Uint64("max-tokens", 8192, "Maximum output tokens")
 	if err := flags.Parse(args); err != nil {
 		return 2
 	}
-	if flags.NArg() != 0 || strings.TrimSpace(*prompt) == "" || *timeout <= 0 || *maxTokens == 0 {
-		fmt.Fprintln(stderr, "usage: taxion dev provider run --prompt \"... \" [--timeout 10m] [--max-tokens 8192]")
+	if flags.NArg() != 0 || strings.TrimSpace(*prompt) == "" || *timeout <= 0 {
+		fmt.Fprintln(stderr, "usage: taxion dev provider run --prompt \"... \" [--timeout 10m]")
 		return 2
 	}
 	commandPath, err := exec.LookPath(*command)
@@ -112,7 +111,7 @@ func runACPProvider(ctx context.Context, args []string, stdout, stderr io.Writer
 	request := provider.StartRequest{
 		OperationID: operationID, JobID: jobID, RoleExecutionID: roleExecutionID,
 		RequestSHA256: requestHash, PromptSHA256: requestHash, Prompt: *prompt,
-		MaxTurns: 1, MaxTokens: *maxTokens, Deadline: time.Now().Add(*timeout),
+		MaxTurns: 1, MaxTokens: ^uint64(0), Deadline: time.Now().Add(*timeout),
 	}
 	if err := request.Validate(); err != nil {
 		_ = adapter.Close()
@@ -133,7 +132,7 @@ func runACPProvider(ctx context.Context, args []string, stdout, stderr io.Writer
 	if closeErr != nil {
 		return report(stderr, errors.New("Copilot CLI process did not close cleanly"))
 	}
-	fmt.Fprintf(stdout, "Provider: %s\nSession: %s\n\n%s\n", identity.ProviderID, start.SessionID, result.Content)
+	fmt.Fprintf(stdout, "Provider: %s\nSession: %s\nToken usage: not reported by ACP\n\n%s\n", identity.ProviderID, start.SessionID, result.Content)
 	return 0
 }
 
