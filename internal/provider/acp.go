@@ -781,6 +781,13 @@ func (a *ACPAdapter) Close() error {
 		<-done
 		a.mu.Lock()
 		err := a.closeErr
+		if err != nil && len(a.processes) == 0 && len(a.startingRole) == 0 && len(a.startingOp) == 0 {
+			// The previous attempt may have timed out just before the process
+			// tracker observed exit. A later Close can confirm shutdown once all
+			// processes and Start reservations have drained.
+			a.closeErr = nil
+			err = nil
+		}
 		a.mu.Unlock()
 		return err
 	}
