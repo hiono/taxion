@@ -125,6 +125,17 @@ func TestACPExecutionPermissionAuthorizerRevalidatesExactTaskAuthority(t *testin
 		t.Fatal("ACP tool call outside the exact approved resource was accepted")
 	}
 	evaluator.resource = permission.Resource
+	nowCalls := 0
+	authorizer.now = func() time.Time {
+		nowCalls++
+		if nowCalls == 1 {
+			return now
+		}
+		return permission.ExpiresAt
+	}
+	if err := authorizer.Authorize(context.Background(), request); err == nil {
+		t.Fatal("ACP tool permission was accepted after evaluator returned beyond expiry")
+	}
 	authorizer.now = func() time.Time { return permission.ExpiresAt }
 	if err := authorizer.Authorize(context.Background(), request); err == nil {
 		t.Fatal("expired ExecutionPermission was accepted")

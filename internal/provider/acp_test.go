@@ -630,6 +630,53 @@ func TestACPAdapterDoesNotCacheNonEndTurnResults(t *testing.T) {
 	}
 }
 
+func TestACPAdapterPreservesSessionWhenSendIsCancelledBeforeDispatch(t *testing.T) {
+	t.Setenv("TAXION_ACP_HELPER", "1;require-deny=1")
+	adapter, err := NewACPAdapter(ACPConfig{
+		Command: os.Args[0], Args: []string{"-test.run=TestACPHelperProcess"},
+		WorkingDirectory: t.TempDir(), Identity: testIdentity(),
+		Environment: []string{"TAXION_ACP_HELPER"},
+	})
+	if err != nil {
+		t.Fatalf("NewACPAdapter: %v", err)
+	}
+	defer func() {
+		if err := adapter.Close(); err != nil {
+			t.Errorf("Close: %v", err)
+		}
+	}()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	prompt := "initial prompt"
+	start, err := adapter.Start(ctx, StartRequest{
+		OperationID: "operation_pre_cancel_start", JobID: "job_1",
+		RoleExecutionID: "role_execution_pre_cancel",
+		RequestSHA256: strings.Repeat("a", 64), PromptSHA256: sha256Hex(prompt),
+		Prompt: prompt, MaxTurns: 2, MaxTokens: 1000, Deadline: time.Now().Add(4 * time.Second),
+	}, nil)
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	turnPrompt := "retry after pre-dispatch cancellation"
+	request := TurnRequest{
+		OperationID: "operation_pre_cancel_turn", TurnID: "turn_pre_cancel",
+		SessionID: start.SessionID, PromptSHA256: sha256Hex(turnPrompt),
+		Prompt: turnPrompt, MaxTokens: 1000, Deadline: time.Now().Add(4 * time.Second),
+	}
+	cancelledCtx, cancelSend := context.WithCancel(ctx)
+	cancelSend()
+	if _, err := adapter.Send(cancelledCtx, request, nil); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Send with pre-cancelled context = %v; want context.Canceled", err)
+	}
+	result, err := adapter.Send(ctx, request, nil)
+	if err != nil {
+		t.Fatalf("Send after pre-dispatch cancellation: %v", err)
+	}
+	if result.Status != "COMPLETED" || result.SessionID != start.SessionID {
+		t.Fatalf("session was not preserved after pre-dispatch cancellation: %#v", result)
+	}
+}
+
 func TestACPAdapterInvalidatesSessionAfterCancelledPrompt(t *testing.T) {
 	t.Setenv("TAXION_ACP_HELPER", "1;block=block")
 	adapter := newACPTestAdapter(t)
