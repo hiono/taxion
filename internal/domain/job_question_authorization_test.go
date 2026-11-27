@@ -507,3 +507,36 @@ func TestJobQuestionTurnAdmissionIncludesUnresolvedPlanningTurnsOnSameSession(t 
 		t.Fatalf("completed ordinary PlanningTurn incorrectly blocked a question: turns=%d tokens=%d err=%v", turns, tokens, err)
 	}
 }
+
+func TestJobQuestionTurnAdmissionTreatsPersistedReplyAsTerminalWithoutProviderObservation(t *testing.T) {
+	now := time.Now().UTC()
+	grant := JobQuestionAuthorization{
+		ID: "job_question_authorization_1", PlannerRoleExecutionID: "planner_execution_1",
+		ProviderSessionID: "provider_session_1",
+	}
+	question := JobMessage{
+		ID: "message_question_1",
+		Sender: ActorRef{Kind: ActorCoder, ID: "coder_execution_1"},
+		Recipient: ActorRef{Kind: ActorPlanner, ID: grant.PlannerRoleExecutionID},
+		Body: "Please clarify this constraint.", CreatedAt: now.Add(-2 * time.Minute),
+	}
+	reply := JobMessage{
+		ID: "message_reply_1", Sender: question.Recipient, Recipient: question.Sender,
+		ReplyToMessageID: question.ID, Body: "The constraint is already satisfied.",
+		CreatedAt: now.Add(-time.Minute),
+	}
+	intent := JobQuestionTurnIntent{
+		ID: "question_turn_1", JobQuestionAuthorizationID: grant.ID,
+		QuestionMessageID: question.ID, RoleExecutionID: grant.PlannerRoleExecutionID,
+		ProviderSessionID: grant.ProviderSessionID, ReservedTokens: 50,
+		CreatedRevision: 1, CreatedAt: now.Add(-2 * time.Minute),
+	}
+	job := Job{
+		JobMessages: []JobMessage{question, reply},
+		JobQuestionTurnIntents: []JobQuestionTurnIntent{intent},
+	}
+	turns, tokens, err := jobQuestionTurnBudgetUsedBefore(job, grant.ID, grant, now, 3)
+	if err != nil || turns != 1 || tokens != intent.ReservedTokens {
+		t.Fatalf("persisted Planner reply did not settle the session guard: turns=%d tokens=%d err=%v", turns, tokens, err)
+	}
+}
