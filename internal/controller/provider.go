@@ -819,7 +819,7 @@ func (c *ProviderController) reconcileStart(
 	}
 	canLookup := capabilities.HasEvidenceAtLeast(provider.CapabilityStartLookup, provider.EvidenceLive)
 	canRetry := capabilities.HasEvidenceAtLeast(provider.CapabilityStartIdempotency, provider.EvidenceLive)
-	if canLookup && !retryNotDispatched {
+	if canLookup {
 		lookup, lookupErr := c.runtime.Lookup(ctx, provider.LookupRequest{OperationID: intent.ID})
 		if lookupErr != nil {
 			if persistErr := c.recordStartObservation(ctx, intent.JobID, intent.ID, domain.ProviderStartUnknown, "", "", "", false, principal); persistErr != nil {
@@ -1335,7 +1335,7 @@ func (c *ProviderController) reconcileTurn(
 	}
 	canLookup := capabilities.HasEvidenceAtLeast(provider.CapabilitySendLookup, provider.EvidenceLive)
 	canRetry := capabilities.HasEvidenceAtLeast(provider.CapabilitySendIdempotency, provider.EvidenceLive)
-	if canLookup {
+	if canLookup && !retryNotDispatched {
 		lookup, lookupErr := c.runtime.Lookup(ctx, provider.LookupRequest{
 			OperationID: turn.OperationID, SessionID: turn.ProviderSessionID, TurnID: turn.ID,
 		})
