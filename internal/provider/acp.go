@@ -578,17 +578,19 @@ func (a *ACPAdapter) send(ctx context.Context, session *acpSession, request Turn
 	}
 
 	var output strings.Builder
+	var childSessionSeen atomic.Bool
 	onUpdate := func(raw json.RawMessage) error {
 		var notification struct {
 			Method string `json:"method"`
 			Params struct {
 				SessionID string `json:"sessionId"`
 				Update    struct {
-					SessionUpdate string `json:"sessionUpdate"`
+					SessionUpdate string                     `json:"sessionUpdate"`
 					Content       struct {
 						Type string `json:"type"`
 						Text string `json:"text"`
 					} `json:"content"`
+					Meta map[string]json.RawMessage `json:"_meta"`
 				} `json:"update"`
 			} `json:"params"`
 		}
@@ -597,6 +599,9 @@ func (a *ACPAdapter) send(ctx context.Context, session *acpSession, request Turn
 		}
 		if notification.Method != "session/update" || notification.Params.SessionID != request.SessionID {
 			return errors.New("ACP session update belongs to another Session")
+		}
+		if _, found := notification.Params.Update.Meta["opencode/child-session"]; found {
+			childSessionSeen.Store(true)
 		}
 		if notification.Params.Update.SessionUpdate != "agent_message_chunk" ||
 			notification.Params.Update.Content.Type != "text" {
@@ -646,8 +651,14 @@ func (a *ACPAdapter) send(ctx context.Context, session *acpSession, request Turn
 	}
 	var promptReply struct {
 		StopReason string `json:"stopReason"`
+		Usage      *struct {
+			InputTokens  uint64 `json:"inputTokens"`
+			OutputTokens uint64 `json:"outputTokens"`
+			TotalTokens  uint64 `json:"totalTokens"`
+		} `json:"usage"`
 	}
-	if json.Unmarshal(response, &promptReply) != nil || promptReply.StopReason != "end_turn" || output.Len() == 0 {
+	if json.Unmarshal(response, &promptReply) != nil || promptReply.StopReason != "end_turn" ||
+		output.Len() == 0 || promptReply.Usage == nil || promptReply.Usage.TotalTokens == 0 || childSessionSeen.Load() {
 		return TurnResult{}, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown}
 	}
 	a.mu.Lock()
@@ -657,10 +668,16 @@ func (a *ACPAdapter) send(ctx context.Context, session *acpSession, request Turn
 	if !owned || session.stopping.Load() {
 		return TurnResult{}, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown}
 	}
+	status := "COMPLETED"
+	turnOutput := output.String()
+	if promptReply.Usage.TotalTokens > request.MaxTokens {
+		status = "FAILED"
+		turnOutput = ""
+	}
 	result := TurnResult{
 		OperationID: request.OperationID, TurnID: request.TurnID,
 		SessionID: request.SessionID, ReceiptID: acpReceiptID("acp-turn-", request.TurnID),
-		Status: "COMPLETED", Output: output.String(),
+		Status: status, TokensUsed: promptReply.Usage.TotalTokens, Output: turnOutput,
 		EvidenceSHA256: sha256Hex(string(response) + "\n" + output.String()),
 	}
 	session.mu.Lock()
