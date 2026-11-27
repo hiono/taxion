@@ -752,6 +752,19 @@ func TestACPAdapterInvalidatesSessionAfterCancelledPrompt(t *testing.T) {
 	if !errors.As(err, &operationErr) || operationErr.Class != FailureAmbiguous {
 		t.Fatalf("cancelled Send error = %v, want ambiguous outcome", err)
 	}
+	retireDeadline := time.Now().Add(time.Second)
+	for {
+		adapter.mu.Lock()
+		_, stillRegistered := adapter.byID[start.SessionID]
+		adapter.mu.Unlock()
+		if !stillRegistered {
+			break
+		}
+		if time.Now().After(retireDeadline) {
+			t.Fatal("cancelled ACP session was not retired after process exit")
+		}
+		time.Sleep(time.Millisecond)
+	}
 	_, err = adapter.Send(context.Background(), TurnRequest{
 		OperationID: "operation_turn_after_cancel", TurnID: "turn_after_cancel", SessionID: start.SessionID,
 		PromptSHA256: sha256Hex("again"), Prompt: "again", MaxTokens: 1000, Deadline: time.Now().Add(time.Second),
