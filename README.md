@@ -32,12 +32,14 @@ Taxion は、最初から完全な要求仕様や実装手順を利用者へ要�
 - `taxion job authorize-planning ... <job-id>`：OIDC再認証後、DRAFT Jobに束縛したbounded read-only PlanningAuthorizationを発行・永続化します。
 - `taxion job start-planning --authorization-id <grant-id> <job-id>`：OIDC再認証後、grantを再検証し、Taskless PLANNER RoleExecutionとProvider Start intentを永続化します。Providerは起動しません。
 - `taxion dev job create --request "..."`：開発・永続化テスト専用の未認証ローカルDRAFT Jobを作成します。
+- `taxion dev provider login`：Copilot CLIをTaxion専用のローカルプロファイルへログインします。
+- `taxion dev provider run --prompt "..."`：Copilot CLIをACP stdioで起動し、自然言語promptを1回送信して応答を表示します。ツール権限要求はすべて拒否します。これはProvider接続のスモークテストであり、承認済みJobのCoder実行ではありません。
 - `taxion job show <job-id>`：Jobの現在の内容をJSONで表示します。
 - `taxion job list`：保存済みJobを一覧表示します。
 
 JobはSQLiteへtransactionで保存し、Command receiptとpayload hashを照合します。既定の保存先はOSのユーザー設定ディレクトリ配下の taxion/jobs.sqlite です。`--store` で保存先を明示できます。
 
-PlanningAuthorizationの発行・永続化と、Taskless PLANNERのRoleExecution / Provider Start intentの記録まで利用できます。Provider Adapterによる実起動、turn / effect / resume、JobContractの承認、Coder / Reviewer実行、Handoff、Job完了は未実装です。Start intentの記録をProvider実行やplanning完了の証拠として扱いません。機能の実装状態はコード、テスト、対象HEADのCIによって確認します。
+PlanningAuthorizationの発行・永続化と、Taskless PLANNERのRoleExecution / Provider Start intentの記録まで利用できます。開発用ProviderスモークテストではCopilot CLIの実起動と応答取得を確認できますが、結果はJobへ結び付かず、承認済みJobのPlanner / Coder実行ではありません。Provider turn / effect / resume、JobContractの承認、Coder / Reviewer実行、Handoff、Job完了は未実装です。Start intentの記録をProvider実行やplanning完了の証拠として扱いません。機能の実装状態はコード、テスト、対象HEADのCIによって確認します。
 
 ## 仕様・設計・受入れ
 
