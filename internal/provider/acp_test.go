@@ -1209,6 +1209,19 @@ func TestACPAdapterInitialSendRejectsDetachedSessionInstance(t *testing.T) {
 	_, _ = adapter.Stop(context.Background(), StopRequest{
 		OperationID: "operation_stop_first", SessionID: started.SessionID,
 	}, nil)
+	retireDeadline := time.Now().Add(time.Second)
+	for {
+		adapter.mu.Lock()
+		_, stillRegistered := adapter.byID[started.SessionID]
+		adapter.mu.Unlock()
+		if !stillRegistered {
+			break
+		}
+		if time.Now().After(retireDeadline) {
+			t.Fatal("first ACP session was not retired after Stop")
+		}
+		time.Sleep(time.Millisecond)
+	}
 	second := newACPTestStartRequest("second", "role_execution_second")
 	second.OperationID = "operation_start_2"
 	if _, err := adapter.Start(context.Background(), second, nil); err != nil {
