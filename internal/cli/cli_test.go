@@ -898,3 +898,14 @@ func TestJobContractCLIRejectsIncompleteInputsBeforeAuthentication(t *testing.T)
 		})
 	}
 }
+
+func TestDevProviderRunRequiresPrompt(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := Run(context.Background(), []string{"dev", "provider", "run"}, &stdout, &stderr, VersionInfo{})
+	if code != 2 {
+		t.Fatalf("exit code = %d, want 2; stderr = %s", code, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "--prompt") {
+		t.Fatalf("stderr = %q, want prompt guidance", stderr.String())
+	}
+}
