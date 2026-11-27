@@ -806,7 +806,7 @@ func (c *ProviderController) reconcileStart(
 	}
 	canLookup := capabilities.HasEvidenceAtLeast(provider.CapabilityStartLookup, provider.EvidenceLive)
 	canRetry := capabilities.HasEvidenceAtLeast(provider.CapabilityStartIdempotency, provider.EvidenceLive)
-	if canLookup {
+	if canLookup && !retryNotDispatched {
 		lookup, lookupErr := c.runtime.Lookup(ctx, provider.LookupRequest{OperationID: intent.ID})
 		if lookupErr != nil {
 			if persistErr := c.recordStartObservation(ctx, intent.JobID, intent.ID, domain.ProviderStartUnknown, "", "", "", false, principal); persistErr != nil {
@@ -1289,10 +1289,19 @@ func (c *ProviderController) SendPlanning(
 		return receipt, turn, domain.PlanningTurnObservation{}, provider.TurnResult{}, err
 	}
 	request.OperationID, request.TurnID = turn.OperationID, turn.ID
-	if previous, found := latestProviderTurnObservation(current, turn.ID); found && previous.Status != domain.PlanningTurnUnknown {
-		return receipt, turn, previous, turnResultFromObservation(previous), nil
+	retryNotDispatched := false
+	allowNotDispatched := true
+	if previous, found := latestProviderTurnObservation(current, turn.ID); found {
+		switch previous.Status {
+		case domain.PlanningTurnCompleted, domain.PlanningTurnFailed:
+			return receipt, turn, previous, turnResultFromObservation(previous), nil
+		case domain.PlanningTurnNotDispatched:
+			retryNotDispatched = true
+		case domain.PlanningTurnUnknown:
+			allowNotDispatched = false
+		}
 	}
-	return c.reconcileTurn(ctx, receipt, current, turn, request, principal)
+	return c.reconcileTurn(ctx, receipt, current, turn, request, principal, retryNotDispatched, allowNotDispatched)
 }
 
 func (c *ProviderController) reconcileTurn(
@@ -1302,6 +1311,7 @@ func (c *ProviderController) reconcileTurn(
 	turn domain.PlanningTurnIntent,
 	request provider.TurnRequest,
 	principal auth.AuthenticatedPrincipal,
+	retryNotDispatched, allowNotDispatched bool,
 ) (store.CommandReceipt, domain.PlanningTurnIntent, domain.PlanningTurnObservation, provider.TurnResult, error) {
 	capabilities, err := c.runtime.Capabilities(ctx)
 	if err != nil {
@@ -1374,7 +1384,7 @@ func (c *ProviderController) reconcileTurn(
 			}
 			return receipt, turn, observation, provider.TurnResult{}, errors.New("Provider Turn lookup has not confirmed a terminal result")
 		}
-	} else if !canRetry {
+	} else if !canRetry && !retryNotDispatched {
 		observation, persistErr := c.recordTurnObservation(
 			ctx, job.ID, turn.ID, domain.PlanningTurnUnknown, 0, "", principal,
 		)
@@ -1394,6 +1404,21 @@ func (c *ProviderController) reconcileTurn(
 	}
 	result, err := c.runtime.Send(ctx, request)
 	if err != nil {
+		if providerOperationNotDispatched(err) && allowNotDispatched {
+			var operationError *provider.OperationError
+			code := provider.OperationCodeUnavailable
+			if errors.As(err, &operationError) && operationError != nil && operationError.Code != "" {
+				code = operationError.Code
+			}
+			evidence := sha256String("taxion:planning-turn:not-dispatched:" + turn.OperationID + ":" + code)
+			observation, persistErr := c.recordTurnObservation(
+				ctx, job.ID, turn.ID, domain.PlanningTurnNotDispatched, 0, evidence, principal,
+			)
+			if persistErr != nil {
+				return receipt, turn, observation, provider.TurnResult{}, errors.Join(err, fmt.Errorf("persist NOT_DISPATCHED Planning Turn observation: %w", persistErr))
+			}
+			return receipt, turn, observation, provider.TurnResult{}, err
+		}
 		if providerOperationMayHaveStarted(err) {
 			observation, persistErr := c.recordTurnObservation(
 				ctx, job.ID, turn.ID, domain.PlanningTurnUnknown, 0, "", principal,
@@ -1460,13 +1485,20 @@ func (c *ProviderController) recordTurnObservation(
 	}
 	previous, found := latestProviderTurnObservation(job, turnID)
 	if found {
-		if previous.Status == domain.PlanningTurnUnknown {
+		switch previous.Status {
+		case domain.PlanningTurnUnknown:
 			if status == domain.PlanningTurnUnknown {
 				return previous, nil
 			}
-		} else if previous.Status == status && previous.TokensUsed == tokensUsed && previous.EvidenceSHA256 == evidenceSHA256 {
-			return previous, nil
-		} else {
+		case domain.PlanningTurnNotDispatched:
+			if status == domain.PlanningTurnNotDispatched && previous.TokensUsed == tokensUsed &&
+				previous.EvidenceSHA256 == evidenceSHA256 {
+				return previous, nil
+			}
+		default:
+			if previous.Status == status && previous.TokensUsed == tokensUsed && previous.EvidenceSHA256 == evidenceSHA256 {
+				return previous, nil
+			}
 			return domain.PlanningTurnObservation{}, errors.New("Provider Turn already has a terminal observation")
 		}
 	}
