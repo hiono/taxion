@@ -56,13 +56,33 @@ func bindACPTestWorktree(
 }
 
 type fakeACPToolCallEvaluator struct {
-	effect   string
-	resource string
-	err      error
+	effect        string
+	resource      string
+	err           error
+	afterEvaluate func()
 }
 
 func (e *fakeACPToolCallEvaluator) Evaluate(_ context.Context, _ provider.ACPToolPermissionRequest) (string, string, error) {
+	if e.afterEvaluate != nil {
+		e.afterEvaluate()
+	}
 	return e.effect, e.resource, e.err
+}
+
+type revokedACPExecutionPermissionStore struct {
+	ProviderExecutionStore
+	revokedAt time.Time
+}
+
+func (s *revokedACPExecutionPermissionStore) GetJob(ctx context.Context, jobID string) (domain.Job, error) {
+	job, err := s.ProviderExecutionStore.GetJob(ctx, jobID)
+	if err != nil {
+		return domain.Job{}, err
+	}
+	for i := range job.ExecutionPermissions {
+		job.ExecutionPermissions[i].ExpiresAt = s.revokedAt
+	}
+	return job, nil
 }
 
 func TestACPExecutionPermissionAuthorizerRevalidatesExactTaskAuthority(t *testing.T) {
@@ -120,6 +140,26 @@ func TestACPExecutionPermissionAuthorizerRevalidatesExactTaskAuthority(t *testin
 	if err := authorizer.Authorize(context.Background(), request); err != nil {
 		t.Fatalf("Authorize exact Task tool call: %v", err)
 	}
+
+	// The evaluator can block while the permission is revoked. The final check
+	// must use a fresh Job snapshot rather than the pre-evaluation snapshot.
+	revokedStore := &revokedACPExecutionPermissionStore{
+		ProviderExecutionStore: database,
+		revokedAt:              now,
+	}
+	revokingEvaluator := &fakeACPToolCallEvaluator{
+		effect: permission.Effect, resource: permission.Resource,
+		afterEvaluate: func() {},
+	}
+	revokingAuthorizer, err := NewACPExecutionPermissionAuthorizer(revokedStore, revokingEvaluator)
+	if err != nil {
+		t.Fatalf("NewACPExecutionPermissionAuthorizer with revocation store: %v", err)
+	}
+	revokingAuthorizer.now = func() time.Time { return now }
+	if err := revokingAuthorizer.Authorize(context.Background(), request); err == nil {
+		t.Fatal("ACP tool call was accepted after the permission changed during evaluation")
+	}
+
 	evaluator.resource += "/outside"
 	if err := authorizer.Authorize(context.Background(), request); err == nil {
 		t.Fatal("ACP tool call outside the exact approved resource was accepted")
