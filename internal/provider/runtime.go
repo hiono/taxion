@@ -68,17 +68,17 @@ func (r *Runtime) Start(ctx context.Context, request StartRequest) (StartResult,
 	}
 	boundedContext, cancel, err := withRequestDeadline(ctx, request.Deadline)
 	if err != nil {
-		return StartResult{}, err
+		return StartResult{}, errors.Join(err, &OperationError{Class: FailureNotDispatched, Code: OperationCodeTimeout})
 	}
 	defer cancel()
 	ctx = boundedContext
 	capabilities, err := r.verifiedCapabilities(ctx)
 	if err != nil {
-		return StartResult{}, err
+		return StartResult{}, errors.Join(err, &OperationError{Class: FailureNotDispatched, Code: OperationCodeUnavailable})
 	}
 	if !capabilities.HasEvidenceAtLeast(CapabilityStartIdempotency, r.minimumEvidence) &&
 		!capabilities.HasEvidenceAtLeast(CapabilityStartLookup, r.minimumEvidence) {
-		return StartResult{}, ErrUnsupportedCapability
+		return StartResult{}, errors.Join(ErrUnsupportedCapability, &OperationError{Class: FailureNotDispatched, Code: OperationCodeUnsupported})
 	}
 	result, err := withCredential(ctx, r.broker, r.identity, func(lease CredentialLease) (StartResult, error) {
 		result, err := r.adapter.Start(ctx, request, lease)
@@ -110,21 +110,21 @@ func (r *Runtime) Send(ctx context.Context, request TurnRequest) (TurnResult, er
 	}
 	boundedContext, cancel, err := withRequestDeadline(ctx, request.Deadline)
 	if err != nil {
-		return TurnResult{}, err
+		return TurnResult{}, errors.Join(err, &OperationError{Class: FailureNotDispatched, Code: OperationCodeTimeout})
 	}
 	defer cancel()
 	ctx = boundedContext
 	capabilities, err := r.verifiedCapabilities(ctx)
 	if err != nil {
-		return TurnResult{}, err
+		return TurnResult{}, errors.Join(err, &OperationError{Class: FailureNotDispatched, Code: OperationCodeUnavailable})
 	}
 	if request.ReadOnlyBoundary != (ReadOnlyContextBoundary{}) &&
 		!capabilities.HasEvidenceAtLeast(CapabilityReadOnlyContextEnforcement, r.minimumEvidence) {
-		return TurnResult{}, ErrUnsupportedCapability
+		return TurnResult{}, errors.Join(ErrUnsupportedCapability, &OperationError{Class: FailureNotDispatched, Code: OperationCodeUnsupported})
 	}
 	if request.RequireSendIdempotency &&
 		!capabilities.HasEvidenceAtLeast(CapabilitySendIdempotency, r.minimumEvidence) {
-		return TurnResult{}, ErrUnsupportedCapability
+		return TurnResult{}, errors.Join(ErrUnsupportedCapability, &OperationError{Class: FailureNotDispatched, Code: OperationCodeUnsupported})
 	}
 	// A bounded first dispatch needs read-only enforcement. The controller owns
 	// recovery decisions because only it can compare the request with persisted
@@ -134,7 +134,7 @@ func (r *Runtime) Send(ctx context.Context, request TurnRequest) (TurnResult, er
 	if request.ReadOnlyBoundary == (ReadOnlyContextBoundary{}) &&
 		!capabilities.HasEvidenceAtLeast(CapabilitySendIdempotency, r.minimumEvidence) &&
 		!capabilities.HasEvidenceAtLeast(CapabilitySendLookup, r.minimumEvidence) {
-		return TurnResult{}, ErrUnsupportedCapability
+		return TurnResult{}, errors.Join(ErrUnsupportedCapability, &OperationError{Class: FailureNotDispatched, Code: OperationCodeUnsupported})
 	}
 	result, err := withCredential(ctx, r.broker, r.identity, func(lease CredentialLease) (TurnResult, error) {
 		result, err := r.adapter.Send(ctx, request, lease)
@@ -476,7 +476,7 @@ func withCredential[T any](ctx context.Context, broker CredentialBroker, identit
 				return result, errors.Join(ErrCredentialUnavailable, ErrCredentialLeaseCleanupFailed)
 			}
 		}
-		return result, ErrCredentialUnavailable
+		return result, errors.Join(ErrCredentialUnavailable, &OperationError{Class: FailureNotDispatched, Code: OperationCodeUnavailable})
 	}
 	defer func() {
 		panicked := recover() != nil
@@ -503,16 +503,22 @@ func safeAdapterError(err error) error {
 	if err == nil {
 		return nil
 	}
-	if errors.Is(err, ErrCredentialUnavailable) {
-		if errors.Is(err, ErrCredentialLeaseCleanupFailed) {
-			return errors.Join(ErrCredentialUnavailable, ErrCredentialLeaseCleanupFailed)
-		}
-		return ErrCredentialUnavailable
-	}
 	var operationError *OperationError
-	if errors.As(err, &operationError) && operationError != nil &&
-		(operationError.Class == FailureDefinitive || operationError.Class == FailureAmbiguous) &&
-		validOperationCode(operationError.Code) {
+	hasOperationError := errors.As(err, &operationError) && operationError != nil &&
+		validOperationCode(operationError.Code)
+	if errors.Is(err, ErrCredentialUnavailable) {
+		result := error(ErrCredentialUnavailable)
+		if errors.Is(err, ErrCredentialLeaseCleanupFailed) {
+			result = errors.Join(result, ErrCredentialLeaseCleanupFailed)
+		}
+		if hasOperationError && operationError.Class == FailureNotDispatched {
+			return errors.Join(result, &OperationError{Class: operationError.Class, Code: operationError.Code})
+		}
+		return result
+	}
+	if hasOperationError &&
+		(operationError.Class == FailureDefinitive || operationError.Class == FailureAmbiguous ||
+			operationError.Class == FailureNotDispatched) {
 		return &OperationError{Class: operationError.Class, Code: operationError.Code}
 	}
 	return &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown}
