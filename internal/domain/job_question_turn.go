@@ -10,9 +10,10 @@ import (
 )
 
 const (
-	JobQuestionTurnUnknown   = "UNKNOWN"
-	JobQuestionTurnCompleted = "COMPLETED"
-	JobQuestionTurnFailed    = "FAILED"
+	JobQuestionTurnUnknown       = "UNKNOWN"
+	JobQuestionTurnNotDispatched = "NOT_DISPATCHED"
+	JobQuestionTurnCompleted     = "COMPLETED"
+	JobQuestionTurnFailed        = "FAILED"
 )
 
 type JobQuestionTurnIntentRequest struct {
@@ -225,17 +226,23 @@ func NewJobQuestionTurnObservation(job Job, request JobQuestionTurnObservationRe
 	if err := intent.Validate(job); err != nil {
 		return JobQuestionTurnObservation{}, err
 	}
-	if request.Status != JobQuestionTurnUnknown && request.Status != JobQuestionTurnCompleted &&
-		request.Status != JobQuestionTurnFailed {
+	if request.Status != JobQuestionTurnUnknown && request.Status != JobQuestionTurnNotDispatched &&
+		request.Status != JobQuestionTurnCompleted && request.Status != JobQuestionTurnFailed {
 		return JobQuestionTurnObservation{}, errors.New("unsupported JobQuestionTurnObservation status")
 	}
 	contentSHA256 := ""
-	if request.Status == JobQuestionTurnUnknown {
+	switch request.Status {
+	case JobQuestionTurnUnknown:
 		if request.TokensUsed != 0 || request.Content != "" || request.ReceiptID != "" ||
 			request.EvidenceSHA256 != "" || request.ReconcilesUnknown {
 			return JobQuestionTurnObservation{}, errors.New("UNKNOWN question turn observation cannot claim output, usage, receipt, or evidence")
 		}
-	} else {
+	case JobQuestionTurnNotDispatched:
+		if request.TokensUsed != 0 || request.Content != "" || request.ReceiptID != "" ||
+			!validSHA256(request.EvidenceSHA256) || request.ReconcilesUnknown {
+			return JobQuestionTurnObservation{}, errors.New("NOT_DISPATCHED question turn observation contains Provider result claims")
+		}
+	default:
 		if !utf8.ValidString(request.Content) || len([]byte(request.Content)) > MaxJobMessageBodyBytes ||
 			(request.Status == JobQuestionTurnCompleted && strings.TrimSpace(request.Content) == "") ||
 			request.TokensUsed > intent.ReservedTokens ||
@@ -252,9 +259,20 @@ func NewJobQuestionTurnObservation(job Job, request JobQuestionTurnObservationRe
 		if request.ReconcilesUnknown {
 			return JobQuestionTurnObservation{}, errors.New("first question turn observation cannot reconcile UNKNOWN")
 		}
-	} else if previous.Status != JobQuestionTurnUnknown ||
-		request.Status == JobQuestionTurnUnknown || !request.ReconcilesUnknown {
-		return JobQuestionTurnObservation{}, errors.New("only UNKNOWN question turn observations may be reconciled by terminal evidence")
+	} else {
+		switch previous.Status {
+		case JobQuestionTurnUnknown:
+			if request.Status == JobQuestionTurnUnknown ||
+				request.Status == JobQuestionTurnNotDispatched || !request.ReconcilesUnknown {
+				return JobQuestionTurnObservation{}, errors.New("only terminal evidence may reconcile UNKNOWN question turns")
+			}
+		case JobQuestionTurnNotDispatched:
+			if request.ReconcilesUnknown {
+				return JobQuestionTurnObservation{}, errors.New("NOT_DISPATCHED retries cannot claim UNKNOWN reconciliation")
+			}
+		default:
+			return JobQuestionTurnObservation{}, errors.New("terminal question turn observation cannot be replaced")
+		}
 	}
 	if job.Revision >= uint64(^uint64(0)>>1) {
 		return JobQuestionTurnObservation{}, errors.New("Job revision exhausted")
@@ -305,6 +323,13 @@ func (o JobQuestionTurnObservation) Validate(job Job, intent JobQuestionTurnInte
 		if o.TokensUsed != 0 || o.Content != "" || o.ContentSHA256 != "" ||
 			o.ReceiptID != "" || o.EvidenceSHA256 != "" || o.ReconcilesUnknown {
 			return errors.New("UNKNOWN JobQuestionTurnObservation contains terminal claims")
+		}
+		return nil
+	}
+	if o.Status == JobQuestionTurnNotDispatched {
+		if o.TokensUsed != 0 || o.Content != "" || o.ContentSHA256 != "" ||
+			o.ReceiptID != "" || !validSHA256(o.EvidenceSHA256) || o.ReconcilesUnknown {
+			return errors.New("NOT_DISPATCHED JobQuestionTurnObservation contains Provider result claims")
 		}
 		return nil
 	}
@@ -382,20 +407,32 @@ func validateJobQuestionTurnFacts(job Job) error {
 		previousObservationRevision, previousObservationAt = observation.CreatedRevision, observation.CreatedAt
 	}
 	for intentID, observations := range observationsByIntent {
-		if len(observations) > 2 {
-			return fmt.Errorf("JobQuestionTurnIntent %s has too many observations", intentID)
-		}
-		if len(observations) == 1 && observations[0].ReconcilesUnknown {
-			return fmt.Errorf("JobQuestionTurnIntent %s first observation reconciles UNKNOWN", intentID)
-		}
-		if len(observations) == 2 {
-			first, second := observations[0], observations[1]
-			if first.Status != JobQuestionTurnUnknown ||
-				(second.Status != JobQuestionTurnCompleted && second.Status != JobQuestionTurnFailed) ||
-				!second.ReconcilesUnknown || second.CreatedRevision <= first.CreatedRevision ||
-				second.CreatedAt.Before(first.CreatedAt) {
-				return fmt.Errorf("JobQuestionTurnIntent %s has an invalid UNKNOWN reconciliation sequence", intentID)
+		var previous *JobQuestionTurnObservation
+		for i := range observations {
+			current := &observations[i]
+			if previous == nil {
+				if current.ReconcilesUnknown {
+					return fmt.Errorf("JobQuestionTurnIntent %s first observation reconciles UNKNOWN", intentID)
+				}
+			} else {
+				switch previous.Status {
+				case JobQuestionTurnUnknown:
+					if (current.Status != JobQuestionTurnCompleted && current.Status != JobQuestionTurnFailed) ||
+						!current.ReconcilesUnknown {
+						return fmt.Errorf("JobQuestionTurnIntent %s has an invalid UNKNOWN reconciliation sequence", intentID)
+					}
+				case JobQuestionTurnNotDispatched:
+					if current.ReconcilesUnknown {
+						return fmt.Errorf("JobQuestionTurnIntent %s NOT_DISPATCHED retry cannot reconcile UNKNOWN", intentID)
+					}
+				default:
+					return fmt.Errorf("JobQuestionTurnIntent %s has observations after a terminal result", intentID)
+				}
+				if current.CreatedRevision <= previous.CreatedRevision || current.CreatedAt.Before(previous.CreatedAt) {
+					return fmt.Errorf("JobQuestionTurnIntent %s observation order is invalid", intentID)
+				}
 			}
+			previous = current
 		}
 	}
 	return nil
@@ -474,31 +511,82 @@ func jobQuestionTurnBudgetUsedBefore(
 		}
 	}
 
+	for _, planningIntent := range job.PlanningTurnIntents {
+		if planningIntent.CreatedRevision >= beforeRevision ||
+			(!beforeAt.IsZero() && planningIntent.CreatedAt.After(beforeAt)) ||
+			planningIntent.RoleExecutionID != grant.PlannerRoleExecutionID ||
+			planningIntent.ProviderSessionID != grant.ProviderSessionID {
+			continue
+		}
+		var latest *PlanningTurnObservation
+		for i := range job.PlanningTurnObservations {
+			candidate := &job.PlanningTurnObservations[i]
+			if candidate.TurnID == planningIntent.ID && candidate.CreatedRevision < beforeRevision &&
+				(beforeAt.IsZero() || !candidate.CreatedAt.After(beforeAt)) &&
+				(latest == nil || candidate.CreatedRevision > latest.CreatedRevision) {
+				latest = candidate
+			}
+		}
+		if latest == nil || latest.Status == PlanningTurnUnknown {
+			return 0, 0, errors.New("previous Planner Provider Turn on this Provider Session is unresolved; reconcile it before another turn")
+		}
+	}
+
 	var turns uint32
 	var tokens uint64
 	for _, intent := range job.JobQuestionTurnIntents {
-		if intent.CreatedRevision >= beforeRevision {
+		if intent.CreatedRevision >= beforeRevision ||
+			(!beforeAt.IsZero() && intent.CreatedAt.After(beforeAt)) {
 			continue
 		}
 		observation, observed := observationsByIntent[intent.ID]
+		hasReply := jobQuestionTurnHasPlannerReply(job, intent)
 		if intent.RoleExecutionID == grant.PlannerRoleExecutionID &&
 			intent.ProviderSessionID == grant.ProviderSessionID &&
-			(!observed || observation.Status == JobQuestionTurnUnknown) {
+			(!observed || observation.Status == JobQuestionTurnUnknown) && !hasReply {
 			return turns, tokens, errors.New("previous JobQuestion Provider Turn on this Provider Session is unresolved; reconcile the same OperationID before another turn")
 		}
 		if intent.JobQuestionAuthorizationID != authorizationID {
 			continue
 		}
+		if observed && observation.Status == JobQuestionTurnNotDispatched {
+			continue
+		}
 		turns++
-		if !observed || observation.Status == JobQuestionTurnUnknown {
+		if (!observed || observation.Status == JobQuestionTurnUnknown) && !hasReply {
 			return turns, tokens, errors.New("previous JobQuestion Provider Turn is unresolved; reconcile the same OperationID before another turn")
 		}
-		if ^uint64(0)-tokens < observation.TokensUsed {
+		usedTokens := observation.TokensUsed
+		if hasReply && (!observed || observation.Status == JobQuestionTurnUnknown) {
+			usedTokens = intent.ReservedTokens
+		}
+		if ^uint64(0)-tokens < usedTokens {
 			return turns, tokens, errors.New("JobQuestionAuthorization token usage overflow")
 		}
-		tokens += observation.TokensUsed
+		tokens += usedTokens
 	}
 	return turns, tokens, nil
+}
+
+func jobQuestionTurnHasPlannerReply(job Job, intent JobQuestionTurnIntent) bool {
+	var question JobMessage
+	questionFound := false
+	for _, message := range job.JobMessages {
+		if message.ID == intent.QuestionMessageID {
+			question, questionFound = message, true
+			break
+		}
+	}
+	if !questionFound {
+		return false
+	}
+	for _, message := range job.JobMessages {
+		if message.ReplyToMessageID == question.ID &&
+			message.Sender == question.Recipient && message.Recipient == question.Sender {
+			return true
+		}
+	}
+	return false
 }
 
 func jobQuestionTurnRequestSHA256(intent JobQuestionTurnIntent) string {
