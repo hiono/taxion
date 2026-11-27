@@ -1108,7 +1108,7 @@ func TestJobQuestionTurnReturnsExistingPlannerReplyBeforeExpiredGrantRecovery(t 
 		t.Fatalf("GetJob: %v", err)
 	}
 	_, _, err = f.database.AddJobMessage(context.Background(), f.jobID, job.Revision,
-		"cmd_55555555555555555555555555555555", domain.JobMessageRequest{
+		"cmd_fedcba9876543210fedcba9876543213", domain.JobMessageRequest{
 			Sender:           domain.ActorRef{Kind: domain.ActorPlanner, ID: f.plannerID},
 			Recipient:        domain.ActorRef{Kind: domain.ActorCoder, ID: f.coderID},
 			ReplyToMessageID: f.questionID,
@@ -1248,7 +1248,7 @@ func TestJobQuestionTurnControllerSerializesUnresolvedTurnsAcrossQuestionGrants(
 		t.Fatal("first JobQuestionAuthorization was not persisted")
 	}
 	_, question, err := f.database.AddJobMessage(ctx, f.jobID, job.Revision,
-		"cmd_0123456789abcdef0123456789abcdef", domain.JobMessageRequest{
+		"cmd_fedcba9876543210fedcba9876543210", domain.JobMessageRequest{
 			Sender:    domain.ActorRef{Kind: domain.ActorCoder, ID: f.coderID},
 			Recipient: domain.ActorRef{Kind: domain.ActorPlanner, ID: f.plannerID},
 			Body:      "A second question for the same Planner Session.",
@@ -1266,14 +1266,14 @@ func TestJobQuestionTurnControllerSerializesUnresolvedTurnsAcrossQuestionGrants(
 		t.Fatalf("NewJobQuestionAuthorizationController: %v", err)
 	}
 	_, secondGrant, err := authorizations.Authorize(ctx, f.jobID, question.ID,
-		"cmd_33333333333333333333333333333333",
+		"cmd_fedcba9876543210fedcba9876543211",
 		domain.PlanningBudget{MaxTurns: 1, MaxTokens: 10}, firstGrant.Deadline)
 	if err != nil {
 		t.Fatalf("Authorize second question: %v", err)
 	}
 
 	if _, err := f.controller.Send(ctx, f.jobID, secondGrant.ID,
-		"cmd_b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4", 10); err == nil ||
+		"cmd_fedcba9876543210fedcba9876543212", 10); err == nil ||
 		!strings.Contains(err.Error(), "Provider Session is unresolved") {
 		t.Fatalf("second question on unresolved Planner Session = %v, want unresolved-session rejection", err)
 	}
@@ -1299,7 +1299,7 @@ func TestJobQuestionTurnIntentReceiptDistinguishesCreationFromReplay(t *testing.
 	}
 	request := domain.JobQuestionTurnIntentRequest{
 		JobQuestionAuthorizationID: grant.ID,
-		CommandID:                  "cmd_fedcba9876543210fedcba9876543210",
+		CommandID:                  "cmd_fedcba9876543210fedcba9876543214",
 		PromptSHA256:               sha256String(jobQuestionTurnPrompt(question.Body)),
 		ReservedTokens:             100,
 	}
