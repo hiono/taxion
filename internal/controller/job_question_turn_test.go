@@ -1400,3 +1400,42 @@ func TestJobQuestionTurnControllerReturnsConcurrentTerminalObservationAfterLateU
 			outcome, f.runtime.sendCalls)
 	}
 }
+
+func TestJobQuestionTurnRetriesAfterConfirmedPreDispatchFailureWithoutSendIdempotency(t *testing.T) {
+	f := newJobQuestionTurnFixture(t)
+	const commandID = "cmd_c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1"
+	f.runtime.capabilities.SendIdempotency = false
+	f.runtime.capabilities.Evidence = []provider.CapabilityEvidence{
+		{
+			Capability: provider.CapabilityReadOnlyContextEnforcement, Identity: f.runtime.identity,
+			TestID: "read-only-context", EvidenceSHA256: strings.Repeat("b", 64),
+			EvidenceLevel: provider.EvidenceSynthetic, VerifiedAt: time.Now().UTC(),
+		},
+	}
+	f.runtime.sendErr = errors.Join(provider.ErrCredentialUnavailable, &provider.OperationError{
+		Class: provider.FailureNotDispatched, Code: provider.OperationCodeUnavailable,
+	})
+	first, err := f.controller.Send(context.Background(), f.jobID, f.authorizationID, commandID, 100)
+	if err == nil {
+		t.Fatal("pre-dispatch credential failure was not returned")
+	}
+	if first.Observation.Status != domain.JobQuestionTurnNotDispatched || f.runtime.sendCalls != 1 {
+		t.Fatalf("pre-dispatch failure was not recorded: observation=%#v sends=%d", first.Observation, f.runtime.sendCalls)
+	}
+
+	f.runtime.sendErr = nil
+	var requireIdempotency bool
+	f.runtime.sendHook = func(_ context.Context, request provider.TurnRequest) error {
+		requireIdempotency = request.RequireSendIdempotency
+		return nil
+	}
+	second, err := f.controller.Send(context.Background(), f.jobID, f.authorizationID, commandID, 100)
+	if err != nil {
+		t.Fatalf("retry after confirmed pre-dispatch failure: %v", err)
+	}
+	if second.Reply.Message.Body != "turn output" || second.Observation.Status != domain.JobQuestionTurnCompleted ||
+		f.runtime.sendCalls != 2 || requireIdempotency {
+		t.Fatalf("safe one-shot retry failed: outcome=%#v sends=%d requireIdempotency=%v",
+			second, f.runtime.sendCalls, requireIdempotency)
+	}
+}
