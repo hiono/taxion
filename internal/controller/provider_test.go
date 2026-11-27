@@ -1410,6 +1410,77 @@ func TestProviderControllerReconcilesTaskCoderStartUnknownBySameOperationID(t *t
 	}
 }
 
+func TestProviderControllerReconcilesUnboundTaskCoderStartByReadOnlyLookup(t *testing.T) {
+	database, jobID, revision, task := approvedExecutionPermissionControllerFixture(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Round(0)
+	assessor := &fakeExecutionEffectAssessor{assessment: domain.ExecutionEffectAssessment{
+		Reversible: true, Mutating: true, ValidUntil: now.Add(45 * time.Minute),
+	}}
+	executionController, err := NewExecutionController(database, assessor)
+	if err != nil {
+		t.Fatalf("NewExecutionController: %v", err)
+	}
+	executionController.now = func() time.Time { return now }
+	request := domain.ExecutionPermissionRequest{
+		JobID: jobID, TaskID: task.ID, CommandID: "cmd_b7777777777777777777777777777777",
+		Role: domain.RoleCoder, Effect: "repository.write", Resource: revision.Contract.TargetRepositories[0],
+		ProviderID: "provider.test", AccountID: "account.primary",
+		ConfigurationSHA256: revision.Contract.ConfigurationSHA256,
+		ReservedTurns:       2, ReservedTokens: 500, ExpiresAt: now.Add(30 * time.Minute),
+	}
+	_, permission, err := executionController.Authorize(ctx, request)
+	if err != nil {
+		t.Fatalf("Authorize: %v", err)
+	}
+	_, execution, intent, err := executionController.StartTaskExecution(
+		ctx, permission.ID, "cmd_b8888888888888888888888888888888", request,
+	)
+	if err != nil {
+		t.Fatalf("StartTaskExecution without Worktree: %v", err)
+	}
+	job, err := database.GetJob(ctx, jobID)
+	if err != nil {
+		t.Fatalf("GetJob: %v", err)
+	}
+	if execution.WorktreeAssignmentID != "" || execution.WorktreePath != "" || len(job.WorktreeAssignments) != 0 {
+		t.Fatalf("fixture unexpectedly has a Worktree binding: execution=%#v assignments=%#v", execution, job.WorktreeAssignments)
+	}
+	runtime := &fakePlanningProviderRuntime{
+		identity: provider.Identity{
+			ProviderID: permission.ProviderID, AccountID: permission.AccountID,
+			SDKVersion: "test-sdk/1", ConfigurationSHA256: permission.ConfigurationSHA256,
+		},
+		lookupResult: provider.LookupResult{
+			Found: true, OperationID: intent.ID, Status: "RUNNING",
+			ReceiptID: "receipt_unbound", SessionID: "session_unbound", EvidenceSHA256: strings.Repeat("a", 64),
+		},
+	}
+	runtime.capabilities = provider.Capabilities{
+		Identity: runtime.identity, StartLookup: true,
+		Evidence: []provider.CapabilityEvidence{{
+			Capability: provider.CapabilityStartLookup, Identity: runtime.identity,
+			TestID: "unbound-start-lookup", EvidenceSHA256: strings.Repeat("b", 64),
+			EvidenceLevel: provider.EvidenceSynthetic, VerifiedAt: now,
+		}},
+	}
+	controller, err := NewProviderControllerWithExecution(database, runtime, executionController)
+	if err != nil {
+		t.Fatalf("NewProviderControllerWithExecution: %v", err)
+	}
+	unknown, err := controller.recordTaskStartObservation(ctx, jobID, intent.ID, domain.ProviderStartUnknown, "", "", "", false)
+	if err != nil || unknown.Status != domain.ProviderStartUnknown {
+		t.Fatalf("record UNKNOWN Start observation: %#v err=%v", unknown, err)
+	}
+	accepted, result, err := controller.DispatchTaskExecution(ctx, jobID, execution.ID, permission.ID, request)
+	if err != nil || accepted.Status != domain.ProviderStartAccepted || !accepted.ReconcilesUnknown ||
+		result.OperationID != intent.ID || result.SessionID != "session_unbound" ||
+		runtime.lookupCalls != 1 || runtime.startCalls != 0 {
+		t.Fatalf("unbound Start was not recovered by read-only Lookup: %#v %#v lookups=%d starts=%d err=%v",
+			accepted, result, runtime.lookupCalls, runtime.startCalls, err)
+	}
+}
+
 func TestProviderControllerRejectsTaskReviewerStartWithoutReadOnlyWorktreeBoundary(t *testing.T) {
 	database, jobID, revision, task := approvedExecutionPermissionControllerFixture(t)
 	ctx := context.Background()
