@@ -761,6 +761,59 @@ func TestACPAdapterInvalidatesSessionAfterCancelledPrompt(t *testing.T) {
 	}
 }
 
+func TestACPAdapterKeepsRoleReservedUntilProcessExit(t *testing.T) {
+	t.Setenv("TAXION_ACP_HELPER", "1")
+	adapter := newACPTestAdapter(t)
+	defer adapter.Close()
+
+	process := &acpProcess{done: make(chan struct{})}
+	session := &acpSession{
+		roleExecutionID: "role_execution_stopping", sessionID: "session_stopping",
+		startOperationID: "operation_start_stopping", process: process,
+		turnGate: make(chan struct{}, 1), turns: make(map[string]TurnResult),
+	}
+	session.turnGate <- struct{}{}
+	adapter.mu.Lock()
+	adapter.byRole[session.roleExecutionID] = session
+	adapter.byID[session.sessionID] = session
+	adapter.mu.Unlock()
+	if err := adapter.trackProcess(process); err != nil {
+		t.Fatalf("trackProcess: %v", err)
+	}
+
+	replacement := newACPTestStartRequest("replacement", session.roleExecutionID)
+	replacement.OperationID = "operation_start_replacement"
+	if _, err := adapter.Start(context.Background(), replacement, nil); err == nil {
+		t.Fatal("Start launched a replacement CLI before the prior process exited")
+	}
+	adapter.mu.Lock()
+	reserved := adapter.byRole[session.roleExecutionID] == session
+	processCount := len(adapter.processes)
+	adapter.mu.Unlock()
+	if !reserved || processCount != 1 {
+		t.Fatalf("stopping RoleExecution reservation was lost: reserved=%v processes=%d", reserved, processCount)
+	}
+
+	close(process.done)
+	retireDeadline := time.Now().Add(time.Second)
+	for {
+		adapter.mu.Lock()
+		_, stillReserved := adapter.byRole[session.roleExecutionID]
+		adapter.mu.Unlock()
+		if !stillReserved {
+			break
+		}
+		if time.Now().After(retireDeadline) {
+			t.Fatal("RoleExecution reservation was not released after process.done")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	replacement.OperationID = "operation_start_replacement_after_exit"
+	if _, err := adapter.Start(context.Background(), replacement, nil); err != nil {
+		t.Fatalf("Start after prior process exit: %v", err)
+	}
+}
+
 func TestACPAdapterCloseDuringStartDoesNotPublishOperationCache(t *testing.T) {
 	t.Setenv("TAXION_ACP_HELPER", "1;block=block")
 	adapter := newACPTestAdapter(t)
