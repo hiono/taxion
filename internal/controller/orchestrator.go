@@ -72,6 +72,9 @@ func (c *OrchestratorController) SendRoleMessage(
 				continue
 			}
 			recipient := reply.Recipient
+			if _, restored := contexts[recipient]; restored {
+				continue
+			}
 			if !ordered[recipient] {
 				order = append(order, recipient)
 				ordered[recipient] = true

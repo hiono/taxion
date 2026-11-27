@@ -30,6 +30,17 @@ func (syntheticCapabilityVerifier) Verify(_ context.Context, identity Identity, 
 		item.EvidenceLevel == EvidenceSynthetic, nil
 }
 
+type selectiveErrorCapabilityVerifier struct {
+	failure Capability
+}
+
+func (v selectiveErrorCapabilityVerifier) Verify(_ context.Context, identity Identity, item CapabilityEvidence) (bool, error) {
+	if item.Capability == v.failure {
+		return false, errors.New("evidence source temporarily unavailable")
+	}
+	return item.Identity == identity, nil
+}
+
 type testEvidenceRegistry struct {
 	items map[Capability]CapabilityEvidence
 	err   error
@@ -80,6 +91,31 @@ func TestCapabilitiesRequireIdentityBoundEvidence(t *testing.T) {
 	}
 	if verified.HasEvidenceAtLeast(CapabilityStartIdempotency, EvidenceLive) || verified.HasEvidenceAtLeast(CapabilityReadOnlyContextEnforcement, EvidenceLive) {
 		t.Fatal("synthetic evidence was promoted to live capability")
+	}
+}
+
+func TestCapabilityVerificationOmitsOnlyCapabilityWithVerifierError(t *testing.T) {
+	identity := testIdentity()
+	capabilities := Capabilities{
+		Identity: identity, SendLookup: true, ReadOnlyContextEnforcement: true,
+		Evidence: []CapabilityEvidence{
+			evidence(identity, CapabilitySendLookup, EvidenceLive),
+			evidence(identity, CapabilityReadOnlyContextEnforcement, EvidenceLive),
+		},
+	}
+	verified, err := capabilities.Verified(context.Background(), identity,
+		selectiveErrorCapabilityVerifier{failure: CapabilityReadOnlyContextEnforcement})
+	if err != nil {
+		t.Fatalf("Verified: %v", err)
+	}
+	if !verified.HasEvidenceAtLeast(CapabilitySendLookup, EvidenceLive) {
+		t.Fatal("unrelated verified SendLookup capability was discarded")
+	}
+	if verified.Has(CapabilityReadOnlyContextEnforcement) {
+		t.Fatal("capability with failed evidence verification remained enabled")
+	}
+	if err := capabilities.Validate(identity); err != nil {
+		t.Fatalf("original capability declaration was mutated: %v", err)
 	}
 }
 

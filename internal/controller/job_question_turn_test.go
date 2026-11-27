@@ -1192,6 +1192,10 @@ func TestJobQuestionTurnControllerBoundsUnknownLookupRecovery(t *testing.T) {
 	)
 	f.runtime.capabilities = capabilities
 	f.runtime.lookupHook = func(ctx context.Context, _ provider.LookupRequest) error {
+		deadline, ok := ctx.Deadline()
+		if !ok || time.Until(deadline) > 5*time.Second {
+			t.Errorf("Lookup deadline = %v, present=%v; want an independent five-second bound", deadline, ok)
+		}
 		<-ctx.Done()
 		return ctx.Err()
 	}

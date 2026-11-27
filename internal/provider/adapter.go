@@ -201,7 +201,10 @@ func (c Capabilities) Verified(ctx context.Context, expected Identity, verifier 
 		}
 		accepted, err := verifier.Verify(ctx, expected, item)
 		if err != nil {
-			return Capabilities{}, errors.New("Provider capability evidence verification is unavailable")
+			if ctx.Err() != nil {
+				return Capabilities{}, ctx.Err()
+			}
+			continue
 		}
 		if !accepted {
 			continue
