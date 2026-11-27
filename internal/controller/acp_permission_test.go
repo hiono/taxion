@@ -121,6 +121,28 @@ func TestACPExecutionPermissionAuthorizerRevalidatesExactTaskAuthority(t *testin
 	if err != nil {
 		t.Fatalf("GetJob before Worktree binding: %v", err)
 	}
+	worktreeCandidate := domain.WorktreeAssignment{
+		ID: domain.WorktreeAssignmentID(jobID, task.ID, revision.Contract.TargetRepositories[0]),
+		JobID: jobID, TaskID: task.ID, RepositoryID: revision.Contract.TargetRepositories[0],
+		RepositoryPath: t.TempDir(), WorktreePath: t.TempDir(),
+		BaselineCommit: strings.Repeat("a", 40), OwnerRoleExecutionID: execution.ID,
+	}
+	startAttempt, err := domain.NewProviderStartObservation(
+		unboundJob, intent.ID, "", "cmd_c1111111111111111111111111111111",
+		domain.ProviderStartUnknown, "", "", "", false, now,
+	)
+	if err != nil {
+		t.Fatalf("NewProviderStartObservation for Worktree binding guard: %v", err)
+	}
+	attemptedJob := unboundJob
+	attemptedJob.ProviderStartObservations = append(
+		append([]domain.ProviderStartObservation(nil), unboundJob.ProviderStartObservations...), startAttempt,
+	)
+	attemptedJob.Revision = startAttempt.CreatedRevision
+	attemptedJob.UpdatedAt = now
+	if _, err := domain.NewWorktreeAssignmentBinding(attemptedJob, execution.ID, worktreeCandidate, now); err == nil {
+		t.Fatal("NewWorktreeAssignmentBinding accepted retroactive binding after an UNKNOWN Provider Start")
+	}
 	invalidPath := filepath.Join(t.TempDir(), string([]byte{0xff}))
 	for _, field := range []string{"repository", "worktree"} {
 		candidate := domain.WorktreeAssignment{
