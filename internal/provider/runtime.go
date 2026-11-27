@@ -72,14 +72,6 @@ func (r *Runtime) Start(ctx context.Context, request StartRequest) (StartResult,
 	}
 	defer cancel()
 	ctx = boundedContext
-	capabilities, err := r.verifiedCapabilities(ctx)
-	if err != nil {
-		return StartResult{}, err
-	}
-	if !capabilities.HasEvidenceAtLeast(CapabilityStartIdempotency, r.minimumEvidence) &&
-		!capabilities.HasEvidenceAtLeast(CapabilityStartLookup, r.minimumEvidence) {
-		return StartResult{}, ErrUnsupportedCapability
-	}
 	result, err := withCredential(ctx, r.broker, r.identity, func(lease CredentialLease) (StartResult, error) {
 		result, err := r.adapter.Start(ctx, request, lease)
 		if err != nil {
@@ -114,14 +106,6 @@ func (r *Runtime) Send(ctx context.Context, request TurnRequest) (TurnResult, er
 	}
 	defer cancel()
 	ctx = boundedContext
-	capabilities, err := r.verifiedCapabilities(ctx)
-	if err != nil {
-		return TurnResult{}, err
-	}
-	if !capabilities.HasEvidenceAtLeast(CapabilitySendIdempotency, r.minimumEvidence) &&
-		!capabilities.HasEvidenceAtLeast(CapabilitySendLookup, r.minimumEvidence) {
-		return TurnResult{}, ErrUnsupportedCapability
-	}
 	result, err := withCredential(ctx, r.broker, r.identity, func(lease CredentialLease) (TurnResult, error) {
 		result, err := r.adapter.Send(ctx, request, lease)
 		if err != nil {
