@@ -937,15 +937,15 @@ func TestCopilotProfileEnvironmentUsesAllowlist(t *testing.T) {
 	}
 
 	for name, want := range map[string]string{
-		"PATH":             "/trusted/bin",
-		"TMPDIR":           "/tmp/taxion",
-		"LANG":             "C.UTF-8",
-		"LC_ALL":           "C.UTF-8",
-		"TERM":             "dumb",
-		"HOME":             profile,
-		"XDG_CONFIG_HOME":  filepath.Join(profile, ".config"),
-		"XDG_CACHE_HOME":   filepath.Join(profile, ".cache"),
-		"XDG_DATA_HOME":    filepath.Join(profile, ".local", "share"),
+		"PATH":            "/trusted/bin",
+		"TMPDIR":          "/tmp/taxion",
+		"LANG":            "C.UTF-8",
+		"LC_ALL":          "C.UTF-8",
+		"TERM":            "dumb",
+		"HOME":            profile,
+		"XDG_CONFIG_HOME": filepath.Join(profile, ".config"),
+		"XDG_CACHE_HOME":  filepath.Join(profile, ".cache"),
+		"XDG_DATA_HOME":   filepath.Join(profile, ".local", "share"),
 	} {
 		if got[name] != want {
 			t.Errorf("%s = %q, want %q", name, got[name], want)
