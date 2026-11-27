@@ -768,13 +768,41 @@ func TestACPAdapterStopInvalidatesStartCache(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
+	adapter.mu.Lock()
+	session := adapter.byID[start.SessionID]
+	adapter.mu.Unlock()
 	_, err = adapter.Stop(context.Background(), StopRequest{OperationID: "operation_stop_1", SessionID: start.SessionID}, nil)
 	var operationErr *OperationError
 	if !errors.As(err, &operationErr) || operationErr.Class != FailureAmbiguous {
 		t.Fatalf("Stop error = %v, want ambiguous outcome", err)
 	}
-	if len(adapter.byOp) != 0 || len(adapter.byID) != 0 || len(adapter.byRole) != 0 {
-		t.Fatal("Stop retained Start or session caches")
+	select {
+	case <-session.process.done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("stopped ACP process did not exit")
+	}
+	deadline := time.Now().Add(time.Second)
+	for {
+		adapter.mu.Lock()
+		retired := adapter.detached[start.SessionID] == session
+		adapter.mu.Unlock()
+		if retired {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("stopped Session ownership was not retired after process exit")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	adapter.mu.Lock()
+	_, cachedStart := adapter.byOp[request.OperationID]
+	_, attached := adapter.byID[start.SessionID]
+	_, roleAttached := adapter.byRole[request.RoleExecutionID]
+	_, retained := adapter.detached[start.SessionID]
+	adapter.mu.Unlock()
+	if cachedStart || attached || roleAttached || !retained {
+		t.Fatalf("Stop completion state: cachedStart=%v attached=%v roleAttached=%v retained=%v",
+			cachedStart, attached, roleAttached, retained)
 	}
 }
 
@@ -833,6 +861,14 @@ func TestACPAdapterAcceptsFinalResponseBeforePeerEOF(t *testing.T) {
 	if !result.Final || result.Content != "fixed ACP response" || result.TurnID == "" {
 		t.Fatalf("final output was not retained after peer EOF: %#v", result)
 	}
+	if _, err := adapter.Start(context.Background(), request, nil); err == nil {
+		t.Fatal("Start replayed a retired OperationID after peer EOF")
+	} else {
+		var operationErr *OperationError
+		if !errors.As(err, &operationErr) || operationErr.Class != FailureAmbiguous {
+			t.Fatalf("retired Start replay error = %v; want ambiguous", err)
+		}
+	}
 }
 
 func TestACPAdapterResultReturnsInitialStartPromptOutput(t *testing.T) {
@@ -880,6 +916,10 @@ func TestACPAdapterStopDoesNotWaitForBlockedWrite(t *testing.T) {
 	}
 	if elapsed := time.Since(started); elapsed > 500*time.Millisecond {
 		t.Fatalf("Stop waited for blocked transport write: %s", elapsed)
+	}
+	if !session.stopping.Load() || adapter.byID[session.sessionID] != session ||
+		adapter.byRole[session.roleExecutionID] != session {
+		t.Fatal("Stop released RoleExecution ownership before process exit was confirmed")
 	}
 }
 
