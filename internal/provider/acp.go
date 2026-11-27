@@ -415,6 +415,9 @@ func (a *ACPAdapter) retireSessionLocked(session *acpSession) {
 	if session == nil {
 		return
 	}
+	if a.detached == nil {
+		a.detached = make(map[string]*acpSession)
+	}
 	if a.byID[session.sessionID] == session {
 		delete(a.byID, session.sessionID)
 		a.detached[session.sessionID] = session
