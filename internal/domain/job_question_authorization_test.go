@@ -537,7 +537,7 @@ func TestJobQuestionTurnAdmissionTreatsPersistedReplyAsTerminalWithoutProviderOb
 		JobQuestionAuthorizations: []JobQuestionAuthorization{grant},
 		JobQuestionTurnIntents:    []JobQuestionTurnIntent{intent},
 	}
-	turns, tokens, err := jobQuestionTurnBudgetUsedBefore(job, grant.ID, grant, now, 3)
+	turns, tokens, err := jobQuestionTurnBudgetUsedBefore(job, grant.ID, 3, now)
 	if err != nil || turns != 1 || tokens != intent.ReservedTokens {
 		t.Fatalf("persisted Planner reply did not settle the session guard: turns=%d tokens=%d err=%v", turns, tokens, err)
 	}
