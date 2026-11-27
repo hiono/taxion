@@ -190,6 +190,7 @@ func (c *JobQuestionTurnController) reconcileUnknown(
 	if err != nil {
 		return outcome, err
 	}
+	lookupConfirmedNotFound := false
 	if capabilities.SendLookup &&
 		capabilities.HasEvidenceAtLeast(provider.CapabilitySendLookup, c.minimumEvidence) &&
 		capabilities.HasEvidenceAtLeast(provider.CapabilityUsageIdentity, c.minimumEvidence) &&
@@ -206,6 +207,9 @@ func (c *JobQuestionTurnController) reconcileUnknown(
 		}
 		if err := lookup.Validate(request); err != nil {
 			return outcome, fmt.Errorf("validate UNKNOWN Planner question lookup: %w", err)
+		}
+		if !lookup.Found {
+			lookupConfirmedNotFound = true
 		}
 		if lookup.Found {
 			if lookup.Status != domain.JobQuestionTurnCompleted && lookup.Status != domain.JobQuestionTurnFailed {
@@ -316,10 +320,13 @@ func (c *JobQuestionTurnController) reconcileUnknown(
 	if err != nil {
 		return outcome, err
 	}
-	if !currentCapabilities.HasEvidenceAtLeast(provider.CapabilitySendIdempotency, c.minimumEvidence) {
+	requireSendIdempotency := !lookupConfirmedNotFound ||
+		!currentCapabilities.HasEvidenceAtLeast(provider.CapabilitySendLookup, c.minimumEvidence)
+	if requireSendIdempotency &&
+		!currentCapabilities.HasEvidenceAtLeast(provider.CapabilitySendIdempotency, c.minimumEvidence) {
 		return outcome, provider.ErrUnsupportedCapability
 	}
-	return c.dispatch(ctx, outcome, currentGrant, currentQuestion, intent, currentCapabilities, true)
+	return c.dispatch(ctx, outcome, currentGrant, currentQuestion, intent, currentCapabilities, requireSendIdempotency)
 }
 
 func (c *JobQuestionTurnController) dispatch(

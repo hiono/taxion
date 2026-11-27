@@ -914,6 +914,56 @@ func TestJobQuestionTurnControllerDoesNotDispatchAfterDeadlineWhenLookupReportsN
 	}
 }
 
+func TestJobQuestionTurnControllerRetriesVerifiedNotFoundWithoutSendIdempotency(t *testing.T) {
+	f := newJobQuestionTurnFixture(t)
+	const commandID = "cmd_fedcba9876543210fedcba9876543216"
+	f.runtime.sendErr = errors.New("simulated preflight failure before Provider acceptance")
+	if _, err := f.controller.Send(context.Background(), f.jobID, f.authorizationID, commandID, 100); err == nil {
+		t.Fatal("initial preflight failure was not returned")
+	}
+
+	now := time.Now().UTC()
+	capabilities := f.runtime.capabilities
+	capabilities.SendIdempotency = false
+	filtered := capabilities.Evidence[:0]
+	for _, evidence := range capabilities.Evidence {
+		if evidence.Capability != provider.CapabilitySendIdempotency {
+			filtered = append(filtered, evidence)
+		}
+	}
+	capabilities.Evidence = filtered
+	capabilities.SendLookup, capabilities.UsageIdentity, capabilities.UsageCompleteness = true, true, true
+	capabilities.Evidence = append(capabilities.Evidence,
+		provider.CapabilityEvidence{Capability: provider.CapabilitySendLookup, Identity: f.runtime.identity, TestID: "question-lookup", EvidenceSHA256: strings.Repeat("c", 64), EvidenceLevel: provider.EvidenceSynthetic, VerifiedAt: now},
+		provider.CapabilityEvidence{Capability: provider.CapabilityUsageIdentity, Identity: f.runtime.identity, TestID: "question-usage-id", EvidenceSHA256: strings.Repeat("d", 64), EvidenceLevel: provider.EvidenceSynthetic, VerifiedAt: now},
+		provider.CapabilityEvidence{Capability: provider.CapabilityUsageCompleteness, Identity: f.runtime.identity, TestID: "question-usage-complete", EvidenceSHA256: strings.Repeat("e", 64), EvidenceLevel: provider.EvidenceSynthetic, VerifiedAt: now},
+	)
+	f.runtime.capabilities = capabilities
+	job, err := f.database.GetJob(context.Background(), f.jobID)
+	if err != nil {
+		t.Fatalf("GetJob: %v", err)
+	}
+	intent, found := findJobQuestionTurnIntentByCommand(job, commandID)
+	if !found {
+		t.Fatal("persisted intent not found")
+	}
+	f.runtime.lookupResult = provider.LookupResult{
+		Found: false, OperationID: intent.OperationID, Status: provider.LookupStatusNotFound,
+		SessionID: f.sessionID, TurnID: intent.ID, EvidenceSHA256: strings.Repeat("a", 64),
+	}
+	f.runtime.sendErr = nil
+
+	outcome, err := f.controller.Send(context.Background(), f.jobID, f.authorizationID, commandID, 100)
+	if err != nil {
+		t.Fatalf("retry after authoritative NOT_FOUND: %v", err)
+	}
+	if outcome.Observation.Status != domain.JobQuestionTurnCompleted ||
+		f.runtime.sendCalls != 2 || f.runtime.lookupCalls != 1 {
+		t.Fatalf("verified NOT_FOUND did not release the unused first Send: outcome=%#v sends=%d lookups=%d",
+			outcome, f.runtime.sendCalls, f.runtime.lookupCalls)
+	}
+}
+
 func TestJobQuestionTurnControllerUsesIdempotentSendWhenLookupRecoveryEvidenceIsIncomplete(t *testing.T) {
 	f := newJobQuestionTurnFixture(t)
 	const commandID = "cmd_b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3"
