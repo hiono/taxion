@@ -62,24 +62,31 @@ func (c *OrchestratorController) SendRoleMessage(
 	switch request.Recipient.Kind {
 	case domain.ActorPlanner:
 		outcome.QuestionTurns, err = c.ProcessPlannerInbox(ctx, request.JobID, request.Recipient.ID)
-		restored := make(map[domain.ActorRef]struct{})
+		contexts := make(map[domain.ActorRef]RoleExecutionContext)
+		order := make([]domain.ActorRef, 0, len(outcome.QuestionTurns)+1)
+		var restoreErrors []error
 		for _, turn := range outcome.QuestionTurns {
-			if turn.Reply.Message.ID == "" {
+			reply := turn.Reply.Message
+			if reply.ID == "" {
 				continue
 			}
-			recipient := turn.Reply.Message.Recipient
-			if _, exists := restored[recipient]; exists {
-				continue
+			recipient := reply.Recipient
+			if _, exists := contexts[recipient]; !exists {
+				order = append(order, recipient)
 			}
-			resumed, contextErr := c.communication.ContextForMessage(ctx, request.JobID, turn.Reply.Message.ID)
+			resumed, contextErr := c.communication.ContextForMessage(ctx, request.JobID, reply.ID)
 			if contextErr != nil {
-				return outcome, fmt.Errorf("restore original Role context after Planner reply: %w", contextErr)
+				restoreErrors = append(restoreErrors, fmt.Errorf("restore original Role context after Planner reply: %w", contextErr))
+				if ctx.Err() != nil {
+					break
+				}
+				continue
 			}
-			restored[recipient] = struct{}{}
-			outcome.ResumedContexts = append(outcome.ResumedContexts, resumed)
+			contexts[recipient] = resumed
 		}
+
 		replyContextRestored := false
-		for _, resumed := range outcome.ResumedContexts {
+		for _, resumed := range contexts {
 			for _, reply := range resumed.Messages {
 				if reply.ReplyToMessageID == message.Message.ID &&
 					reply.Sender == (domain.ActorRef{Kind: domain.ActorPlanner, ID: request.Recipient.ID}) &&
@@ -92,23 +99,36 @@ func (c *OrchestratorController) SendRoleMessage(
 				break
 			}
 		}
-		if !replyContextRestored {
+		if !replyContextRestored && ctx.Err() == nil {
 			resumed, found, contextErr := c.contextForPlannerReply(ctx, request.JobID, message.Message.ID)
 			if contextErr != nil {
-				return outcome, contextErr
-			}
-			if found {
+				restoreErrors = append(restoreErrors, contextErr)
+			} else if found {
 				actorKind, actorErr := actorKindForRole(resumed.RoleExecution.Role)
 				if actorErr != nil {
-					return outcome, actorErr
-				}
-				actor := domain.ActorRef{Kind: actorKind, ID: resumed.RoleExecution.ID}
-				if _, exists := restored[actor]; !exists {
-					outcome.ResumedContexts = append(outcome.ResumedContexts, resumed)
+					restoreErrors = append(restoreErrors, actorErr)
+				} else {
+					actor := domain.ActorRef{Kind: actorKind, ID: resumed.RoleExecution.ID}
+					if _, exists := contexts[actor]; !exists {
+						order = append(order, actor)
+					}
+					// The fallback reads the latest Job; replace any older context for this Actor.
+					contexts[actor] = resumed
 				}
 			}
 		}
-		return outcome, err
+		for _, actor := range order {
+			if resumed, found := contexts[actor]; found {
+				outcome.ResumedContexts = append(outcome.ResumedContexts, resumed)
+			}
+		}
+		if err != nil {
+			restoreErrors = append(restoreErrors, err)
+		}
+		if ctx.Err() != nil {
+			restoreErrors = append(restoreErrors, ctx.Err())
+		}
+		return outcome, errors.Join(restoreErrors...)
 	case domain.ActorCoder, domain.ActorReviewer:
 		resumed, contextErr := c.communication.ContextForMessage(ctx, request.JobID, message.Message.ID)
 		if contextErr != nil {
