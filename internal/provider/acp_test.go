@@ -9,7 +9,6 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -1174,43 +1173,30 @@ func TestACPProcessNotificationDrainHonorsDeadline(t *testing.T) {
 	}
 }
 
-func TestACPAdapterConcurrentCloseReapsLateStartedProcess(t *testing.T) {
-	t.Setenv("TAXION_ACP_HELPER", "1")
-	wrapper := filepath.Join(t.TempDir(), "delayed-acp")
-	if err := os.WriteFile(wrapper, []byte("#!/bin/sh\nsleep 0.25\nexec \"$@\"\n"), 0700); err != nil {
-		t.Fatalf("write delayed ACP wrapper: %v", err)
-	}
-	adapter, err := NewACPAdapter(ACPConfig{
-		Command: wrapper, Args: []string{os.Args[0], "-test.run=TestACPHelperProcess"},
-		WorkingDirectory: t.TempDir(), Identity: testIdentity(),
-		Environment: []string{"TAXION_ACP_HELPER"},
-	})
-	if err != nil {
-		t.Fatalf("NewACPAdapter: %v", err)
-	}
-	startResult := make(chan error, 1)
-	go func() {
-		_, startErr := adapter.Start(context.Background(), newACPTestStartRequest("late", "role_execution_late"), nil)
-		startResult <- startErr
-	}()
-	deadline := time.Now().Add(time.Second)
-	for {
-		adapter.mu.Lock()
-		reserved := len(adapter.startingRole) == 1
-		notTracked := len(adapter.processes) == 0
-		adapter.mu.Unlock()
-		if reserved && notTracked {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("Start did not reach the untracked process-launch window")
-		}
-		time.Sleep(time.Millisecond)
-	}
+type acpTestProcessCloser struct {
+	done chan struct{}
+}
+
+func (w *acpTestProcessCloser) Write(data []byte) (int, error) {
+	return len(data), nil
+}
+
+func (w *acpTestProcessCloser) Close() error {
+	close(w.done)
+	return nil
+}
+
+func TestACPAdapterConcurrentCloseReapsLateTrackedProcess(t *testing.T) {
+	adapter := newACPTestAdapter(t)
+	reservation := &acpStartReservation{cancel: func() {}, done: make(chan struct{})}
+	adapter.mu.Lock()
+	adapter.startingRole["role_execution_late"] = reservation
+	adapter.startingOp["operation_late"] = reservation
+	adapter.mu.Unlock()
 
 	closeResults := make(chan error, 2)
 	go func() { closeResults <- adapter.Close() }()
-	deadline = time.Now().Add(time.Second)
+	deadline := time.Now().Add(time.Second)
 	for {
 		adapter.mu.Lock()
 		closeStarted := adapter.closeDone != nil
@@ -1223,14 +1209,25 @@ func TestACPAdapterConcurrentCloseReapsLateStartedProcess(t *testing.T) {
 		}
 		time.Sleep(time.Millisecond)
 	}
+
+	process := newACPProcess(nil, &acpTestWriter{})
+	process.stdin = &acpTestProcessCloser{done: process.done}
+	if err := adapter.trackProcess(process); err == nil {
+		t.Fatal("late process was accepted after adapter Close")
+	}
 	go func() { closeResults <- adapter.Close() }()
+	adapter.releaseStartReservation("role_execution_late", "operation_late", reservation)
+	close(reservation.done)
+
 	for i := 0; i < 2; i++ {
 		if closeErr := <-closeResults; closeErr != nil {
 			t.Fatalf("concurrent Close %d: %v", i+1, closeErr)
 		}
 	}
-	if startErr := <-startResult; startErr == nil {
-		t.Fatal("Start reported success after Close won the process-launch race")
+	select {
+	case <-process.done:
+	default:
+		t.Fatal("Close returned before the late-tracked process exited")
 	}
 	adapter.mu.Lock()
 	remaining := len(adapter.processes)
@@ -1240,6 +1237,7 @@ func TestACPAdapterConcurrentCloseReapsLateStartedProcess(t *testing.T) {
 		t.Fatalf("Close left processes=%d reservations=%d", remaining, reservations)
 	}
 }
+
 
 func TestACPAdapterCloseTracksDetachedProcesses(t *testing.T) {
 	t.Setenv("TAXION_ACP_HELPER", "1")
