@@ -1069,11 +1069,10 @@ func TestOrchestratorContinuesAfterPerTurnDeadlineWhileCallerContextIsActive(t *
 	}
 }
 
-
 type replyBeforeObservationStore struct {
 	*store.Store
 	jobID, plannerID, coderID, questionID string
-	inserted bool
+	inserted                              bool
 }
 
 func (s *replyBeforeObservationStore) AddJobQuestionTurnObservation(
@@ -1089,10 +1088,10 @@ func (s *replyBeforeObservationStore) AddJobQuestionTurnObservation(
 	}
 	_, _, err = s.Store.AddJobMessage(ctx, s.jobID, job.Revision,
 		"cmd_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", domain.JobMessageRequest{
-			Sender: domain.ActorRef{Kind: domain.ActorPlanner, ID: s.plannerID},
-			Recipient: domain.ActorRef{Kind: domain.ActorCoder, ID: s.coderID},
+			Sender:           domain.ActorRef{Kind: domain.ActorPlanner, ID: s.plannerID},
+			Recipient:        domain.ActorRef{Kind: domain.ActorCoder, ID: s.coderID},
 			ReplyToMessageID: s.questionID,
-			Body: "Planner answered through ordinary messaging",
+			Body:             "Planner answered through ordinary messaging",
 		})
 	if err != nil {
 		return receipt, observation, err
