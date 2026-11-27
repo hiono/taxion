@@ -174,9 +174,6 @@ func (c *JobQuestionTurnController) Send(
 	if err != nil {
 		return outcome, err
 	}
-	if !capabilities.HasEvidenceAtLeast(provider.CapabilityReadOnlyContextEnforcement, c.minimumEvidence) {
-		return outcome, provider.ErrUnsupportedCapability
-	}
 	return c.dispatch(ctx, outcome, grant, question, intent, capabilities)
 }
 
