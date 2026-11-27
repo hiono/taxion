@@ -1246,14 +1246,6 @@ func TestJobQuestionTurnControllerSerializesUnresolvedTurnsAcrossQuestionGrants(
 	if firstGrant.ID == "" {
 		t.Fatal("first JobQuestionAuthorization was not persisted")
 	}
-	coder, found := findRoleExecution(job, f.coderID)
-	if !found {
-		t.Fatal("Coder RoleExecution was not found")
-	}
-	coderSession, found := acceptedRoleSession(job, coder)
-	if !found {
-		t.Fatal("Coder has no accepted Provider Session")
-	}
 	_, question, err := f.database.AddJobMessage(ctx, f.jobID, job.Revision,
 		"cmd_b2b2b2b2b2b2b2b2b2b2b2b2b2b2", domain.JobMessageRequest{
 			Sender: domain.ActorRef{Kind: domain.ActorCoder, ID: f.coderID},
@@ -1286,5 +1278,43 @@ func TestJobQuestionTurnControllerSerializesUnresolvedTurnsAcrossQuestionGrants(
 	}
 	if f.runtime.sendCalls != 1 {
 		t.Fatalf("second question was dispatched while the Planner Session had an UNKNOWN turn: sends=%d", f.runtime.sendCalls)
+	}
+}
+
+
+func TestJobQuestionTurnIntentReceiptDistinguishesCreationFromReplay(t *testing.T) {
+	f := newJobQuestionTurnFixture(t)
+	ctx := context.Background()
+	job, err := f.database.GetJob(ctx, f.jobID)
+	if err != nil {
+		t.Fatalf("GetJob: %v", err)
+	}
+	grant, found := findJobQuestionAuthorization(job, f.authorizationID)
+	if !found {
+		t.Fatal("JobQuestionAuthorization was not found")
+	}
+	question, found := findJobMessage(job, f.questionID)
+	if !found {
+		t.Fatal("source question was not found")
+	}
+	request := domain.JobQuestionTurnIntentRequest{
+		JobQuestionAuthorizationID: grant.ID,
+		CommandID: "cmd_c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1",
+		PromptSHA256: sha256String(jobQuestionTurnPrompt(question.Body)),
+		ReservedTokens: 100,
+	}
+	first, _, err := f.database.AddJobQuestionTurnIntent(ctx, f.jobID, job.Revision, request)
+	if err != nil {
+		t.Fatalf("first AddJobQuestionTurnIntent: %v", err)
+	}
+	if !first.Created {
+		t.Fatal("first intent receipt did not identify the creation")
+	}
+	replayed, _, err := f.database.AddJobQuestionTurnIntent(ctx, f.jobID, job.Revision, request)
+	if err != nil {
+		t.Fatalf("replayed AddJobQuestionTurnIntent: %v", err)
+	}
+	if replayed.Created {
+		t.Fatal("replayed intent receipt incorrectly claimed creation")
 	}
 }
