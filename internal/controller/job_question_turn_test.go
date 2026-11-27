@@ -713,8 +713,9 @@ func TestOrchestratorContinuesAfterFailedQuestionAndCollectsErrors(t *testing.T)
 	}
 	// Replay must retain the completed turn and its correlated reply without another Provider Send.
 	replayed, replayErr := orchestrator.ProcessPlannerInbox(context.Background(), fixture.jobID, fixture.plannerID)
-	if replayErr == nil || len(replayed) != 2 || fixture.runtime.sendCalls != 2 {
-		t.Fatalf("inbox replay changed terminal outcomes or resent Provider Turns: outcomes=%#v sends=%d err=%v",
+	if replayErr != nil || len(replayed) != 1 ||
+		replayed[0].Observation.Status != domain.JobQuestionTurnCompleted || fixture.runtime.sendCalls != 2 {
+		t.Fatalf("inbox replay did not skip the prior terminal failure or preserve the completed turn: outcomes=%#v sends=%d err=%v",
 			replayed, fixture.runtime.sendCalls, replayErr)
 	}
 	job, err = fixture.database.GetJob(context.Background(), fixture.jobID)
@@ -1107,7 +1108,7 @@ func TestJobQuestionTurnReturnsExistingPlannerReplyBeforeExpiredGrantRecovery(t 
 		t.Fatalf("GetJob: %v", err)
 	}
 	_, _, err = f.database.AddJobMessage(context.Background(), f.jobID, job.Revision,
-		"cmd_b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5", domain.JobMessageRequest{
+		"cmd_55555555555555555555555555555555", domain.JobMessageRequest{
 			Sender:           domain.ActorRef{Kind: domain.ActorPlanner, ID: f.plannerID},
 			Recipient:        domain.ActorRef{Kind: domain.ActorCoder, ID: f.coderID},
 			ReplyToMessageID: f.questionID,
@@ -1247,7 +1248,7 @@ func TestJobQuestionTurnControllerSerializesUnresolvedTurnsAcrossQuestionGrants(
 		t.Fatal("first JobQuestionAuthorization was not persisted")
 	}
 	_, question, err := f.database.AddJobMessage(ctx, f.jobID, job.Revision,
-		"cmd_b2b2b2b2b2b2b2b2b2b2b2b2b2b2", domain.JobMessageRequest{
+		"cmd_22222222222222222222222222222222", domain.JobMessageRequest{
 			Sender:    domain.ActorRef{Kind: domain.ActorCoder, ID: f.coderID},
 			Recipient: domain.ActorRef{Kind: domain.ActorPlanner, ID: f.plannerID},
 			Body:      "A second question for the same Planner Session.",
@@ -1265,7 +1266,7 @@ func TestJobQuestionTurnControllerSerializesUnresolvedTurnsAcrossQuestionGrants(
 		t.Fatalf("NewJobQuestionAuthorizationController: %v", err)
 	}
 	_, secondGrant, err := authorizations.Authorize(ctx, f.jobID, question.ID,
-		"cmd_b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3",
+		"cmd_33333333333333333333333333333333",
 		domain.PlanningBudget{MaxTurns: 1, MaxTokens: 10}, firstGrant.Deadline)
 	if err != nil {
 		t.Fatalf("Authorize second question: %v", err)
@@ -1298,7 +1299,7 @@ func TestJobQuestionTurnIntentReceiptDistinguishesCreationFromReplay(t *testing.
 	}
 	request := domain.JobQuestionTurnIntentRequest{
 		JobQuestionAuthorizationID: grant.ID,
-		CommandID:                  "cmd_c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1",
+		CommandID:                  "cmd_11111111111111111111111111111111",
 		PromptSHA256:               sha256String(jobQuestionTurnPrompt(question.Body)),
 		ReservedTokens:             100,
 	}
