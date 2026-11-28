@@ -45,14 +45,15 @@ func (b *workspaceBaseline) diff(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("list tracked changes: %w", err)
 	}
-	args := []string{"diff", "--no-ext-diff", "--no-textconv", "--no-renames", "--relative", b.commit, "--"}
+	args := []string{"diff", "--no-ext-diff", "--no-textconv", "--no-renames", "--submodule=short", "--relative", b.commit, "--"}
+	baseArgs := len(args)
 	for _, file := range splitGitPaths(changed) {
 		if !b.untracked[file] {
 			args = append(args, ":(literal)"+file)
 		}
 	}
 	var diff strings.Builder
-	if len(args) > 7 {
+	if len(args) > baseArgs {
 		tracked, err := workspaceGit(ctx, b.directory, false, args...)
 		if err != nil {
 			return "", fmt.Errorf("read tracked changes: %w", err)
@@ -89,21 +90,36 @@ func splitGitPaths(value string) []string {
 }
 
 type limitedGitOutput struct {
-	bytes.Buffer
+	buffer   bytes.Buffer
 	exceeded bool
 }
 
 func (b *limitedGitOutput) Write(p []byte) (int, error) {
-	if b.Len()+len(p) > maxWorkspaceDiffBytes {
+	if b.buffer.Len()+len(p) > maxWorkspaceDiffBytes {
 		b.exceeded = true
 		return 0, errors.New("Git output exceeds the input size limit")
 	}
-	return b.Buffer.Write(p)
+	return b.buffer.Write(p)
+}
+
+func workspaceGitEnvironment() []string {
+	var env []string
+	for _, entry := range os.Environ() {
+		name, _, _ := strings.Cut(entry, "=")
+		name = strings.ToUpper(name)
+		if strings.HasPrefix(name, "GIT_") && name != "GIT_CONFIG_GLOBAL" &&
+			name != "GIT_CONFIG_SYSTEM" && name != "GIT_CONFIG_NOSYSTEM" {
+			continue
+		}
+		env = append(env, entry)
+	}
+	return env
 }
 
 func workspaceGit(ctx context.Context, directory string, allowDiffExit bool, args ...string) (string, error) {
 	command := exec.CommandContext(ctx, "git", args...)
 	command.Dir = directory
+	command.Env = workspaceGitEnvironment()
 	var output limitedGitOutput
 	var stderr limitedGitOutput
 	command.Stdout = &output
@@ -116,8 +132,8 @@ func workspaceGit(ctx context.Context, directory string, allowDiffExit bool, arg
 		return "", ctx.Err()
 	}
 	var exit *exec.ExitError
-	if err != nil && !(allowDiffExit && errors.As(err, &exit) && exit.ExitCode() == 1 && stderr.Len() == 0 && output.Len() > 0) {
+	if err != nil && !(allowDiffExit && errors.As(err, &exit) && exit.ExitCode() == 1 && stderr.buffer.Len() == 0 && output.buffer.Len() > 0) {
 		return "", err
 	}
-	return output.String(), nil
+	return output.buffer.String(), nil
 }

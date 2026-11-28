@@ -13,6 +13,7 @@ func testGit(t *testing.T, dir string, args ...string) {
 	t.Helper()
 	cmd := exec.Command("git", args...)
 	cmd.Dir = dir
+	cmd.Env = workspaceGitEnvironment()
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git %v: %v: %s", args, err, output)
 	}
@@ -134,5 +135,58 @@ func TestWorkspaceDiffReportsMissingNewFile(t *testing.T) {
 	_, err := workspaceGit(context.Background(), dir, true, "diff", "--no-index", "--", os.DevNull, "missing")
 	if err == nil {
 		t.Fatal("missing file was treated as a successful diff")
+	}
+}
+
+func TestWorkspaceDiffLimitsGitOutput(t *testing.T) {
+	dir := testGitWorkspace(t)
+	baseline, err := captureWorkspaceBaseline(context.Background(), dir)
+	if err != nil || baseline == nil {
+		t.Fatalf("baseline = %#v, error = %v", baseline, err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "tracked.txt"), []byte(strings.Repeat("x", maxWorkspaceDiffBytes)+"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := baseline.diff(context.Background()); err == nil {
+		t.Fatal("oversized tracked diff was accepted")
+	}
+}
+
+func TestWorkspaceDiffIgnoresGitRepositoryEnvironment(t *testing.T) {
+	dir, other := testGitWorkspace(t), testGitWorkspace(t)
+	t.Setenv("GIT_DIR", filepath.Join(other, ".git"))
+	t.Setenv("GIT_WORK_TREE", other)
+	t.Setenv("GIT_INDEX_FILE", filepath.Join(other, ".git", "index"))
+	baseline, err := captureWorkspaceBaseline(context.Background(), dir)
+	if err != nil || baseline == nil {
+		t.Fatalf("baseline = %#v, error = %v", baseline, err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "tracked.txt"), []byte("target repository\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	diff, err := baseline.diff(context.Background())
+	if err != nil || !strings.Contains(diff, "target repository") {
+		t.Fatalf("diff = %q, error = %v", diff, err)
+	}
+}
+
+func TestWorkspaceDiffOmitsSubmoduleContents(t *testing.T) {
+	dir, source := testGitWorkspace(t), testGitWorkspace(t)
+	testGit(t, dir, "-c", "protocol.file.allow=always", "submodule", "add", "-q", source, "module")
+	testGit(t, dir, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "add submodule")
+	testGit(t, dir, "config", "diff.submodule", "diff")
+	baseline, err := captureWorkspaceBaseline(context.Background(), dir)
+	if err != nil || baseline == nil {
+		t.Fatalf("baseline = %#v, error = %v", baseline, err)
+	}
+	module := filepath.Join(dir, "module")
+	if err := os.WriteFile(filepath.Join(module, "tracked.txt"), []byte("submodule content\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	testGit(t, module, "add", "tracked.txt")
+	testGit(t, module, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "change")
+	diff, err := baseline.diff(context.Background())
+	if err != nil || !strings.Contains(diff, "Subproject commit") || strings.Contains(diff, "+submodule content") {
+		t.Fatalf("diff = %q, error = %v", diff, err)
 	}
 }
