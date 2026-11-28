@@ -1025,6 +1025,36 @@ func (c *ProviderController) reconcileTurn(
 						}
 						return receipt, turn, observation, provider.TurnResult{}, errors.New("Provider Turn terminal state awaits complete Usage evidence")
 					}
+					if lookup.Status == domain.PlanningTurnCompleted {
+						current, err := c.store.GetJob(ctx, job.ID)
+						if err != nil {
+							return receipt, turn, previous, provider.TurnResult{}, err
+						}
+						if _, found := plannerTurnMessage(current, turn); !found {
+							var content string
+							haveResult := false
+							for _, final := range current.ProviderResultObservations {
+								if final.OperationID == turn.OperationID && final.TurnID == turn.ID &&
+									final.RoleExecutionID == turn.RoleExecutionID && final.SessionID == turn.ProviderSessionID && final.Final {
+									content, haveResult = final.Content, true
+									break
+								}
+							}
+							if !haveResult {
+								_, final, err := c.RetrieveProviderResult(ctx, job.ID, turn.RoleExecutionID, turn.ProviderSessionID, turn.ID, principal)
+								if err != nil {
+									return receipt, turn, previous, provider.TurnResult{}, fmt.Errorf("recover Planner response: %w", err)
+								}
+								content = final.Content
+							}
+							if err := c.validatePlannerTurnCompletion(ctx, turn, usage.Tokens, usage.EvidenceSHA256, principal); err != nil {
+								return receipt, turn, previous, provider.TurnResult{}, err
+							}
+							if err := c.savePlannerTurnMessage(ctx, turn, content); err != nil {
+								return receipt, turn, previous, provider.TurnResult{}, err
+							}
+						}
+					}
 					observation, err := c.recordTurnObservation(
 						ctx, job.ID, turn.ID, lookup.Status, usage.Tokens, usage.EvidenceSHA256, principal,
 					)
@@ -1116,29 +1146,11 @@ func (c *ProviderController) reconcileTurn(
 		return receipt, turn, observation, provider.TurnResult{}, provider.ErrProviderInvalidResult
 	}
 	if result.Status == domain.PlanningTurnCompleted && strings.TrimSpace(result.Output) != "" {
-		current, err := c.store.GetJob(ctx, job.ID)
-		if err != nil {
+		if err := c.validatePlannerTurnCompletion(ctx, turn, result.TokensUsed, result.EvidenceSHA256, principal); err != nil {
 			return receipt, turn, previous, result, err
 		}
-		latest, found := latestProviderTurnObservation(current, turn.ID)
-		if !found || latest.Status == domain.PlanningTurnUnknown {
-			commandID := providerTurnObservationCommandID(turn.ID, result.Status, result.TokensUsed, result.EvidenceSHA256, found)
-			if _, err := domain.NewPlanningTurnObservation(current, turn.ID, principal.PrincipalID(), commandID,
-				result.Status, result.TokensUsed, result.EvidenceSHA256, found, c.now()); err != nil {
-				return receipt, turn, previous, result, err
-			}
-		} else if latest.Status != result.Status || latest.TokensUsed != result.TokensUsed || latest.EvidenceSHA256 != result.EvidenceSHA256 {
-			return receipt, turn, latest, result, errors.New("Provider Turn already has a different terminal observation")
-		}
-		communication := CommunicationController{store: c.store}
-		_, err = communication.SendFromRole(ctx, RoleMessageRequest{
-			JobID: job.ID, RoleExecutionID: turn.RoleExecutionID, ProviderSessionID: turn.ProviderSessionID,
-			CommandID: providerTurnMessageCommandID(turn.ID),
-			Recipient: domain.ActorRef{Kind: domain.ActorOrchestrator, ID: domain.OrchestratorActorID},
-			Body:      result.Output,
-		})
-		if err != nil {
-			return receipt, turn, previous, result, fmt.Errorf("save Planner response: %w", err)
+		if err := c.savePlannerTurnMessage(ctx, turn, result.Output); err != nil {
+			return receipt, turn, previous, result, err
 		}
 	}
 	observation, err := c.recordTurnObservation(
@@ -1242,17 +1254,61 @@ func providerTurnMessageCommandID(turnID string) string {
 	return "cmd_" + hex.EncodeToString(sum[:16])
 }
 
+func (c *ProviderController) validatePlannerTurnCompletion(ctx context.Context, turn domain.PlanningTurnIntent, tokens uint64, evidence string, principal auth.AuthenticatedPrincipal) error {
+	job, err := c.store.GetJob(ctx, turn.JobID)
+	if err != nil {
+		return err
+	}
+	latest, found := latestProviderTurnObservation(job, turn.ID)
+	if found && latest.Status != domain.PlanningTurnUnknown {
+		if latest.Status == domain.PlanningTurnCompleted && latest.TokensUsed == tokens && latest.EvidenceSHA256 == evidence {
+			return nil
+		}
+		return errors.New("Provider Turn already has a different terminal observation")
+	}
+	commandID := providerTurnObservationCommandID(turn.ID, domain.PlanningTurnCompleted, tokens, evidence, found)
+	_, err = domain.NewPlanningTurnObservation(job, turn.ID, principal.PrincipalID(), commandID,
+		domain.PlanningTurnCompleted, tokens, evidence, found, c.now())
+	return err
+}
+
+func (c *ProviderController) savePlannerTurnMessage(ctx context.Context, turn domain.PlanningTurnIntent, body string) error {
+	if strings.TrimSpace(body) == "" {
+		return nil
+	}
+	communication := CommunicationController{store: c.store}
+	_, err := communication.SendFromRole(ctx, RoleMessageRequest{
+		JobID: turn.JobID, RoleExecutionID: turn.RoleExecutionID, ProviderSessionID: turn.ProviderSessionID,
+		CommandID: providerTurnMessageCommandID(turn.ID),
+		Recipient: domain.ActorRef{Kind: domain.ActorOrchestrator, ID: domain.OrchestratorActorID},
+		Body:      body,
+	})
+	if err != nil {
+		return fmt.Errorf("save Planner response: %w", err)
+	}
+	return nil
+}
+
+func plannerTurnMessage(job domain.Job, turn domain.PlanningTurnIntent) (string, bool) {
+	for _, message := range job.JobMessages {
+		if message.CommandID == providerTurnMessageCommandID(turn.ID) &&
+			message.Sender == (domain.ActorRef{Kind: domain.ActorPlanner, ID: turn.RoleExecutionID}) &&
+			message.Recipient == (domain.ActorRef{Kind: domain.ActorOrchestrator, ID: domain.OrchestratorActorID}) {
+			return message.Body, true
+		}
+	}
+	return "", false
+}
+
 func turnResultFromObservation(job domain.Job, observation domain.PlanningTurnObservation) provider.TurnResult {
 	result := provider.TurnResult{
 		OperationID: observation.OperationID, TurnID: observation.TurnID, SessionID: observation.ProviderSessionID,
 		Status: observation.Status, TokensUsed: observation.TokensUsed, EvidenceSHA256: observation.EvidenceSHA256,
 	}
 	if observation.Status == domain.PlanningTurnCompleted {
-		for _, message := range job.JobMessages {
-			if message.CommandID == providerTurnMessageCommandID(observation.TurnID) &&
-				message.Sender == (domain.ActorRef{Kind: domain.ActorPlanner, ID: observation.RoleExecutionID}) &&
-				message.Recipient == (domain.ActorRef{Kind: domain.ActorOrchestrator, ID: domain.OrchestratorActorID}) {
-				result.Output = message.Body
+		for _, turn := range job.PlanningTurnIntents {
+			if turn.ID == observation.TurnID {
+				result.Output, _ = plannerTurnMessage(job, turn)
 				break
 			}
 		}

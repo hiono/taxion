@@ -839,12 +839,12 @@ func TestProviderControllerDoesNotCompleteOrResendWhenSavingResponseFails(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	controller, err = NewProviderController(rejectPlannerMessageStore{database}, runtime)
+	failing, err := NewProviderController(rejectPlannerMessageStore{database}, runtime)
 	if err != nil {
 		t.Fatal(err)
 	}
 	commandID := "cmd_19191919191919191919191919191919"
-	_, _, observation, result, err := controller.SendPlanning(ctx, jobID, execution.ID, "session_1",
+	_, turn, observation, result, err := failing.SendPlanning(ctx, jobID, execution.ID, "session_1",
 		commandID, "inspect the accepted repository snapshot", 100, principal)
 	if err == nil || result.Output != "turn output" || observation.Status != domain.PlanningTurnUnknown {
 		t.Fatalf("save failure: observation=%#v result=%#v err=%v", observation, result, err)
@@ -857,6 +857,40 @@ func TestProviderControllerDoesNotCompleteOrResendWhenSavingResponseFails(t *tes
 	if err != nil || len(job.JobMessages) != 0 || len(job.PlanningTurnObservations) != 1 ||
 		job.PlanningTurnObservations[0].Status != domain.PlanningTurnUnknown {
 		t.Fatalf("save failure must remain UNKNOWN: %#v err=%v", job, err)
+	}
+	now := time.Now().UTC()
+	runtime.capabilities.SendLookup = true
+	runtime.capabilities.UsageIdentity = true
+	runtime.capabilities.UsageCompleteness = true
+	runtime.capabilities.Evidence = append(runtime.capabilities.Evidence,
+		provider.CapabilityEvidence{Capability: provider.CapabilitySendLookup, Identity: runtime.identity, TestID: "controller-test", EvidenceSHA256: strings.Repeat("a", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
+		provider.CapabilityEvidence{Capability: provider.CapabilityUsageIdentity, Identity: runtime.identity, TestID: "controller-test", EvidenceSHA256: strings.Repeat("b", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
+		provider.CapabilityEvidence{Capability: provider.CapabilityUsageCompleteness, Identity: runtime.identity, TestID: "controller-test", EvidenceSHA256: strings.Repeat("c", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
+	)
+	runtime.lookupResult = provider.LookupResult{
+		Found: true, OperationID: turn.OperationID, SessionID: "session_1", TurnID: turn.ID,
+		Status: domain.PlanningTurnCompleted, ReceiptID: "receipt_1", UsageID: "usage_1",
+		EvidenceSHA256: strings.Repeat("e", 64),
+	}
+	_, _, observation, _, err = controller.SendPlanning(ctx, jobID, execution.ID, "session_1",
+		commandID, "inspect the accepted repository snapshot", 100, principal)
+	if !errors.Is(err, provider.ErrUnsupportedCapability) || observation.Status != domain.PlanningTurnUnknown || runtime.sendCalls != 1 {
+		t.Fatalf("unrecoverable output must remain UNKNOWN: observation=%#v sends=%d err=%v", observation, runtime.sendCalls, err)
+	}
+	runtime.capabilities.FinalOutputRetrieval = true
+	runtime.capabilities.Evidence = append(runtime.capabilities.Evidence,
+		provider.CapabilityEvidence{Capability: provider.CapabilityFinalOutput, Identity: runtime.identity, TestID: "controller-test", EvidenceSHA256: strings.Repeat("d", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
+	)
+	if _, _, observation, _, err := failing.SendPlanning(ctx, jobID, execution.ID, "session_1",
+		commandID, "inspect the accepted repository snapshot", 100, principal); err == nil || observation.Status != domain.PlanningTurnUnknown {
+		t.Fatalf("recovered output save failure: observation=%#v err=%v", observation, err)
+	}
+	runtime.capabilities.FinalOutputRetrieval = false
+	_, _, observation, recovered, err := controller.SendPlanning(ctx, jobID, execution.ID, "session_1",
+		commandID, "inspect the accepted repository snapshot", 100, principal)
+	if err != nil || observation.Status != domain.PlanningTurnCompleted ||
+		recovered.Output != "final provider result" || runtime.sendCalls != 1 || runtime.resultCalls != 1 {
+		t.Fatalf("recovered response=%#v observation=%#v sends=%d results=%d err=%v", recovered, observation, runtime.sendCalls, runtime.resultCalls, err)
 	}
 }
 
@@ -942,6 +976,53 @@ func TestProviderControllerDoesNotPublishInvalidTurnResult(t *testing.T) {
 	}
 }
 
+func TestProviderControllerReconcilesVerifiedBlankPlannerResponse(t *testing.T) {
+	ctx := context.Background()
+	runtime := &fakePlanningProviderRuntime{sendErr: &provider.OperationError{Class: provider.FailureAmbiguous, Code: provider.OperationCodeTimeout}}
+	controller, database, principal, jobID, grantID, documents := newProviderControllerFixture(t, runtime)
+	_, execution, _, _, err := controller.StartPlanning(ctx, jobID, grantID,
+		"cmd_18181818181818181818181818181818", documents, principal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commandID := "cmd_19191919191919191919191919191919"
+	_, turn, unknown, _, err := controller.SendPlanning(ctx, jobID, execution.ID, "session_1",
+		commandID, "inspect the accepted repository snapshot", 100, principal)
+	if err == nil || unknown.Status != domain.PlanningTurnUnknown {
+		t.Fatalf("initial turn was not UNKNOWN: %#v %v", unknown, err)
+	}
+	now := time.Now().UTC()
+	runtime.capabilities.SendLookup = true
+	runtime.capabilities.UsageIdentity = true
+	runtime.capabilities.UsageCompleteness = true
+	runtime.capabilities.FinalOutputRetrieval = true
+	runtime.capabilities.Evidence = append(runtime.capabilities.Evidence,
+		provider.CapabilityEvidence{Capability: provider.CapabilitySendLookup, Identity: runtime.identity, TestID: "controller-test", EvidenceSHA256: strings.Repeat("a", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
+		provider.CapabilityEvidence{Capability: provider.CapabilityUsageIdentity, Identity: runtime.identity, TestID: "controller-test", EvidenceSHA256: strings.Repeat("b", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
+		provider.CapabilityEvidence{Capability: provider.CapabilityUsageCompleteness, Identity: runtime.identity, TestID: "controller-test", EvidenceSHA256: strings.Repeat("c", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
+		provider.CapabilityEvidence{Capability: provider.CapabilityFinalOutput, Identity: runtime.identity, TestID: "controller-test", EvidenceSHA256: strings.Repeat("d", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
+	)
+	runtime.lookupResult = provider.LookupResult{
+		Found: true, OperationID: turn.OperationID, SessionID: "session_1", TurnID: turn.ID,
+		Status: domain.PlanningTurnCompleted, ReceiptID: "receipt_1", UsageID: "usage_1",
+		EvidenceSHA256: strings.Repeat("e", 64),
+	}
+	runtime.resultResult = provider.Result{
+		OperationID: turn.OperationID, SessionID: "session_1", TurnID: turn.ID, Content: "",
+		ResultSHA256: sha256String(""), Final: true, EvidenceSHA256: strings.Repeat("f", 64),
+	}
+	_, _, observation, result, err := controller.SendPlanning(ctx, jobID, execution.ID, "session_1",
+		commandID, "inspect the accepted repository snapshot", 100, principal)
+	if err != nil || observation.Status != domain.PlanningTurnCompleted || result.Output != "" || runtime.sendCalls != 1 {
+		t.Fatalf("blank response: observation=%#v result=%#v err=%v", observation, result, err)
+	}
+	job, err := database.GetJob(ctx, jobID)
+	if err != nil || len(job.JobMessages) != 0 || len(job.ProviderResultObservations) != 1 ||
+		job.ProviderResultObservations[0].Content != "" {
+		t.Fatalf("blank result evidence=%#v messages=%#v err=%v", job.ProviderResultObservations, job.JobMessages, err)
+	}
+}
+
 func TestProviderControllerReconcilesUnknownTurnWithLookupAndCompleteUsage(t *testing.T) {
 	runtime := &fakePlanningProviderRuntime{}
 	controller, database, principal, jobID, grantID, documents := newProviderControllerFixture(t, runtime)
@@ -949,10 +1030,12 @@ func TestProviderControllerReconcilesUnknownTurnWithLookupAndCompleteUsage(t *te
 	runtime.capabilities.SendLookup = true
 	runtime.capabilities.UsageIdentity = true
 	runtime.capabilities.UsageCompleteness = true
+	runtime.capabilities.FinalOutputRetrieval = true
 	runtime.capabilities.Evidence = append(runtime.capabilities.Evidence,
 		provider.CapabilityEvidence{Capability: provider.CapabilitySendLookup, Identity: runtime.identity, TestID: "controller-test", EvidenceSHA256: strings.Repeat("a", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
 		provider.CapabilityEvidence{Capability: provider.CapabilityUsageIdentity, Identity: runtime.identity, TestID: "controller-test", EvidenceSHA256: strings.Repeat("b", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
 		provider.CapabilityEvidence{Capability: provider.CapabilityUsageCompleteness, Identity: runtime.identity, TestID: "controller-test", EvidenceSHA256: strings.Repeat("c", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
+		provider.CapabilityEvidence{Capability: provider.CapabilityFinalOutput, Identity: runtime.identity, TestID: "controller-test", EvidenceSHA256: strings.Repeat("d", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
 	)
 	_, execution, _, _, err := controller.StartPlanning(
 		context.Background(), jobID, grantID, "cmd_20202020202020202020202020202020", documents, principal,
