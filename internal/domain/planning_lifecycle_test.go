@@ -90,7 +90,7 @@ func TestPlanningTurnLifecycleRevalidatesBudgetAndUnknown(t *testing.T) {
 	job.PlanningTurnIntents = append(job.PlanningTurnIntents, second)
 	job.Revision++
 	job.UpdatedAt = second.CreatedAt
-	secondObservation, err := NewPlanningTurnObservation(job, second.ID, principal, "cmd_77777777777777777777777777777777", PlanningTurnFailed, 99880, strings.Repeat("3", 64), false, now.Add(4*time.Second))
+	secondObservation, err := NewPlanningTurnObservation(job, second.ID, principal, "cmd_77777777777777777777777777777777", PlanningTurnFailed, 100050, strings.Repeat("3", 64), false, now.Add(4*time.Second))
 	if err != nil {
 		t.Fatalf("second turn observation: %v", err)
 	}
@@ -101,7 +101,26 @@ func TestPlanningTurnLifecycleRevalidatesBudgetAndUnknown(t *testing.T) {
 		t.Fatalf("Job.Validate after token usage: %v", err)
 	}
 	if _, err := NewPlanningTurnIntent(job, executionID, principal, "session_1", "cmd_66666666666666666666666666666666", strings.Repeat("4", 64), 1, now.Add(5*time.Second)); err == nil {
-		t.Fatal("turn exceeded the remaining token budget after actual usage was applied")
+		t.Fatal("turn exceeded the grant token budget after an over-budget FAILED result was recorded")
+	}
+}
+
+func TestPlanningCompletedTurnCannotExceedItsReservation(t *testing.T) {
+	job, principal, executionID := planningLifecycleJob(t)
+	now := job.UpdatedAt.Add(time.Second)
+	turn, err := NewPlanningTurnIntent(job, executionID, principal, "session_1", "cmd_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", strings.Repeat("a", 64), 100, now)
+	if err != nil {
+		t.Fatalf("turn: %v", err)
+	}
+	job.PlanningTurnIntents = append(job.PlanningTurnIntents, turn)
+	job.Revision++
+	job.UpdatedAt = turn.CreatedAt
+	if _, err := NewPlanningTurnObservation(job, turn.ID, principal, "cmd_cccccccccccccccccccccccccccccccc", PlanningTurnCompleted, 101, strings.Repeat("b", 64), false, now.Add(time.Second)); err == nil {
+		t.Fatal("COMPLETED turn exceeded its token reservation")
+	}
+	failed, err := NewPlanningTurnObservation(job, turn.ID, principal, "cmd_dddddddddddddddddddddddddddddddd", PlanningTurnFailed, 101, strings.Repeat("c", 64), false, now.Add(time.Second))
+	if err != nil || failed.TokensUsed != 101 || failed.Status != PlanningTurnFailed {
+		t.Fatalf("FAILED turn did not preserve over-budget usage: %#v err=%v", failed, err)
 	}
 }
 
