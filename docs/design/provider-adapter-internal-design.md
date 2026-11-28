@@ -411,11 +411,19 @@ aggregate updateとreceipt insertのいずれかが失敗した場合は両方ro
 
 ```go
 type ProviderExecutionStore interface {
-    PlanningLifecycleStore
+    JobContractProposalStore
+    AddProviderStartObservation(...)
+    AddPlanningTurnIntent(...)
+    AddPlanningTurnObservation(...)
+    AddPlanningResumeIntent(...)
+    AddPlanningResumeObservation(...)
     StartTasklessPlanner(...)
     AddProviderEventObservation(...)
+    AddProviderStopIntent(...)
+    AddProviderStopObservation(...)
     AddProviderResultObservation(...)
     AddProviderUsageObservation(...)
+    AddTaskProviderStartObservation(...)
 }
 
 type PlanningProviderRuntime interface {
@@ -423,6 +431,8 @@ type PlanningProviderRuntime interface {
     Capabilities(context.Context) (provider.Capabilities, error)
     Start(context.Context, provider.StartRequest) (provider.StartResult, error)
     Send(context.Context, provider.TurnRequest) (provider.TurnResult, error)
+    Resume(context.Context, provider.ResumeRequest) (provider.ResumeResult, error)
+    Stop(context.Context, provider.StopRequest) (provider.StopResult, error)
     Lookup(context.Context, provider.LookupRequest) (provider.LookupResult, error)
     ReplayEvents(context.Context, provider.ReplayEventsRequest) (provider.EventPage, error)
     Result(context.Context, provider.ResultRequest) (provider.Result, error)
@@ -430,10 +440,10 @@ type PlanningProviderRuntime interface {
 }
 
 type ProviderController struct {
-    store    ProviderExecutionStore
-    runtime  PlanningProviderRuntime
-    planning *PlanningController
-    now      func() time.Time
+    store     ProviderExecutionStore
+    runtime   PlanningProviderRuntime
+    execution *ExecutionController
+    now       func() time.Time
 }
 ```
 
