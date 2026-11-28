@@ -178,12 +178,31 @@ func TestACPExecutionPermissionAuthorizerRevalidatesExactTaskAuthority(t *testin
 	}
 	for _, field := range []string{"repository", "worktree"} {
 		candidate := assignment
+		candidateJob := persistedJob
 		if field == "repository" {
 			candidate.RepositoryPath = invalidPath
 		} else {
 			candidate.WorktreePath = invalidPath
+			candidateJob.WorktreeAssignments = append([]domain.WorktreeAssignment(nil), persistedJob.WorktreeAssignments...)
+			candidateJob.RoleExecutions = append([]domain.RoleExecution(nil), persistedJob.RoleExecutions...)
+			candidateJob.ProviderStartIntents = append([]domain.ProviderStartIntent(nil), persistedJob.ProviderStartIntents...)
+			for i := range candidateJob.WorktreeAssignments {
+				if candidateJob.WorktreeAssignments[i].ID == assignment.ID {
+					candidateJob.WorktreeAssignments[i].WorktreePath = invalidPath
+				}
+			}
+			for i := range candidateJob.RoleExecutions {
+				if candidateJob.RoleExecutions[i].ID == execution.ID {
+					candidateJob.RoleExecutions[i].WorktreePath = invalidPath
+				}
+			}
+			for i := range candidateJob.ProviderStartIntents {
+				if candidateJob.ProviderStartIntents[i].RoleExecutionID == execution.ID {
+					candidateJob.ProviderStartIntents[i].WorktreePath = invalidPath
+				}
+			}
 		}
-		if err := candidate.Validate(persistedJob); err == nil {
+		if err := candidate.Validate(candidateJob); err == nil {
 			t.Fatalf("WorktreeAssignment.Validate accepted invalid UTF-8 %s path", field)
 		}
 	}
