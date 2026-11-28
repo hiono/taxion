@@ -333,27 +333,6 @@ type StartRequest struct {
 	Deadline              time.Time
 }
 
-type ACPToolPermissionRequest struct {
-	OperationID           string
-	JobID                 string
-	RoleExecutionID       string
-	TaskID                string
-	ExecutionPermissionID string
-	WorktreeAssignmentID  string
-	WorktreePath          string
-	SessionID             string
-	RequestSHA256         string
-	ProviderIdentity      Identity
-	ToolCall              []byte
-}
-
-// ACPToolPermissionAuthorizer must validate the current JobApproval and exact
-// Task ExecutionPermission, then classify the requested tool operation.
-// A nil authorizer always results in permission denial.
-type ACPToolPermissionAuthorizer interface {
-	Authorize(context.Context, ACPToolPermissionRequest) error
-}
-
 func (r StartRequest) Validate() error {
 	if !validIdentifier(r.OperationID) || !validIdentifier(r.JobID) || !validIdentifier(r.RoleExecutionID) ||
 		(r.TaskID == "") != (r.ExecutionPermissionID == "") ||

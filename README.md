@@ -34,7 +34,7 @@ Taxion は、最初から完全な要求仕様や実装手順を利用者へ要�
 - `taxion job message --body "..." <job-id>`：OIDC再認証後、Jobの所有者からControllerへの補足を保存します。`--to <role-execution-id>` で宛先、`--reply-to <message-id>` で返信先を指定できます。保存のみで、Agentへの自動配送は行いません。
 - `taxion dev job create --request "..."`：開発・永続化テスト専用の未認証ローカルDRAFT Jobを作成します。
 - `taxion dev provider login`：Copilot CLIをTaxion専用のローカルプロファイルへログインします。
-- `taxion dev provider run --prompt "..."`：Copilot CLIをACP stdioで起動し、自然言語promptを1回送信して応答を表示します。ツール権限要求はすべて拒否します。これはProvider接続のスモークテストであり、承認済みJobのCoder実行ではありません。
+- `taxion dev provider run --prompt "..."`：Copilot CLIをACP stdioで起動し、自然言語promptを1回送信して応答を表示します。ツール権限要求はすべて拒否します。ACP AdapterはTask実行を受け付けません。これはProvider接続のスモークテストであり、承認済みJobのCoder実行ではありません。
 - `taxion dev provider run --provider opencode --prompt "..."`：OpenCodeの`opencode/big-pickle`を一時プロファイルで起動するスモークテストです。Jobには接続されません。
 - `taxion dev provider run --provider opencode --job <local-job-id> --prompt "..."`：未認証のローカルDRAFT Jobに限り、依頼と過去の会話を自然言語でProviderへ渡し、Controller / Orchestrator間の記録として同じJobへ保存します。各実行は新しいSessionを開始し、履歴のコピーで文脈を再構成します。Provider失敗時も送信前に保存した入力は残ります。認可済みJob実行やAgent間自動配送ではありません。
 - `taxion job show <job-id>`：Jobの現在の内容をJSONで表示します。

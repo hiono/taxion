@@ -3,9 +3,6 @@ package controller
 import (
 	"context"
 	"errors"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -279,86 +276,4 @@ func TestExecutionControllerExactReplayAndCommandConflict(t *testing.T) {
 	if len(job.ExecutionPermissions) != 1 {
 		t.Fatalf("permission count = %d, want exactly one", len(job.ExecutionPermissions))
 	}
-}
-
-func TestVerifyGitWorktreeChecksRepositoryAndBaseline(t *testing.T) {
-	repositoryPath, worktreePath, baselineCommit := newControllerTestGitWorktree(t)
-	if err := verifyGitWorktree(context.Background(), repositoryPath, worktreePath, baselineCommit); err != nil {
-		t.Fatalf("verify valid Git Worktree: %v", err)
-	}
-	if err := verifyGitWorktree(context.Background(), repositoryPath, worktreePath, strings.Repeat("0", 40)); err == nil {
-		t.Fatal("verifyGitWorktree accepted a mismatched baseline commit")
-	}
-	otherRepositoryPath, _, _ := newControllerTestGitWorktree(t)
-	if err := verifyGitWorktree(context.Background(), otherRepositoryPath, worktreePath, baselineCommit); err == nil {
-		t.Fatal("verifyGitWorktree accepted a Worktree from another repository")
-	}
-}
-
-func TestControllerTestGitIgnoresInheritedRepository(t *testing.T) {
-	otherRepository, _, otherHead := newControllerTestGitWorktree(t)
-	otherConfig, err := os.ReadFile(filepath.Join(otherRepository, ".git", "config"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("GIT_DIR", filepath.Join(otherRepository, ".git"))
-	t.Setenv("GIT_WORK_TREE", otherRepository)
-	t.Setenv("GIT_INDEX_FILE", filepath.Join(otherRepository, ".git", "index"))
-
-	repository, _, _ := newControllerTestGitWorktree(t)
-	root, err := canonicalGitPath(runControllerTestGit(t, repository, "rev-parse", "--show-toplevel"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	expectedRoot, err := canonicalGitPath(repository)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if root != expectedRoot {
-		t.Fatalf("fixture root = %q, want %q", root, repository)
-	}
-	if head := runControllerTestGit(t, otherRepository, "rev-parse", "HEAD"); head != otherHead {
-		t.Fatalf("other repository HEAD changed from %s to %s", otherHead, head)
-	}
-	config, err := os.ReadFile(filepath.Join(otherRepository, ".git", "config"))
-	if err != nil || string(config) != string(otherConfig) {
-		t.Fatalf("other repository config changed: %v", err)
-	}
-}
-
-func newControllerTestGitWorktree(t *testing.T) (string, string, string) {
-	t.Helper()
-	repositoryPath := filepath.Join(t.TempDir(), "repository")
-	if err := os.MkdirAll(repositoryPath, 0o755); err != nil {
-		t.Fatalf("create test repository: %v", err)
-	}
-	runControllerTestGit(t, repositoryPath, "init", "--quiet")
-	runControllerTestGit(t, repositoryPath, "config", "user.name", "Taxion Test")
-	runControllerTestGit(t, repositoryPath, "config", "user.email", "taxion-test@example.invalid")
-	if err := os.WriteFile(filepath.Join(repositoryPath, "README.md"), []byte("baseline\n"), 0o644); err != nil {
-		t.Fatalf("write test repository baseline: %v", err)
-	}
-	runControllerTestGit(t, repositoryPath, "add", "README.md")
-	runControllerTestGit(t, repositoryPath, "commit", "--quiet", "-m", "baseline")
-	baselineCommit := runControllerTestGit(t, repositoryPath, "rev-parse", "HEAD")
-	worktreePath := filepath.Join(t.TempDir(), "worktree")
-	runControllerTestGit(t, repositoryPath, "worktree", "add", "--quiet", "--detach", worktreePath, baselineCommit)
-	return repositoryPath, worktreePath, baselineCommit
-}
-
-func runControllerTestGit(t *testing.T, directory string, args ...string) string {
-	t.Helper()
-	commandArgs := append([]string{"-C", directory}, args...)
-	command := exec.Command("git", commandArgs...)
-	command.Env = []string{}
-	for _, entry := range os.Environ() {
-		if !strings.HasPrefix(strings.ToUpper(entry), "GIT_") {
-			command.Env = append(command.Env, entry)
-		}
-	}
-	output, err := command.CombinedOutput()
-	if err != nil {
-		t.Fatalf("git %s: %v: %s", strings.Join(args, " "), err, output)
-	}
-	return strings.TrimSpace(string(output))
 }

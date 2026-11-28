@@ -113,29 +113,22 @@ func TestCommunicationControllerPersistsCoderPlannerQuestionAndAnswer(t *testing
 	if err != nil {
 		t.Fatalf("StartTaskExecution Coder: %v", err)
 	}
-	coderExecution, _ = bindProviderTestWorktree(
-		t, database, executionController, jobID, "cmd_c3333333333333333333333333333333",
-		revision.Contract.TargetRepositories[0], coderExecution,
-	)
-
-	providerController, err := NewProviderControllerWithExecution(database, runtime, executionController)
-	if err != nil {
-		t.Fatalf("NewProviderControllerWithExecution: %v", err)
-	}
-	runtime.startResult = provider.StartResult{
-		OperationID: permission.OperationID, SessionID: "session_coder",
-		ReceiptID: "receipt_coder", EvidenceSHA256: strings.Repeat("f", 64),
-	}
-	coderStart, _, err := providerController.DispatchTaskExecution(
-		context.Background(), jobID, coderExecution.ID, permission.ID, permissionRequest,
-	)
-	if err != nil {
-		t.Fatalf("DispatchTaskExecution Coder: %v", err)
-	}
-
 	job, err := database.GetJob(context.Background(), jobID)
 	if err != nil {
-		t.Fatalf("GetJob before communication: %v", err)
+		t.Fatal(err)
+	}
+	// This fixture represents a recorded Coder session, not a Provider execution.
+	_, coderStart, err := database.AddTaskProviderStartObservation(
+		context.Background(), jobID, job.Revision, permission.OperationID,
+		domain.ProviderStartObservationCommandID(permission.OperationID, domain.ProviderStartAccepted, "session_coder", "receipt_coder", strings.Repeat("f", 64), false),
+		domain.ProviderStartAccepted, "session_coder", "receipt_coder", strings.Repeat("f", 64), false,
+	)
+	if err != nil {
+		t.Fatalf("record simulated Coder session: %v", err)
+	}
+	job, err = database.GetJob(context.Background(), jobID)
+	if err != nil {
+		t.Fatal(err)
 	}
 	var plannerExecution domain.RoleExecution
 	for _, execution := range job.RoleExecutions {

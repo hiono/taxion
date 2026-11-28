@@ -998,62 +998,6 @@ func TestACPAdapterCloseCanConfirmAfterUnconfirmedExit(t *testing.T) {
 	}
 }
 
-func TestACPAdapterStopSerializesWithPermissionResponse(t *testing.T) {
-	t.Setenv("TAXION_ACP_HELPER", "1")
-	adapter := newACPTestAdapter(t)
-	defer adapter.Close()
-	start, err := adapter.Start(context.Background(), newACPTestStartRequest("start", "role_execution_stop_permission"), nil)
-	if err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-	adapter.mu.Lock()
-	session := adapter.byID[start.SessionID]
-	adapter.mu.Unlock()
-	if session == nil {
-		t.Fatal("Start did not publish its Session")
-	}
-
-	// The permission handler holds the prompt gate from its final authorization check
-	// until its allow/deny response is written. Stop must not send cancellation
-	// or terminate the process ahead of that response.
-	unlockPrompt, err := session.lockPrompt(context.Background())
-	if err != nil {
-		t.Fatalf("lockPrompt: %v", err)
-	}
-	session.promptCtx = context.Background()
-	stopStarted := make(chan struct{})
-	stopDone := make(chan error, 1)
-	go func() {
-		close(stopStarted)
-		_, stopErr := adapter.Stop(context.Background(), StopRequest{
-			OperationID: "operation_stop_permission", SessionID: start.SessionID,
-		}, nil)
-		stopDone <- stopErr
-	}()
-	<-stopStarted
-	select {
-	case err := <-stopDone:
-		t.Fatalf("Stop returned while permission response owned prompt gate: %v", err)
-	case <-time.After(25 * time.Millisecond):
-	}
-	unlockPrompt()
-
-	select {
-	case err := <-stopDone:
-		var operationErr *OperationError
-		if !errors.As(err, &operationErr) || operationErr.Class != FailureAmbiguous {
-			t.Fatalf("Stop error = %v, want ambiguous outcome", err)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("Stop did not finish after permission response released prompt gate")
-	}
-	select {
-	case <-session.process.done:
-	case <-time.After(2 * time.Second):
-		t.Fatal("Stop did not terminate the ACP process")
-	}
-}
-
 func TestACPAdapterStopInvalidatesStartCache(t *testing.T) {
 	t.Setenv("TAXION_ACP_HELPER", "1")
 	adapter := newACPTestAdapter(t)
@@ -1191,13 +1135,10 @@ func TestACPAdapterStopDoesNotWaitForBlockedWrite(t *testing.T) {
 	defer reader.Close()
 	process := newACPProcess(nil, writer)
 	<-process.writeGate // Simulate a concurrent write holding the transport gate.
-	promptGate := make(chan struct{}, 1)
-	promptGate <- struct{}{}
 	session := &acpSession{
 		roleExecutionID: "role_execution_1",
 		sessionID:       "session_1",
 		process:         process,
-		promptGate:      promptGate,
 	}
 	adapter := &ACPAdapter{
 		byRole: map[string]*acpSession{session.roleExecutionID: session},
@@ -1218,50 +1159,6 @@ func TestACPAdapterStopDoesNotWaitForBlockedWrite(t *testing.T) {
 	if !session.stopping.Load() || adapter.byID[session.sessionID] != session ||
 		adapter.byRole[session.roleExecutionID] != session {
 		t.Fatal("Stop released RoleExecution ownership before process exit was confirmed")
-	}
-}
-
-func TestACPAdapterStopHonorsDeadlineWhilePermissionReplyHoldsGate(t *testing.T) {
-	reader, writer := io.Pipe()
-	defer reader.Close()
-	process := newACPProcess(nil, writer)
-	promptGate := make(chan struct{}, 1)
-	promptGate <- struct{}{}
-	session := &acpSession{
-		roleExecutionID: "role_execution_stop_deadline",
-		sessionID:       "session_stop_deadline",
-		process:         process,
-		promptGate:      promptGate,
-	}
-	adapter := &ACPAdapter{
-		byRole: map[string]*acpSession{session.roleExecutionID: session},
-		byID:   map[string]*acpSession{session.sessionID: session},
-		byOp:   make(map[string]StartResult),
-	}
-	unlockPrompt, err := session.lockPrompt(context.Background())
-	if err != nil {
-		t.Fatalf("lockPrompt: %v", err)
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
-	defer cancel()
-	started := time.Now()
-	_, err = adapter.Stop(ctx, StopRequest{OperationID: "operation_stop_deadline", SessionID: session.sessionID}, nil)
-	elapsed := time.Since(started)
-	unlockPrompt()
-	var operationErr *OperationError
-	if !errors.As(err, &operationErr) || operationErr.Class != FailureAmbiguous {
-		t.Fatalf("Stop error = %v, want ambiguous outcome", err)
-	}
-	if elapsed > 100*time.Millisecond {
-		t.Fatalf("Stop exceeded its 20ms deadline while waiting for permission gate: %s", elapsed)
-	}
-	if !session.stopping.Load() {
-		t.Fatal("Stop deadline did not prevent further permission approvals")
-	}
-	select {
-	case <-process.stop:
-	default:
-		t.Fatal("Stop deadline did not terminate the blocked ACP process")
 	}
 }
 
@@ -1471,45 +1368,21 @@ func TestACPAdapterInitialSendRejectsDetachedSessionInstance(t *testing.T) {
 	}
 }
 
-func (a *acpTestPermissionAuthorizer) Authorize(_ context.Context, request ACPToolPermissionRequest) error {
-	a.calls++
-	if request.OperationID != "operation_start_1" || request.JobID != "job_1" ||
-		request.RoleExecutionID != "role_execution_1" || request.TaskID != "task_1" ||
-		request.ExecutionPermissionID != "permission_1" || request.WorktreeAssignmentID != "worktree_1" ||
-		request.WorktreePath == "" || request.SessionID != acpReceiptID("acp-session-", request.RoleExecutionID+":"+request.OperationID) ||
-		request.RequestSHA256 != strings.Repeat("a", 64) || request.ProviderIdentity.ProviderID != "provider.test" ||
-		!strings.Contains(string(request.ToolCall), "git status") {
-		return errors.New("ACP permission request did not preserve its exact Task authority")
-	}
-	return nil
-}
-
-func TestACPAdapterAllowsOnlyAuthorizedTaskPermissionOnce(t *testing.T) {
-	t.Setenv("TAXION_ACP_HELPER", "1;require-allow=1")
-	identity := testIdentity()
-	authorizer := &acpTestPermissionAuthorizer{}
-	adapter, err := NewACPAdapter(ACPConfig{
-		Command: os.Args[0], Args: []string{"-test.run=TestACPHelperProcess"},
-		WorkingDirectory: t.TempDir(), Identity: identity,
-		Environment: []string{"TAXION_ACP_HELPER"}, PermissionAuthorizer: authorizer,
-	})
-	if err != nil {
-		t.Fatalf("NewACPAdapter: %v", err)
-	}
+func TestACPAdapterRejectsTaskExecutionBeforeStartingProcess(t *testing.T) {
+	adapter := newACPTestAdapter(t)
 	defer adapter.Close()
-	prompt := "execute the approved task"
-	request := StartRequest{
-		OperationID: "operation_start_1", JobID: "job_1", RoleExecutionID: "role_execution_1",
-		TaskID: "task_1", ExecutionPermissionID: "permission_1",
-		WorktreeAssignmentID: "worktree_1", WorktreePath: t.TempDir(),
-		RequestSHA256: strings.Repeat("a", 64), Prompt: prompt, PromptSHA256: sha256Hex(prompt),
-		MaxTurns: 1, MaxTokens: 1000, Deadline: time.Now().Add(8 * time.Second),
+	request := newACPTestStartRequest("task", "role_execution_task")
+	request.TaskID = "task_1"
+	request.ExecutionPermissionID = "permission_1"
+	request.WorktreeAssignmentID = "worktree_1"
+	request.WorktreePath = t.TempDir()
+	if _, err := adapter.Start(context.Background(), request, nil); !errors.Is(err, ErrUnsupportedCapability) {
+		t.Fatalf("Task Start error = %v, want unsupported capability", err)
 	}
-	if _, err := adapter.Start(context.Background(), request, nil); err != nil {
-		t.Fatalf("Start with authorized Task tool request: %v", err)
-	}
-	if authorizer.calls != 1 {
-		t.Fatalf("permission authorizer calls = %d, want 1", authorizer.calls)
+	adapter.mu.Lock()
+	defer adapter.mu.Unlock()
+	if len(adapter.processes) != 0 {
+		t.Fatal("Task Start launched a process")
 	}
 }
 
@@ -1722,10 +1595,6 @@ func TestACPAdapterCloseTracksDetachedProcesses(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("Close returned before the detached CLI process exited")
 	}
-}
-
-type acpTestPermissionAuthorizer struct {
-	calls int
 }
 
 func TestACPAdapterBoundsResultRetentionAndPreservesOperationTombstones(t *testing.T) {
