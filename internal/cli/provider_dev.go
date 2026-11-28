@@ -30,6 +30,10 @@ func loginACPProvider(ctx context.Context, args []string, stdout, stderr io.Writ
 		fmt.Fprintln(stderr, "Copilot CLI was not found in PATH")
 		return 1
 	}
+	commandPath, err = filepath.Abs(commandPath)
+	if err != nil {
+		return report(stderr, err)
+	}
 	profile, err := copilotProfileDirectory()
 	if err != nil {
 		return report(stderr, err)
@@ -65,6 +69,10 @@ func runACPProvider(ctx context.Context, args []string, stdout, stderr io.Writer
 	if err != nil {
 		fmt.Fprintln(stderr, "Copilot CLI was not found in PATH")
 		return 1
+	}
+	commandPath, err = filepath.Abs(commandPath)
+	if err != nil {
+		return report(stderr, err)
 	}
 	profile, err := copilotProfileDirectory()
 	if err != nil {
