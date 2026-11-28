@@ -589,6 +589,9 @@ func (c *ProviderController) DispatchTaskExecution(
 		var claimed bool
 		attempt, claimed, err = c.claimTaskStartDispatch(ctx, job.ID, intent.ID)
 		if err == nil && !claimed {
+			if attempt.Status != domain.ProviderStartUnknown {
+				return attempt, provider.StartResult{}, nil
+			}
 			return attempt, provider.StartResult{}, errors.New("Task Provider Start dispatch is already claimed; reconcile the same OperationID")
 		}
 	}
@@ -1494,6 +1497,9 @@ func (c *ProviderController) reconcileTurn(
 			return receipt, turn, domain.PlanningTurnObservation{}, provider.TurnResult{}, claimErr
 		}
 		if !claimed {
+			if previous.Status != domain.PlanningTurnUnknown {
+				return receipt, turn, previous, turnResultFromObservation(previous), nil
+			}
 			previousFound = true
 		} else {
 			previousFound = true
