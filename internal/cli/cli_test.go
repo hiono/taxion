@@ -1143,6 +1143,52 @@ func TestDevProviderConversationPreservesAnswerWhenCloseFails(t *testing.T) {
 	}
 }
 
+type cliWriterFunc func([]byte) (int, error)
+
+func (f cliWriterFunc) Write(p []byte) (int, error) { return f(p) }
+
+func TestDevProviderConversationSavesAndClosesBeforeOutput(t *testing.T) {
+	helper := fakeOpenCode(t)
+	work := t.TempDir()
+	if err := os.WriteFile(filepath.Join(work, "track-close"), nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "jobs.sqlite")
+	var stdout, stderr bytes.Buffer
+	if code := Run(context.Background(), []string{"dev", "job", "create", "--store", path,
+		"--request", "Original task"}, &stdout, &stderr, VersionInfo{}); code != 0 {
+		t.Fatalf("create exit=%d, stderr=%q", code, stderr.String())
+	}
+	jobID := strings.TrimPrefix(strings.Split(stdout.String(), "\n")[1], "ID: ")
+	stdout.Reset()
+	stderr.Reset()
+	firstWrite := true
+	output := cliWriterFunc(func(p []byte) (int, error) {
+		if firstWrite {
+			firstWrite = false
+			if _, err := os.Stat(filepath.Join(work, "close-reached")); err != nil {
+				t.Errorf("provider was not closed before output: %v", err)
+			}
+			database, err := store.Open(context.Background(), path)
+			if err != nil {
+				t.Errorf("open store before output: %v", err)
+			} else {
+				job, err := database.GetJob(context.Background(), jobID)
+				_ = database.Close()
+				if err != nil || len(job.JobMessages) != 2 || job.JobMessages[1].Body != "hello from ACP" {
+					t.Errorf("answer before output = %#v, error = %v", job.JobMessages, err)
+				}
+			}
+		}
+		return stdout.Write(p)
+	})
+	if code := Run(context.Background(), []string{"dev", "provider", "run", "--provider", "opencode",
+		"--command", helper, "--working-directory", work, "--store", path, "--job", jobID,
+		"--prompt", "hello"}, output, &stderr, VersionInfo{}); code != 0 || firstWrite {
+		t.Fatalf("exit=%d, stdout=%q, stderr=%q", code, stdout.String(), stderr.String())
+	}
+}
+
 func TestDevProviderConsultsAndResumesMainSession(t *testing.T) {
 	helper := fakeOpenCode(t)
 	path := filepath.Join(t.TempDir(), "jobs.sqlite")
@@ -1425,6 +1471,9 @@ func TestDevProviderACPHelper(t *testing.T) {
 			_ = writer.Encode(map[string]any{"jsonrpc": "2.0", "id": request.ID,
 				"result": map[string]any{"stopReason": "end_turn"}})
 		}
+	}
+	if _, err := os.Stat("track-close"); err == nil {
+		_ = os.WriteFile("close-reached", nil, 0600)
 	}
 	if _, err := os.Stat("close-fail"); err == nil {
 		time.Sleep(3 * time.Second)
