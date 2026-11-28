@@ -188,11 +188,11 @@ func (c *CommunicationController) persistMessage(
 		if err == nil {
 			return CommunicationOutcome{MessageReceipt: receipt, Message: message}, nil
 		}
-		if !errors.Is(err, store.ErrIdempotencyConflict) || attempt != 0 {
+		if !errors.Is(err, store.ErrRevisionConflict) || attempt != 0 {
 			return outcome, err
 		}
 	}
-	return outcome, store.ErrIdempotencyConflict
+	return outcome, store.ErrRevisionConflict
 }
 
 func findRoleExecution(job domain.Job, roleExecutionID string) (domain.RoleExecution, bool) {

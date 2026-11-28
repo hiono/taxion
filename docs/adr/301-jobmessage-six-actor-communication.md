@@ -19,14 +19,14 @@ Taxion内部の協調は同じJobの文脈で追跡する必要があります�
 - Bodyは自然言語のまま保存・受け渡し、固定JSONやWorkflow DSLへ変換しません。
 - 永続化に必要な情報はMessageID、JobID、認証済みSender、Recipient、本文、作成時刻、Command provenanceに限定します。
 - SenderはHUMANの認証済みPrincipal、CONTROLLER / ORCHESTRATORの管理identity、またはPLANNER / CODER / REVIEWERのRoleExecution identityに結び付けます。本文の自己申告でSenderやRecipientを確定しません。
-- ReplyToMessageIDは元の会話へ戻る必要がある場合だけ保持します。ThreadID、BatchID、MessageKind等の重複・分類metadataを必須化しません。
+- ReplyToMessageIDは元の会話へ戻る必要がある場合だけ保持し、同じJob内の先行メッセージを参照します。送受信Actorが元の二者に限られることは要求しません。ThreadID、BatchID、MessageKind等の重複・分類metadataを必須化しません。
 - Jobや宛先を信頼できるContextから一意に特定できない場合だけ確認します。
 
 ### Information exchange and execution
 
 - 質問・回答・依頼・通知・レビュー指摘は通常の自然言語メッセージです。種類ごとの通信認可、方向別ACL、専用grantを設けません。
 - メッセージの保存・参照・受け渡しはProvider実行や外部副作用の許可を意味しません。一方で、情報交換そのものにProvider実行grantを要求しません。
-- 回答のために新たなProvider実行やbounded read-only context acquisitionが必要な場合だけ、ADR-506等の該当する認可を別途検証します。
+- 既存Contextだけで完結するメッセージ応答にはProvider実行grantを要求しません。DRAFT Plannerがbounded read-only Provider turnを必要とする場合はADR-505 PlanningAuthorizationを検証します。JobApproval後のProvider実行はADR-507のoperation単位Execution Permissionを検証します。
 - 実行責任やWorktree所有権の移転は通常メッセージに含めず、停止・結果・成果・所有権の条件を検証する独立したHandoff操作とします。
 
 ### Persistence and provider operations
@@ -41,4 +41,4 @@ Agent間の自然言語交換を最小の構造で実現し、元のJobと作業
 
 ## Relationship to other ADRs
 
-ADR-200はDomain Modelの基本方針、ADR-201はJobAggregateの保存境界、ADR-202はidentity・scope・idempotencyの不変条件、ADR-300はCollaborationの基本方針、ADR-408はWorktree handoff、ADR-409はProvider operation lifecycle、ADR-506は質問を契機とする追加Provider実行、ADR-507はoperation単位の実行権限、ADR-701は外部AgentとのA2A境界を定義します。
+ADR-200はDomain Modelの基本方針、ADR-201はJobAggregateの保存境界、ADR-202はidentity・scope・idempotencyの不変条件、ADR-300はCollaborationの基本方針、ADR-408はWorktree handoff、ADR-409はProvider operation lifecycle、ADR-507はoperation単位の実行権限、ADR-701は外部AgentとのA2A境界を定義します。

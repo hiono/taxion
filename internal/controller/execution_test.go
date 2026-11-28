@@ -265,7 +265,7 @@ func TestExecutionControllerExactReplayAndCommandConflict(t *testing.T) {
 		t.Fatalf("exact replay changed permission: first=%#v replay=%#v", first, replay)
 	}
 	changed := request
-	changed.Resource = revision.Contract.Workspaces[0]
+	changed.ReservedTokens++
 	if _, _, err := controller.Authorize(context.Background(), changed); !errors.Is(err, store.ErrIdempotencyConflict) {
 		t.Fatalf("changed request under same CommandID error = %v, want idempotency conflict", err)
 	}

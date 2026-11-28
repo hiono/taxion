@@ -411,9 +411,16 @@ aggregate updateとreceipt insertのいずれかが失敗した場合は両方ro
 
 ```go
 type ProviderExecutionStore interface {
-    PlanningLifecycleStore
+    JobContractProposalStore
+    AddProviderStartObservation(...)
+    AddPlanningTurnIntent(...)
+    AddPlanningTurnObservation(...)
+    AddPlanningResumeIntent(...)
+    AddPlanningResumeObservation(...)
     StartTasklessPlanner(...)
     AddProviderEventObservation(...)
+    AddProviderStopIntent(...)
+    AddProviderStopObservation(...)
     AddProviderResultObservation(...)
     AddProviderUsageObservation(...)
 }
@@ -423,6 +430,8 @@ type PlanningProviderRuntime interface {
     Capabilities(context.Context) (provider.Capabilities, error)
     Start(context.Context, provider.StartRequest) (provider.StartResult, error)
     Send(context.Context, provider.TurnRequest) (provider.TurnResult, error)
+    Resume(context.Context, provider.ResumeRequest) (provider.ResumeResult, error)
+    Stop(context.Context, provider.StopRequest) (provider.StopResult, error)
     Lookup(context.Context, provider.LookupRequest) (provider.LookupResult, error)
     ReplayEvents(context.Context, provider.ReplayEventsRequest) (provider.EventPage, error)
     Result(context.Context, provider.ResultRequest) (provider.Result, error)
@@ -430,14 +439,15 @@ type PlanningProviderRuntime interface {
 }
 
 type ProviderController struct {
-    store    ProviderExecutionStore
-    runtime  PlanningProviderRuntime
-    planning *PlanningController
-    now      func() time.Time
+    store   ProviderExecutionStore
+    runtime PlanningProviderRuntime
+    now     func() time.Time
 }
 ```
 
 現時点のController interfaceはDRAFT Planning Start / Send / Resume / Stop、accepted Sessionに束縛したEvent replay、Result / Usage retrievalに対応する。Sendはintent-first、E4 Send idempotency / lookup gate、同一OperationID / TurnIDのLookup recovery、Usage Complete=true確認を実装済み。ResumeはE5 SessionReattach evidence、intent-first永続化、同一OperationID / SessionIDのUNKNOWN reconciliationを実装済み。Controller testsではfake implementationを注入する。
+
+TaskへのProvider dispatchは未実装。ACP AdapterはTask Startとすべてのツール権限要求を拒否する。
 
 ### 8.2 Start sequence（実装済み）
 
@@ -462,14 +472,15 @@ Load Job
   -> Verify E4 Send idempotency or Send lookup capability
   -> Persist TurnIntent + CommandReceipt
   -> Confirm commit / reload Job / revalidate authority
-  -> Lookup same OperationID / TurnID when recovery is required
-  -> Runtime.Send only for a new intent, verified NOT_FOUND, or verified Send idempotency
+  -> Claim first dispatch by persisting an UNKNOWN observation
+  -> For an existing UNKNOWN, Lookup same OperationID / TurnID if supported
+  -> Runtime.Send only for the claim owner or verified Send idempotency after recovery
   -> Persist terminal or UNKNOWN PlanningTurnObservation
   -> Retrieve Usage and require Complete=true before reconciling a terminal Lookup result
   -> Retrieve Result / Usage as separate append-only facts
 ```
 
-Sendの結果がAmbiguousの場合は同じTurnIDのUNKNOWNを追加し、新しいTurnIDを生成しない。既存UNKNOWNはLookupまたは実証済みSend idempotencyでのみ照合し、Lookupがterminal statusを返してもUsage Complete=trueを得るまでterminal TurnObservationへ遷移させない。
+Sendの結果がAmbiguousの場合は同じTurnIDのUNKNOWNを追加し、新しいTurnIDを生成しない。LookupがNOT_FOUNDでも、実証済みSend idempotencyなしには再送しない。Lookupがterminal statusを返してもUsage Complete=trueを得るまでterminal TurnObservationへ遷移させない。
 
 ### 8.4 Recovery sequence（Start / Send / Resume / Event replay実装済み）
 
@@ -484,7 +495,7 @@ Load JobAggregate
   -> Re-evaluate terminality / usage / quiescence
 ```
 
-Start / Sendの照合能力がない場合はUNKNOWNを保持する。Sendは同じOperationID / TurnIDのLookupまたは実証済みidempotencyでのみ再実行する。ResumeはE5 SessionReattach capabilityを確認し、intent-firstで同じOperationID / SessionIDを再利用する。曖昧なResume結果はUNKNOWNを保持し、同じOperationIDのATTACHED / FAILED evidenceだけで解消する。Event replayはaccepted Start Sessionと保存済みcursor prefixへ束縛し、eventをappend-onlyで保存する。Result / UsageのControllerはaccepted Startとoptional Turnのidentityを検証し、E4 Capability確認後に取得結果を既存OperationID / TurnIDへappend-onlyで保存する。Complete=falseのUsageは途中値として残し、Complete=trueでのみ確定する。Resume ControllerはE5 capabilityと同一OperationID / SessionIDで照合し、新identityを作って回避しない。
+Start / Sendの照合能力がない場合はUNKNOWNを保持する。Sendの再実行には同じOperationID / TurnIDと実証済みidempotencyが必要である。ResumeはE5 SessionReattach capabilityを確認し、intent-firstで同じOperationID / SessionIDを再利用する。曖昧なResume結果はUNKNOWNを保持し、同じOperationIDのATTACHED / FAILED evidenceだけで解消する。Event replayはaccepted Start Sessionと保存済みcursor prefixへ束縛し、eventをappend-onlyで保存する。Result / UsageのControllerはaccepted Startとoptional Turnのidentityを検証し、E4 Capability確認後に取得結果を既存OperationID / TurnIDへappend-onlyで保存する。Complete=falseのUsageは途中値として残し、Complete=trueでのみ確定する。Resume ControllerはE5 capabilityと同一OperationID / SessionIDで照合し、新identityを作って回避しない。
 
 ### 8.5 Result / Usage sequence（Domain / Store / Controller実装済み）
 

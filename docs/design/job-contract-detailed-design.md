@@ -185,7 +185,7 @@ The Controller does not call the Provider, change Job authority, issue JobApprov
 
 The Planner's final Result content is exactly one JSON object representing `JobContract`. JSON keys use the struct's lower_snake_case tags; `budget` is a nested object with `max_turns` and `max_tokens`. The object contains no wrapper, Markdown fence, explanatory prose, or trailing value.
 
-The proposal Controller receives only the persisted Result observation ID. It loads the JobAggregate, resolves the exact final Result, validates its Job / RoleExecution / accepted Start / Session / Turn provenance, and decodes the Result content into JobContract. It does not accept a parallel caller-supplied JobContract value. The Planner workflow entrypoint is `PlanningController.ProposeJobContract`, which delegates to `JobContractController.Propose` and accepts only the Job / RoleExecution / Result observation / Command identities plus the authenticated Principal.
+The proposal Controller receives only the persisted Result observation ID. It loads the JobAggregate, resolves the exact final Result, validates its Job / RoleExecution / accepted Start / Session / Turn provenance, and decodes the Result content into JobContract. It does not accept a parallel caller-supplied JobContract value. The Planner workflow calls `JobContractController.Propose` directly with the Job / RoleExecution / Result observation / Command identities and the authenticated Principal.
 
 Decoding rejects:
 - non-object roots and malformed JSON;
@@ -198,6 +198,8 @@ Duplicate-key detection runs before struct decoding because the standard Go JSON
 
 ### 7.2 Upper-level Planner workflow
 
+This workflow is not connected or implemented yet. The requirements below remain prerequisites for a future implementation; the proposal Controller alone does not enforce complete Usage.
+
 The upper-level workflow is responsible for sequencing Provider completion, Result persistence, and JobContract proposal. It does not reconstruct contract data or bypass the proposal Controller.
 
 For the exact Job / Taskless PLANNER RoleExecution / Session / Turn tuple, the workflow:
@@ -206,7 +208,7 @@ For the exact Job / Taskless PLANNER RoleExecution / Session / Turn tuple, the w
 2. Resolves the latest Turn observation for that Turn. Only COMPLETED is eligible; UNKNOWN, FAILED, or missing observations stop the workflow.
 3. Resolves the latest Usage observation for the same operation / Session / Turn. Only Complete=true is eligible. A partial or missing Usage observation stops the workflow.
 4. Reuses an already persisted final Result observation for the exact tuple when present. Otherwise it calls ProviderController.RetrieveProviderResult, which validates Provider identity / capability and appends the final Result observation.
-5. Re-reads the JobAggregate and validates the persisted Result observation before calling PlanningController.ProposeJobContract with its exact observation ID.
+5. Re-reads the JobAggregate and validates the persisted Result observation before calling JobContractController.Propose with its exact observation ID.
 6. Returns both the Result receipt / observation and proposal receipt / revision so callers can distinguish Result persistence from proposal persistence.
 
 If Result persistence succeeds but proposal persistence fails, the Result remains immutable. A retry resolves and reuses that same Result observation; it does not retrieve or substitute a later Result. The proposal Store command remains the authoritative atomic mutation and idempotency boundary. An exact retry uses the same proposal CommandID. The workflow creates no JobApproval, ExecutionPermission, or additional Provider operation.

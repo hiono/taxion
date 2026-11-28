@@ -162,9 +162,7 @@ func ValidateExecutionPermissionRequest(job Job, request ExecutionPermissionRequ
 		return errors.New("ExecutionPermission Provider configuration differs from the approved contract")
 	}
 	if !contractContainsResource(revision.Contract, request.Resource) ||
-		(!containsExact(task.TargetRepositories, request.Resource) &&
-			!containsExact(task.TargetResources, request.Resource) &&
-			!containsExact(task.Workspaces, request.Resource)) {
+		!executionPermissionResourceAllowed(task, request.Role, request.Resource) {
 		return errors.New("ExecutionPermission resource is outside the approved JobContract or Task scope")
 	}
 	if containsExact(task.ProhibitedEffects, request.Effect) ||
@@ -297,9 +295,7 @@ func (p ExecutionPermission) Validate(job Job) error {
 		p.ExpiresAt.After(revision.Contract.Deadline) || p.ExpiresAt.After(task.Deadline) ||
 		p.ConfigurationSHA256 != revision.Contract.ConfigurationSHA256 ||
 		!contractContainsResource(revision.Contract, p.Resource) ||
-		(!containsExact(task.TargetRepositories, p.Resource) &&
-			!containsExact(task.TargetResources, p.Resource) &&
-			!containsExact(task.Workspaces, p.Resource)) ||
+		!executionPermissionResourceAllowed(task, p.Role, p.Resource) ||
 		containsExact(task.ProhibitedEffects, p.Effect) ||
 		containsExact(task.ApprovalRequiredEffects, p.Effect) ||
 		containsExact(revision.Contract.ProhibitedEffects, p.Effect) ||
@@ -451,6 +447,15 @@ func jobApprovalForRevision(job Job, revision uint64) (JobApproval, bool) {
 		}
 	}
 	return JobApproval{}, false
+}
+
+func executionPermissionResourceAllowed(task Task, role, resource string) bool {
+	if role == "CODER" {
+		return containsExact(task.TargetRepositories, resource)
+	}
+	return containsExact(task.TargetRepositories, resource) ||
+		containsExact(task.TargetResources, resource) ||
+		containsExact(task.Workspaces, resource)
 }
 
 func contractContainsResource(contract JobContract, resource string) bool {

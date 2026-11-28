@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"database/sql"
-	"database/sql/driver"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -24,39 +23,13 @@ var (
 	ErrNotFound            = errors.New("job not found")
 	ErrJobExists           = errors.New("job already exists")
 	ErrIdempotencyConflict = errors.New("idempotency key reused with different content")
+	ErrRevisionConflict    = errors.New("Job revision conflict")
 	ErrIntegrity           = errors.New("job integrity check failed")
 	ErrUnsupportedSchema   = errors.New("unsupported database schema version")
 )
 
-// schemaVersion covers SQLite tables, append-only guards, and the serialized JobAggregate contract.
-// Increment it when older binaries could discard newly added aggregate fields.
-const schemaVersion = 3
-
-const preserveJobAggregateFactsTrigger = `CREATE TRIGGER IF NOT EXISTS job_aggregates_preserve_job_messages
-BEFORE UPDATE OF payload_json ON job_aggregates
-WHEN EXISTS (
-	WITH old_messages AS MATERIALIZED (
-		SELECT
-			COALESCE(json_array_length(OLD.payload_json, '$.job_messages'), 0) AS old_count,
-			COALESCE((
-				SELECT json_group_array(json(value) ORDER BY CAST(key AS INTEGER))
-				FROM json_each(OLD.payload_json, '$.job_messages')
-			), '[]') AS old_values
-	),
-	new_prefix AS MATERIALIZED (
-		SELECT COALESCE(json_group_array(json(value) ORDER BY CAST(key AS INTEGER)), '[]') AS new_values
-		FROM json_each(NEW.payload_json, '$.job_messages'), old_messages
-		WHERE CAST(key AS INTEGER) < old_messages.old_count
-	)
-	SELECT 1
-	FROM old_messages, new_prefix
-	WHERE
-		(old_messages.old_count > 0 AND json_type(NEW.payload_json, '$.job_messages') != 'array')
-		OR new_prefix.new_values != old_messages.old_values
-)
-BEGIN
-	SELECT RAISE(ABORT, 'append-only JobMessages');
-END`
+// schemaVersion identifies the single supported fresh schema. Older schemas are rejected; no migration path is retained.
+const schemaVersion = 1
 
 const createLocalDraftJobCommandType = "CreateJob"
 const createTrustedDraftJobCommandType = "CreateTrustedDraftJob"
@@ -124,50 +97,31 @@ func (s *Store) initialize(ctx context.Context) error {
 		return fmt.Errorf("acquire SQLite schema connection: %w", err)
 	}
 	defer conn.Close()
-	var initialVersion int
-	if err := conn.QueryRowContext(ctx, "PRAGMA user_version").Scan(&initialVersion); err != nil {
-		return fmt.Errorf("preflight SQLite schema version: %w", err)
+
+	var version int
+	if err := conn.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil {
+		return fmt.Errorf("read SQLite schema version: %w", err)
 	}
-	if initialVersion > schemaVersion {
-		return fmt.Errorf("%w: database=%d supported=%d", ErrUnsupportedSchema, initialVersion, schemaVersion)
+	if version != 0 && version != schemaVersion {
+		return fmt.Errorf("%w: database=%d supported=%d", ErrUnsupportedSchema, version, schemaVersion)
 	}
 	for _, statement := range []string{
 		"PRAGMA foreign_keys = ON",
 		"PRAGMA busy_timeout = 5000",
-		"PRAGMA journal_mode = WAL",
 		"PRAGMA synchronous = FULL",
 	} {
 		if _, err := conn.ExecContext(ctx, statement); err != nil {
 			return fmt.Errorf("configure SQLite: %w", err)
 		}
 	}
-	if _, err := conn.ExecContext(ctx, "BEGIN"); err != nil {
-		beginErr := fmt.Errorf("begin SQLite schema read snapshot: %w", err)
-		_ = rollbackSQLiteConnection(conn)
-		return beginErr
-	}
-	version, triggerPresent, err := readSQLiteSchemaState(ctx, conn)
-	if err != nil {
-		_ = rollbackSQLiteConnection(conn)
-		return fmt.Errorf("read SQLite schema state: %w", err)
-	}
-	if version > schemaVersion {
-		_ = rollbackSQLiteConnection(conn)
-		return fmt.Errorf("%w: database=%d supported=%d", ErrUnsupportedSchema, version, schemaVersion)
-	}
-	if version == schemaVersion && triggerPresent {
-		if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
-			return fmt.Errorf("finish SQLite schema read snapshot: %w", err)
-		}
+	if version == schemaVersion {
 		return nil
 	}
-	if err := rollbackSQLiteConnection(conn); err != nil {
-		return fmt.Errorf("release SQLite schema read snapshot: %w", err)
+	if _, err := conn.ExecContext(ctx, "PRAGMA journal_mode = WAL"); err != nil {
+		return fmt.Errorf("enable SQLite WAL: %w", err)
 	}
 	if _, err := conn.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
-		beginErr := fmt.Errorf("begin immediate schema transaction: %w", err)
-		rollbackErr := rollbackSQLiteConnection(conn)
-		return errors.Join(beginErr, rollbackErr)
+		return fmt.Errorf("begin SQLite schema transaction: %w", err)
 	}
 	committed := false
 	defer func() {
@@ -176,16 +130,22 @@ func (s *Store) initialize(ctx context.Context) error {
 		}
 	}()
 
-	version, _, err = readSQLiteSchemaState(ctx, conn)
-	if err != nil {
-		return fmt.Errorf("read schema version under writer lock: %w", err)
+	if err := conn.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil {
+		return fmt.Errorf("recheck SQLite schema version: %w", err)
 	}
-	if version > schemaVersion {
+	if version != 0 {
+		if version == schemaVersion {
+			if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
+				return fmt.Errorf("finish concurrent SQLite schema initialization: %w", err)
+			}
+			committed = true
+			return nil
+		}
 		return fmt.Errorf("%w: database=%d supported=%d", ErrUnsupportedSchema, version, schemaVersion)
 	}
 
 	statements := []string{
-		`CREATE TABLE IF NOT EXISTS job_aggregates (
+		`CREATE TABLE job_aggregates (
 			job_id TEXT PRIMARY KEY,
 			revision INTEGER NOT NULL CHECK (revision > 0),
 			payload_json TEXT NOT NULL,
@@ -193,12 +153,9 @@ func (s *Store) initialize(ctx context.Context) error {
 			created_at TEXT NOT NULL,
 			updated_at TEXT NOT NULL
 		)`,
-		`CREATE INDEX IF NOT EXISTS job_aggregates_updated_at
+		`CREATE INDEX job_aggregates_updated_at
 			ON job_aggregates(updated_at DESC, job_id ASC)`,
-		`DROP TRIGGER IF EXISTS protect_job_v2_append_only_facts`,
-		`DROP TRIGGER IF EXISTS job_aggregates_preserve_job_messages`,
-		preserveJobAggregateFactsTrigger,
-		`CREATE TABLE IF NOT EXISTS job_commands (
+		`CREATE TABLE job_commands (
 			command_id TEXT PRIMARY KEY,
 			job_id TEXT NOT NULL REFERENCES job_aggregates(job_id),
 			command_type TEXT NOT NULL,
@@ -213,47 +170,14 @@ func (s *Store) initialize(ctx context.Context) error {
 			return fmt.Errorf("create Job schema: %w", err)
 		}
 	}
-	if version < schemaVersion {
-		// The trigger fences old processes that opened the prior schema before
-		// migration and would otherwise discard unknown append-only aggregate facts.
-		if _, err := conn.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d", schemaVersion)); err != nil {
-			return fmt.Errorf("upgrade schema version: %w", err)
-		}
+	if _, err := conn.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d", schemaVersion)); err != nil {
+		return fmt.Errorf("set SQLite schema version: %w", err)
 	}
 	if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
-		commitErr := fmt.Errorf("commit schema transaction: %w", err)
-		rollbackErr := rollbackSQLiteConnection(conn)
-		durableVersion, durableTrigger, stateErr := readSQLiteSchemaState(context.Background(), conn)
-		if stateErr == nil && durableVersion == schemaVersion && durableTrigger {
-			committed = true
-			return nil
-		}
-		if rollbackErr != nil {
-			commitErr = errors.Join(commitErr, fmt.Errorf("rollback schema transaction after commit error: %w", rollbackErr))
-		}
-		if stateErr != nil {
-			commitErr = errors.Join(commitErr, fmt.Errorf("verify schema durability after commit error: %w", stateErr))
-		}
-		return commitErr
+		return fmt.Errorf("commit SQLite schema transaction: %w", err)
 	}
 	committed = true
 	return nil
-}
-
-func readSQLiteSchemaState(ctx context.Context, conn *sql.Conn) (int, bool, error) {
-	var objectCount int
-	if err := conn.QueryRowContext(ctx, "SELECT COUNT(*) FROM sqlite_master").Scan(&objectCount); err != nil {
-		return 0, false, fmt.Errorf("establish SQLite schema snapshot: %w", err)
-	}
-	var version int
-	if err := conn.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil {
-		return 0, false, fmt.Errorf("read SQLite schema version: %w", err)
-	}
-	var triggerCount int
-	if err := conn.QueryRowContext(ctx, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'trigger' AND name = ?", "job_aggregates_preserve_job_messages").Scan(&triggerCount); err != nil {
-		return 0, false, fmt.Errorf("read SQLite schema guard: %w", err)
-	}
-	return version, triggerCount == 1, nil
 }
 
 func rollbackSQLiteConnection(conn *sql.Conn) error {
@@ -264,8 +188,7 @@ func rollbackSQLiteConnection(conn *sql.Conn) error {
 	if err == nil || strings.Contains(strings.ToLower(err.Error()), "no transaction is active") {
 		return nil
 	}
-	discardErr := conn.Raw(func(any) error { return driver.ErrBadConn })
-	return errors.Join(err, discardErr)
+	return err
 }
 
 func (s *Store) Close() error {

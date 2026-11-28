@@ -44,8 +44,8 @@ CodeRabbitのレビュー指摘と「Prompt to fix issue」を組み合わせる
 
 Coderはレビューの判断根拠と修正に必要な情報源を受け取った状態から作業を開始できます。指摘の妥当性確認は維持され、誤検知や古い指摘に対する不要な修正を抑制できます。レビュー・修正・再レビューの履歴は既存のJobAggregate内で追跡できます。
 
-レビュー指摘や修正プロンプトは、JobApproval、Execution Permission、JobQuestionAuthorization、Task assignment、Handoff、Job完了判定の代替にはなりません。追加Provider実行や外部副作用は、それぞれADR-506 / ADR-507等の既存認可を別途満たす必要があります。
+レビュー指摘や修正プロンプトは、JobApproval、Execution Permission、Task assignment、Handoff、Job完了判定の代替にはなりません。追加Provider実行や外部副作用は、それぞれADR-507の既存認可を別途満たす必要があります。
 
 ## Relationship to other ADRs
 
-ADR-201はJobAggregateとimmutable成果・Evidenceの保存境界、ADR-202は不変条件、ADR-300は情報交換と実行責任の分離、ADR-301はJobMessage、ADR-408はWorktreeとRoleの逐次引継ぎ、ADR-409はProvider operation、ADR-506 / ADR-507は追加Provider実行とoperation権限、ADR-800〜802は検証証拠とJob完了を定義します。
+ADR-201はJobAggregateとimmutable成果・Evidenceの保存境界、ADR-202は不変条件、ADR-300は情報交換と実行責任の分離、ADR-301はJobMessage、ADR-408はWorktreeとRoleの逐次引継ぎ、ADR-409はProvider operation、ADR-507はoperation単位の実行権限、ADR-800〜802は検証証拠とJob完了を定義します。

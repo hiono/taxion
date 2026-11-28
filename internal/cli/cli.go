@@ -45,14 +45,22 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer, version V
 		return login(ctx, stdout, stderr)
 	}
 	if args[0] == "dev" {
-		if len(args) < 3 || args[1] != "job" || args[2] != "create" {
-			fmt.Fprintln(stderr, "expected: taxion dev job create --request \"...\"")
-			return 2
+		if len(args) >= 3 && args[1] == "job" && args[2] == "create" {
+			return createLocalJob(ctx, args[3:], stdout, stderr)
 		}
-		return createLocalJob(ctx, args[3:], stdout, stderr)
+		if len(args) >= 3 && args[1] == "provider" {
+			switch args[2] {
+			case "login":
+				return loginACPProvider(ctx, args[3:], stdout, stderr)
+			case "run":
+				return runACPProvider(ctx, args[3:], stdout, stderr)
+			}
+		}
+		fmt.Fprintln(stderr, "commands: taxion dev job create, taxion dev provider login, taxion dev provider run")
+		return 2
 	}
 	if args[0] != "job" || len(args) < 2 {
-		fmt.Fprintln(stderr, "コマンドを確認してください: taxion auth login、taxion dev job create、taxion job <create|authorize-planning|start-planning|approve|amend|show|list>")
+		fmt.Fprintln(stderr, "コマンドを確認してください: taxion auth login、taxion dev job create、taxion job <create|authorize-planning|start-planning|message|approve|amend|show|list>")
 		return 2
 	}
 
@@ -63,6 +71,8 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer, version V
 		return authorizePlanning(ctx, args[2:], stdout, stderr)
 	case "start-planning":
 		return startPlanning(ctx, args[2:], stdout, stderr)
+	case "message":
+		return sendJobMessage(ctx, args[2:], stdout, stderr)
 	case "approve":
 		return approveJob(ctx, args[2:], stdout, stderr)
 	case "amend":
@@ -72,7 +82,7 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer, version V
 	case "list":
 		return listJobs(ctx, args[2:], stdout, stderr)
 	default:
-		fmt.Fprintln(stderr, "コマンドを確認してください: taxion job <authorize-planning|start-planning|approve|amend|show|list>")
+		fmt.Fprintln(stderr, "コマンドを確認してください: taxion job <create|authorize-planning|start-planning|message|approve|amend|show|list>")
 		return 2
 	}
 }
@@ -152,6 +162,72 @@ func createTrustedJobWithPrincipal(ctx context.Context, request, dbPath, command
 		return report(stderr, err)
 	}
 	fmt.Fprintf(stdout, "Trusted Job created\nID: %s\nState: %s\nRevision: %d\nHUMAN Principal ID: %s\n", receipt.JobID, domain.JobDraft, receipt.Revision, principal.PrincipalID())
+	return 0
+}
+
+func sendJobMessage(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	flags := flag.NewFlagSet("taxion job message", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	body := flags.String("body", "", "Natural-language message")
+	to := flags.String("to", "", "RoleExecution ID (defaults to Controller)")
+	replyTo := flags.String("reply-to", "", "Earlier JobMessage ID")
+	commandID := flags.String("command-id", "", "Command ID for idempotent retry")
+	path := flags.String("store", "", "Override the local Job database path")
+	if err := flags.Parse(args); err != nil {
+		return 2
+	}
+	if flags.NArg() != 1 || strings.TrimSpace(*body) == "" || !utf8.ValidString(*body) {
+		fmt.Fprintln(stderr, "usage: taxion job message --body \"...\" [--to role-execution-id] [--reply-to message-id] <job-id>")
+		return 2
+	}
+	dbPath, err := resolveStorePath(*path)
+	if err != nil {
+		return report(stderr, err)
+	}
+	id := strings.TrimSpace(*commandID)
+	if id == "" {
+		id, err = domain.NewID("cmd")
+		if err != nil {
+			return report(stderr, err)
+		}
+	}
+	principal, err := authenticate(ctx, stdout)
+	if err != nil {
+		return report(stderr, err)
+	}
+	fmt.Fprintf(stdout, "Command ID: %s\n", id)
+	database, err := store.Open(ctx, dbPath)
+	if err != nil {
+		return report(stderr, err)
+	}
+	defer database.Close()
+	recipient := domain.ActorRef{Kind: domain.ActorController, ID: domain.ControllerActorID}
+	if *to != "" {
+		job, err := database.GetJob(ctx, flags.Arg(0))
+		if err != nil {
+			return report(stderr, err)
+		}
+		recipient = domain.ActorRef{ID: *to}
+		for _, execution := range job.RoleExecutions {
+			if execution.ID == *to {
+				recipient.Kind = domain.ActorKind(execution.Role)
+				break
+			}
+		}
+	}
+	communication, err := controller.NewCommunicationController(database)
+	if err != nil {
+		return report(stderr, err)
+	}
+	outcome, err := communication.SendFromHuman(ctx, controller.HumanMessageRequest{
+		JobID: flags.Arg(0), CommandID: id, Recipient: recipient,
+		ReplyToMessageID: *replyTo, Body: *body,
+	}, principal)
+	if err != nil {
+		return report(stderr, err)
+	}
+	fmt.Fprintf(stdout, "Job message saved (not delivered)\nID: %s\nRevision: %d\n",
+		outcome.Message.ID, outcome.MessageReceipt.Revision)
 	return 0
 }
 
@@ -647,8 +723,11 @@ Usage:
   taxion job create --request "Trusted OIDC-authenticated DRAFT"
   taxion job authorize-planning [scope and budget options] <job-id>
   taxion job start-planning --authorization-id <grant-id> <job-id>
+  taxion job message --body "..." [--to <role-execution-id>] [--reply-to <message-id>] <job-id>
   taxion job approve --revision <n> --canonical-hash <sha256> --canonicalization-version <n> --reason <text> <job-id>
   taxion dev job create --request "Local untrusted DRAFT only"
+  taxion dev provider login
+  taxion dev provider run --prompt "..." [--provider copilot|opencode] [--job <local-job-id>]
   taxion job show <job-id>
   taxion job list
   taxion version

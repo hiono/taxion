@@ -334,7 +334,7 @@ func NewPlanningTurnIntent(job Job, roleExecutionID, principalID, providerSessio
 		}
 		return PlanningTurnIntent{}, &PlanningBoundaryError{Boundary: PlanningBoundaryTurn, ReasonCode: "provider_session_not_attached", Cause: errors.New("Provider Session is not attached after the latest resume")}
 	}
-	if count >= grant.Budget.MaxTurns || reservedTokens > grant.Budget.MaxTokens-tokensUsed {
+	if count >= grant.Budget.MaxTurns || tokensUsed > grant.Budget.MaxTokens || reservedTokens > grant.Budget.MaxTokens-tokensUsed {
 		reasonCode := "turn_budget_exhausted"
 		if reservedTokens > grant.Budget.MaxTokens-tokensUsed {
 			reasonCode = "token_budget_exhausted"
@@ -458,7 +458,7 @@ func NewPlanningTurnObservation(job Job, turnID, principalID, commandID, status 
 		if tokensUsed != 0 || evidenceSHA256 != "" || reconcilesUnknown {
 			return PlanningTurnObservation{}, errors.New("UNKNOWN observation cannot claim token usage or terminal evidence")
 		}
-	} else if !validSHA256(evidenceSHA256) || tokensUsed > turn.ReservedTokens {
+	} else if !validSHA256(evidenceSHA256) || (status == PlanningTurnCompleted && tokensUsed > turn.ReservedTokens) {
 		return PlanningTurnObservation{}, errors.New("terminal turn observation requires evidence and must fit its token reservation")
 	}
 	var previous *PlanningTurnObservation
@@ -509,7 +509,7 @@ func (o PlanningTurnObservation) Validate(job Job, turn PlanningTurnIntent) erro
 	if o.Status != PlanningTurnCompleted && o.Status != PlanningTurnFailed {
 		return errors.New("PlanningTurnObservation status is invalid")
 	}
-	if o.TokensUsed > turn.ReservedTokens || !validSHA256(o.EvidenceSHA256) {
+	if (o.Status == PlanningTurnCompleted && o.TokensUsed > turn.ReservedTokens) || !validSHA256(o.EvidenceSHA256) {
 		return errors.New("terminal PlanningTurnObservation evidence or usage is invalid")
 	}
 	return nil

@@ -63,7 +63,6 @@ ADRがAcceptedであることは、実装や受入れが完了したことを意
 - [ADR-503: ACTIVE Jobの契約変更は独立したHUMAN authorityで行う](503-active-job-contract-amendment-authority.md) — Accepted
 - [ADR-504: JobApprovalを承認済みJobContract revisionへ束縛する](504-job-approval-contract-binding.md) — Accepted
 - [ADR-505: DRAFT planningを限定的なread-only authorityとして分離する](505-draft-planning-authorization.md) — Accepted
-- [ADR-506: Job内の質問実行権限を独立したgrantとして扱う](506-job-question-authorization.md) — Accepted
 - [ADR-507: 実行権限をoperation単位に限定し、観測・適合・登録と分離する](507-operation-scoped-execution-permission.md) — Accepted
 
 ### 600–699 Persistence & Recovery

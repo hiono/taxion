@@ -29,11 +29,11 @@ func validControllerJobContract(deadline time.Time) domain.JobContract {
 	}
 }
 
-func startContractPlanner(t *testing.T) (*PlanningController, *store.Store, auth.AuthenticatedPrincipal, string, string, domain.ProviderResultObservation, domain.JobContract) {
+func startContractPlanner(t *testing.T) (*JobContractController, *store.Store, auth.AuthenticatedPrincipal, string, string, domain.ProviderResultObservation, domain.JobContract) {
 	return startContractPlannerWithResultContent(t, "")
 }
 
-func startContractPlannerWithResultContent(t *testing.T, resultContent string) (*PlanningController, *store.Store, auth.AuthenticatedPrincipal, string, string, domain.ProviderResultObservation, domain.JobContract) {
+func startContractPlannerWithResultContent(t *testing.T, resultContent string) (*JobContractController, *store.Store, auth.AuthenticatedPrincipal, string, string, domain.ProviderResultObservation, domain.JobContract) {
 	t.Helper()
 	runtime := &fakePlanningProviderRuntime{}
 	providerController, database, principal, jobID, grantID, documents := newProviderControllerFixture(t, runtime)
@@ -82,9 +82,9 @@ func startContractPlannerWithResultContent(t *testing.T, resultContent string) (
 	if err != nil {
 		t.Fatalf("AddProviderResultObservation: %v", err)
 	}
-	contractController, err := NewPlanningController(database)
+	contractController, err := NewJobContractController(database)
 	if err != nil {
-		t.Fatalf("NewPlanningController: %v", err)
+		t.Fatalf("NewJobContractController: %v", err)
 	}
 	return contractController, database, principal, jobID, grantID, sourceResult, contract
 }
@@ -94,7 +94,7 @@ func TestJobContractControllerProposesForAuthorizedPlanner(t *testing.T) {
 	ctx := context.Background()
 	commandID := "cmd_dddddddddddddddddddddddddddddddd"
 	roleExecutionID := domain.RoleExecutionID("cmd_cccccccccccccccccccccccccccccccc")
-	if _, _, err := controller.ProposeJobContract(ctx, jobID, roleExecutionID,
+	if _, _, err := controller.Propose(ctx, jobID, roleExecutionID,
 		"provider_result_missing", "cmd_91919191919191919191919191919191", principal); err == nil {
 		t.Fatal("Controller accepted an unknown source Result")
 	}
@@ -102,7 +102,7 @@ func TestJobContractControllerProposesForAuthorizedPlanner(t *testing.T) {
 	if err != nil || len(before.JobContractRevisions) != 0 {
 		t.Fatalf("rejected Result provenance changed Job: %#v %v", before.JobContractRevisions, err)
 	}
-	receipt, revision, err := controller.ProposeJobContract(
+	receipt, revision, err := controller.Propose(
 		ctx, jobID, domain.RoleExecutionID("cmd_cccccccccccccccccccccccccccccccc"),
 		sourceResult.ID, commandID, principal,
 	)
@@ -131,7 +131,7 @@ func TestJobContractControllerRejectsPrincipalMismatchAndExpiredGrant(t *testing
 	controller, database, principal, jobID, grantID, sourceResult, _ := startContractPlanner(t)
 	ctx := context.Background()
 	otherPrincipal := newProviderTestPrincipal(t)
-	if _, _, err := controller.ProposeJobContract(
+	if _, _, err := controller.Propose(
 		ctx, jobID, domain.RoleExecutionID("cmd_cccccccccccccccccccccccccccccccc"),
 		sourceResult.ID, "cmd_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", otherPrincipal,
 	); err == nil {
@@ -151,8 +151,8 @@ func TestJobContractControllerRejectsPrincipalMismatchAndExpiredGrant(t *testing
 	if grant.ID == "" || grant.PrincipalID != principal.PrincipalID() {
 		t.Fatalf("expected PlanningAuthorization was not found: %#v", grant)
 	}
-	controller.jobContract.now = func() time.Time { return grant.Deadline.Add(time.Second) }
-	if _, _, err := controller.ProposeJobContract(
+	controller.now = func() time.Time { return grant.Deadline.Add(time.Second) }
+	if _, _, err := controller.Propose(
 		ctx, jobID, domain.RoleExecutionID("cmd_cccccccccccccccccccccccccccccccc"),
 		sourceResult.ID, "cmd_ffffffffffffffffffffffffffffffff", principal,
 	); err == nil {
@@ -180,12 +180,12 @@ func TestJobContractControllerAllowsExactReplayAfterGrantExpiry(t *testing.T) {
 	}
 	commandID := "cmd_12121212121212121212121212121212"
 	roleExecutionID := domain.RoleExecutionID("cmd_cccccccccccccccccccccccccccccccc")
-	firstReceipt, firstRevision, err := controller.ProposeJobContract(ctx, jobID, roleExecutionID, sourceResult.ID, commandID, principal)
+	firstReceipt, firstRevision, err := controller.Propose(ctx, jobID, roleExecutionID, sourceResult.ID, commandID, principal)
 	if err != nil {
 		t.Fatalf("initial Propose: %v", err)
 	}
-	controller.jobContract.now = func() time.Time { return grant.Deadline.Add(time.Second) }
-	retryReceipt, retryRevision, err := controller.ProposeJobContract(ctx, jobID, roleExecutionID, sourceResult.ID, commandID, principal)
+	controller.now = func() time.Time { return grant.Deadline.Add(time.Second) }
+	retryReceipt, retryRevision, err := controller.Propose(ctx, jobID, roleExecutionID, sourceResult.ID, commandID, principal)
 	if err != nil {
 		t.Fatalf("idempotent replay after expiry: %v", err)
 	}
@@ -206,7 +206,7 @@ func TestJobContractControllerRejectsNewProposalAfterApproval(t *testing.T) {
 	controller, database, principal, jobID, _, sourceResult, _ := startContractPlanner(t)
 	ctx := context.Background()
 	roleExecutionID := domain.RoleExecutionID("cmd_cccccccccccccccccccccccccccccccc")
-	_, revision, err := controller.ProposeJobContract(
+	_, revision, err := controller.Propose(
 		ctx, jobID, roleExecutionID, sourceResult.ID, "cmd_23232323232323232323232323232323", principal,
 	)
 	if err != nil {
@@ -223,7 +223,7 @@ func TestJobContractControllerRejectsNewProposalAfterApproval(t *testing.T) {
 	); err != nil {
 		t.Fatalf("AddJobApproval: %v", err)
 	}
-	if _, _, err := controller.ProposeJobContract(
+	if _, _, err := controller.Propose(
 		ctx, jobID, roleExecutionID, sourceResult.ID, "cmd_25252525252525252525252525252525", principal,
 	); err == nil {
 		t.Fatal("new proposal through the DRAFT Planner authority was accepted after approval")
@@ -239,10 +239,10 @@ func TestJobContractControllerRejectsCommandIDReuseByDifferentPlanner(t *testing
 	ctx := context.Background()
 	commandID := "cmd_34343434343434343434343434343434"
 	roleExecutionID := domain.RoleExecutionID("cmd_cccccccccccccccccccccccccccccccc")
-	if _, _, err := controller.ProposeJobContract(ctx, jobID, roleExecutionID, sourceResult.ID, commandID, principal); err != nil {
+	if _, _, err := controller.Propose(ctx, jobID, roleExecutionID, sourceResult.ID, commandID, principal); err != nil {
 		t.Fatalf("initial Propose: %v", err)
 	}
-	if _, _, err := controller.ProposeJobContract(
+	if _, _, err := controller.Propose(
 		ctx, jobID, "role_exec_00000000000000000000000000000000",
 		sourceResult.ID, commandID, principal,
 	); err == nil {
@@ -257,7 +257,7 @@ func TestJobContractControllerRejectsCommandIDReuseByDifferentPlanner(t *testing
 func TestJobContractControllerApprovesExactRevisionAndReplaysAfterActivation(t *testing.T) {
 	controller, database, principal, jobID, _, sourceResult, _ := startContractPlanner(t)
 	ctx := context.Background()
-	_, revision, err := controller.ProposeJobContract(
+	_, revision, err := controller.Propose(
 		ctx, jobID, domain.RoleExecutionID("cmd_cccccccccccccccccccccccccccccccc"),
 		sourceResult.ID, "cmd_45454545454545454545454545454545", principal,
 	)
@@ -265,7 +265,7 @@ func TestJobContractControllerApprovesExactRevisionAndReplaysAfterActivation(t *
 		t.Fatalf("Propose: %v", err)
 	}
 	approvalCommandID := "cmd_56565656565656565656565656565656"
-	firstReceipt, firstApproval, err := controller.jobContract.Approve(
+	firstReceipt, firstApproval, err := controller.Approve(
 		ctx, jobID, approvalCommandID, revision.Revision,
 		revision.CanonicalHash, revision.CanonicalizationVersion,
 		"Reviewed and approved the exact bounded scope", principal,
@@ -280,7 +280,7 @@ func TestJobContractControllerApprovesExactRevisionAndReplaysAfterActivation(t *
 		firstApproval.ApproverPrincipalID != principal.PrincipalID() {
 		t.Fatalf("approval did not activate exact revision: job=%#v approval=%#v err=%v", job, firstApproval, err)
 	}
-	retryReceipt, retryApproval, err := controller.jobContract.Approve(
+	retryReceipt, retryApproval, err := controller.Approve(
 		ctx, jobID, approvalCommandID, revision.Revision,
 		revision.CanonicalHash, revision.CanonicalizationVersion,
 		"Reviewed and approved the exact bounded scope", principal,
@@ -294,7 +294,7 @@ func TestJobContractControllerApprovesExactRevisionAndReplaysAfterActivation(t *
 		t.Fatalf("approval replay changed receipt or fact: first=%#v/%#v retry=%#v/%#v",
 			firstReceipt, firstApproval, retryReceipt, retryApproval)
 	}
-	if _, _, err := controller.jobContract.Approve(
+	if _, _, err := controller.Approve(
 		ctx, jobID, "cmd_67676767676767676767676767676767",
 		revision.Revision, strings.Repeat("0", 64),
 		revision.CanonicalizationVersion, "Wrong hash", principal,
@@ -349,14 +349,14 @@ func TestDecodeJobContractJSONStrict(t *testing.T) {
 	}
 }
 
-func TestPlanningControllerRejectsMalformedFinalResultWithoutMutation(t *testing.T) {
+func TestJobContractControllerRejectsMalformedFinalResultWithoutMutation(t *testing.T) {
 	controller, database, principal, jobID, _, sourceResult, _ := startContractPlannerWithResultContent(t, "not JSON")
-	_, _, err := controller.ProposeJobContract(
+	_, _, err := controller.Propose(
 		context.Background(), jobID, domain.RoleExecutionID("cmd_cccccccccccccccccccccccccccccccc"),
 		sourceResult.ID, "cmd_98989898989898989898989898989898", principal,
 	)
 	if err == nil {
-		t.Fatal("PlanningController accepted malformed Planner Result JSON")
+		t.Fatal("JobContractController accepted malformed Planner Result JSON")
 	}
 	job, readErr := database.GetJob(context.Background(), jobID)
 	if readErr != nil || len(job.JobContractRevisions) != 0 {
@@ -367,7 +367,7 @@ func TestPlanningControllerRejectsMalformedFinalResultWithoutMutation(t *testing
 func TestJobContractControllerAmendsActiveRevisionAndRequiresReapproval(t *testing.T) {
 	ctx := context.Background()
 	controller, database, principal, jobID, _, sourceResult, contract := startContractPlanner(t)
-	_, proposed, err := controller.ProposeJobContract(
+	_, proposed, err := controller.Propose(
 		ctx, jobID, domain.RoleExecutionID("cmd_cccccccccccccccccccccccccccccccc"),
 		sourceResult.ID, "cmd_71717171717171717171717171717171", principal,
 	)
@@ -378,7 +378,7 @@ func TestJobContractControllerAmendsActiveRevisionAndRequiresReapproval(t *testi
 	if err != nil {
 		t.Fatalf("GetJob before approval: %v", err)
 	}
-	if _, _, err := controller.jobContract.Approve(
+	if _, _, err := controller.Approve(
 		ctx, jobID, "cmd_72727272727272727272727272727272",
 		proposed.Revision, proposed.CanonicalHash, proposed.CanonicalizationVersion,
 		"Approve initial contract", principal,
@@ -397,7 +397,7 @@ func TestJobContractControllerAmendsActiveRevisionAndRequiresReapproval(t *testi
 	amendedContract.Deadline = time.Now().UTC().Add(3 * time.Hour)
 	amendmentCommand := "cmd_73737373737373737373737373737373"
 	reason := "Human-approved change to the target scope"
-	receipt, amendedRevision, err := controller.jobContract.Amend(
+	receipt, amendedRevision, err := controller.Amend(
 		ctx, jobID, job.Revision, amendmentCommand, proposed.Revision, proposed.CanonicalHash,
 		reason, amendedContract, amendPrincipal,
 	)
@@ -417,19 +417,19 @@ func TestJobContractControllerAmendsActiveRevisionAndRequiresReapproval(t *testi
 		amendedRevision.AmendmentReason != reason {
 		t.Fatalf("human amendment provenance mismatch: %#v", amendedRevision)
 	}
-	if _, _, err := controller.jobContract.Amend(
+	if _, _, err := controller.Amend(
 		ctx, jobID, job.Revision, "cmd_74747474747474747474747474747474",
 		amendedRevision.Revision, amendedRevision.CanonicalHash, reason, contract, principal,
 	); err == nil {
 		t.Fatal("DRAFT Job accepted a second amendment command")
 	}
-	if _, _, err := controller.jobContract.Amend(
+	if _, _, err := controller.Amend(
 		ctx, jobID, job.Revision, "cmd_75757575757575757575757575757575",
 		amendedRevision.Revision, amendedRevision.CanonicalHash, reason, amendedContract, auth.AuthenticatedPrincipal{},
 	); err == nil {
 		t.Fatal("Controller accepted an unauthenticated amendment Principal")
 	}
-	if _, _, err := controller.jobContract.Approve(
+	if _, _, err := controller.Approve(
 		ctx, jobID, "cmd_76767676767676767676767676767676",
 		amendedRevision.Revision, amendedRevision.CanonicalHash, amendedRevision.CanonicalizationVersion,
 		"Approve amended contract", amendPrincipal,
@@ -440,7 +440,7 @@ func TestJobContractControllerAmendsActiveRevisionAndRequiresReapproval(t *testi
 	if err != nil || job.State != domain.JobActive || len(job.JobApprovals) != 2 {
 		t.Fatalf("amended revision was not reapproved: state=%s approvals=%d err=%v", job.State, len(job.JobApprovals), err)
 	}
-	retryReceipt, retryRevision, err := controller.jobContract.Amend(
+	retryReceipt, retryRevision, err := controller.Amend(
 		ctx, jobID, job.Revision, amendmentCommand, proposed.Revision, proposed.CanonicalHash,
 		reason, amendedContract, amendPrincipal,
 	)
@@ -448,7 +448,7 @@ func TestJobContractControllerAmendsActiveRevisionAndRequiresReapproval(t *testi
 		retryReceipt.Revision != receipt.Revision || retryRevision.ID != amendedRevision.ID {
 		t.Fatalf("amendment idempotency: %#v %#v %v", retryReceipt, retryRevision, err)
 	}
-	if _, _, err := controller.jobContract.Amend(
+	if _, _, err := controller.Amend(
 		ctx, jobID, job.Revision, amendmentCommand, proposed.Revision, proposed.CanonicalHash,
 		"Changed reason", amendedContract, amendPrincipal,
 	); err != store.ErrIdempotencyConflict {

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/rand"
@@ -11,11 +12,13 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -391,6 +394,69 @@ func runCLIWithFakeOIDC(t *testing.T, server *httptest.Server, args []string) (i
 	}
 }
 
+func TestJobMessageSavesAndRetriesOnlyForOwner(t *testing.T) {
+	server := newCLIAuthServer(t)
+	t.Setenv("TAXION_OIDC_ISSUER", server.URL)
+	t.Setenv("TAXION_OIDC_CLIENT_ID", "taxion-cli-test")
+	t.Setenv("TAXION_OIDC_AUDIENCE", "taxion-cli-test")
+	t.Setenv("TAXION_OIDC_REDIRECT_URI", "http://127.0.0.1:0/callback")
+	principal := authenticateCLIPrincipal(t, server)
+	path := filepath.Join(t.TempDir(), "jobs.sqlite")
+	ctx := context.Background()
+	database, err := store.Open(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const jobID = "job_cli_message"
+	_, err = database.CreateTrustedDraftJob(ctx, jobID, "Plan the work.",
+		"cmd_11111111111111111111111111111111", principal.AuthenticatedAt(), principal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	const commandID = "cmd_22222222222222222222222222222222"
+	args := []string{"job", "message", "--store", path, "--body", "安全性を優先してください。",
+		"--command-id", commandID, jobID}
+	for range 2 {
+		code, output, stderr := runCLIWithFakeOIDC(t, server, args)
+		if code != 0 || !strings.Contains(output, "Job message saved (not delivered)") ||
+			!strings.Contains(output, "Revision: 2") {
+			t.Fatalf("job message exit=%d, output=%q, stderr=%q", code, output, stderr)
+		}
+	}
+	other := newCLIAuthServer(t)
+	t.Setenv("TAXION_OIDC_ISSUER", other.URL)
+	code, _, stderr := runCLIWithFakeOIDC(t, other, args)
+	if code != 1 || !strings.Contains(stderr, "does not own the Job") {
+		t.Fatalf("non-owner exit=%d, stderr=%q", code, stderr)
+	}
+
+	database, err = store.Open(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	job, err := database.GetJob(ctx, jobID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(job.JobMessages) != 1 || job.JobMessages[0].Body != "安全性を優先してください。" ||
+		job.JobMessages[0].Recipient.ID != domain.ControllerActorID || job.Revision != 2 {
+		t.Fatalf("persisted Job messages = %#v, revision = %d", job.JobMessages, job.Revision)
+	}
+}
+
+func TestJobMessageRejectsMissingBodyBeforeAuthentication(t *testing.T) {
+	t.Setenv("TAXION_OIDC_ISSUER", "")
+	var stdout, stderr bytes.Buffer
+	if code := Run(context.Background(), []string{"job", "message", "job_missing"}, &stdout, &stderr, VersionInfo{}); code != 2 {
+		t.Fatalf("exit = %d, stderr = %q", code, stderr.String())
+	}
+}
+
 func TestAuthorizePlanningIssuesBoundedGrantAndSupportsIdempotentRetry(t *testing.T) {
 	server := newCLIAuthServer(t)
 	t.Setenv("TAXION_OIDC_ISSUER", server.URL)
@@ -517,6 +583,32 @@ func TestAuthorizePlanningIssuesBoundedGrantAndSupportsIdempotentRetry(t *testin
 		grant.ReadOnlyBoundary.Mode != domain.PlanningReadOnlyBoundarySnapshot ||
 		grant.ReadOnlyBoundary.Reference != "snapshot_123" || grant.ReadOnlyBoundary.SHA256 != strings.Repeat("c", 64) {
 		t.Fatalf("persisted PlanningAuthorization = %#v", grant)
+	}
+	const messageCommand = "cmd_33333333333333333333333333333333"
+	roleID := job.RoleExecutions[0].ID
+	code, _, stderr = runCLIWithFakeOIDC(t, server, []string{"job", "message", "--store", path,
+		"--body", "Please clarify the constraints.", "--to", roleID, "--command-id", messageCommand, jobID})
+	if code != 0 {
+		t.Fatalf("message to Planner exit=%d, stderr=%q", code, stderr)
+	}
+	code, _, stderr = runCLIWithFakeOIDC(t, server, []string{"job", "message", "--store", path,
+		"--body", "Additional context.", "--reply-to", domain.JobMessageID(messageCommand), jobID})
+	if code != 0 {
+		t.Fatalf("message reply exit=%d, stderr=%q", code, stderr)
+	}
+	code, _, _ = runCLIWithFakeOIDC(t, server, []string{"job", "message", "--store", path,
+		"--body", "Invalid recipient.", "--to", "missing_role", jobID})
+	if code != 1 {
+		t.Fatalf("message to missing role exit=%d, want 1", code)
+	}
+	job, err = database.GetJob(context.Background(), jobID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(job.JobMessages) != 2 || job.JobMessages[0].Recipient.ID != roleID ||
+		job.JobMessages[0].Recipient.Kind != domain.ActorPlanner ||
+		job.JobMessages[1].ReplyToMessageID != job.JobMessages[0].ID {
+		t.Fatalf("persisted messages = %#v", job.JobMessages)
 	}
 }
 
@@ -896,5 +988,309 @@ func TestJobContractCLIRejectsIncompleteInputsBeforeAuthentication(t *testing.T)
 				t.Fatalf("Store path exists after invalid contract file: %v", err)
 			}
 		})
+	}
+}
+
+func TestDevProviderRunRequiresPrompt(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := Run(context.Background(), []string{"dev", "provider", "run"}, &stdout, &stderr, VersionInfo{})
+	if code != 2 {
+		t.Fatalf("exit code = %d, want 2; stderr = %s", code, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "--prompt") {
+		t.Fatalf("stderr = %q, want prompt guidance", stderr.String())
+	}
+}
+
+func fakeOpenCode(t *testing.T) string {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("test helper uses a shell script")
+	}
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	helper := filepath.Join(t.TempDir(), "opencode")
+	quoted := "'" + strings.ReplaceAll(executable, "'", "'\\''") + "'"
+	script := fmt.Sprintf("#!/bin/sh\n[ \"$1\" = acp ] || exit 1\nTAXION_TEST_CLI_HELPER=1 exec %s -test.run=^TestDevProviderACPHelper$\n", quoted)
+	if err := os.WriteFile(helper, []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	return helper
+}
+
+func TestDevProviderRunOpenCode(t *testing.T) {
+	helper := fakeOpenCode(t)
+	t.Setenv("TAXION_TEST_HOST_SECRET", "must-not-be-inherited")
+	var stdout, stderr bytes.Buffer
+	code := Run(context.Background(), []string{"dev", "provider", "run", "--provider", "opencode",
+		"--command", helper, "--working-directory", t.TempDir(), "--prompt", "hello"},
+		&stdout, &stderr, VersionInfo{})
+	if code != 0 || !strings.Contains(stdout.String(), "Provider: opencode") ||
+		!strings.Contains(stdout.String(), "hello from ACP") {
+		t.Fatalf("exit=%d, stdout=%q, stderr=%q", code, stdout.String(), stderr.String())
+	}
+}
+
+func TestDevProviderRunRejectsUnconfirmedModel(t *testing.T) {
+	helper := fakeOpenCode(t)
+	work := t.TempDir()
+	if err := os.WriteFile(filepath.Join(work, "different-model"), nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	code := Run(context.Background(), []string{"dev", "provider", "run", "--provider", "opencode",
+		"--command", helper, "--working-directory", work, "--prompt", "hello"},
+		&stdout, &stderr, VersionInfo{})
+	if code != 1 || !strings.Contains(stderr.String(), "did not confirm the required model") {
+		t.Fatalf("exit=%d, stdout=%q, stderr=%q", code, stdout.String(), stderr.String())
+	}
+	if _, err := os.Stat(filepath.Join(work, "prompt-reached")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("prompt was sent before model confirmation: %v", err)
+	}
+}
+
+func TestLocalJobPromptStopsAtOwnQuestion(t *testing.T) {
+	job := domain.Job{Request: "original", JobMessages: []domain.JobMessage{
+		{ID: "first", Sender: domain.ActorRef{Kind: domain.ActorController}, Recipient: domain.ActorRef{Kind: domain.ActorOrchestrator}, Body: "first question"},
+		{ID: "second", Sender: domain.ActorRef{Kind: domain.ActorController}, Recipient: domain.ActorRef{Kind: domain.ActorOrchestrator}, Body: "later question"},
+	}}
+	prompt, err := localJobPrompt(job, "first")
+	if err != nil || !strings.Contains(prompt, "first question") || strings.Contains(prompt, "later question") {
+		t.Fatalf("prompt=%q, err=%v", prompt, err)
+	}
+	if _, err := localJobPrompt(job, "missing"); err == nil {
+		t.Fatal("missing saved question was accepted")
+	}
+}
+
+func TestDevProviderConversationPersistsAndReusesLocalJobHistory(t *testing.T) {
+	helper := fakeOpenCode(t)
+	path := filepath.Join(t.TempDir(), "jobs.sqlite")
+	var stdout, stderr bytes.Buffer
+	if code := Run(context.Background(), []string{"dev", "job", "create", "--store", path,
+		"--request", "The original request."}, &stdout, &stderr, VersionInfo{}); code != 0 {
+		t.Fatalf("create exit=%d, stderr=%q", code, stderr.String())
+	}
+	jobID := strings.TrimPrefix(strings.Split(stdout.String(), "\n")[1], "ID: ")
+	for _, prompt := range []string{"Remember the token HARBOR42.", "what token?"} {
+		stdout.Reset()
+		stderr.Reset()
+		code := Run(context.Background(), []string{"dev", "provider", "run", "--provider", "opencode",
+			"--command", helper, "--working-directory", t.TempDir(), "--store", path,
+			"--job", jobID, "--prompt", prompt}, &stdout, &stderr, VersionInfo{})
+		if code != 0 || !strings.Contains(stdout.String(), "Local Job conversation saved") {
+			t.Fatalf("conversation exit=%d, stdout=%q, stderr=%q", code, stdout.String(), stderr.String())
+		}
+	}
+	if !strings.Contains(stdout.String(), "HARBOR42") {
+		t.Fatalf("follow-up response=%q", stdout.String())
+	}
+	database, err := store.Open(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	job, err := database.GetJob(context.Background(), jobID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(job.JobMessages) != 4 ||
+		job.JobMessages[0].Sender.Kind != domain.ActorController ||
+		job.JobMessages[1].Sender.Kind != domain.ActorOrchestrator ||
+		job.JobMessages[1].ReplyToMessageID != job.JobMessages[0].ID ||
+		job.JobMessages[3].ReplyToMessageID != job.JobMessages[2].ID ||
+		job.JobMessages[3].Body != "HARBOR42" {
+		t.Fatalf("stored conversation=%#v", job.JobMessages)
+	}
+}
+
+func TestDevProviderConversationRejectsTrustedJob(t *testing.T) {
+	helper := fakeOpenCode(t)
+	server := newCLIAuthServer(t)
+	principal := authenticateCLIPrincipal(t, server)
+	path := filepath.Join(t.TempDir(), "jobs.sqlite")
+	database, err := store.Open(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const jobID = "job_trusted_dev_rejection"
+	_, err = database.CreateTrustedDraftJob(context.Background(), jobID, "trusted",
+		"cmd_11111111111111111111111111111111", principal.AuthenticatedAt(), principal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	code := Run(context.Background(), []string{"dev", "provider", "run", "--provider", "opencode",
+		"--command", helper, "--working-directory", t.TempDir(), "--store", path, "--job", jobID,
+		"--prompt", "test"}, &stdout, &stderr, VersionInfo{})
+	if code != 1 || !strings.Contains(stderr.String(), "untrusted local DRAFT") {
+		t.Fatalf("trusted job exit=%d, stdout=%q, stderr=%q", code, stdout.String(), stderr.String())
+	}
+}
+
+func TestDevProviderConversationRetainsInputOnProviderFailure(t *testing.T) {
+	helper := fakeOpenCode(t)
+	work := t.TempDir()
+	path := filepath.Join(t.TempDir(), "jobs.sqlite")
+	var stdout, stderr bytes.Buffer
+	if code := Run(context.Background(), []string{"dev", "job", "create", "--store", path,
+		"--request", "The original request."}, &stdout, &stderr, VersionInfo{}); code != 0 {
+		t.Fatalf("create exit=%d, stderr=%q", code, stderr.String())
+	}
+	jobID := strings.TrimPrefix(strings.Split(stdout.String(), "\n")[1], "ID: ")
+	stdout.Reset()
+	stderr.Reset()
+	code := Run(context.Background(), []string{"dev", "provider", "run", "--provider", "opencode",
+		"--command", helper, "--working-directory", work, "--store", path,
+		"--job", jobID, "--prompt", "simulate provider failure"}, &stdout, &stderr, VersionInfo{})
+	if code != 1 {
+		t.Fatalf("provider failure exit=%d, stdout=%q", code, stdout.String())
+	}
+	if _, err := os.Stat(filepath.Join(work, "prompt-reached")); err != nil {
+		t.Fatalf("provider did not receive the prompt: %v", err)
+	}
+	database, err := store.Open(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	job, err := database.GetJob(context.Background(), jobID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(job.JobMessages) != 1 || job.JobMessages[0].Body != "simulate provider failure" {
+		t.Fatalf("stored conversation=%#v", job.JobMessages)
+	}
+}
+
+func TestDevProviderACPHelper(t *testing.T) {
+	if os.Getenv("TAXION_TEST_CLI_HELPER") != "1" {
+		return
+	}
+	config, err := os.ReadFile(filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "opencode", "opencode.json"))
+	if err != nil || string(config) != `{"model":"opencode/big-pickle"}` ||
+		os.Getenv("TAXION_TEST_HOST_SECRET") != "" {
+		os.Exit(1)
+	}
+	scanner := bufio.NewScanner(os.Stdin)
+	writer := json.NewEncoder(os.Stdout)
+	for scanner.Scan() {
+		var request struct {
+			ID     json.RawMessage `json:"id"`
+			Method string          `json:"method"`
+			Params struct {
+				Prompt []struct {
+					Text string `json:"text"`
+				} `json:"prompt"`
+			} `json:"params"`
+		}
+		if json.Unmarshal(scanner.Bytes(), &request) != nil {
+			os.Exit(1)
+		}
+		switch request.Method {
+		case "initialize":
+			_ = writer.Encode(map[string]any{"jsonrpc": "2.0", "id": request.ID,
+				"result": map[string]any{"protocolVersion": 1}})
+		case "session/new":
+			model := "opencode/big-pickle"
+			if _, err := os.Stat("different-model"); err == nil {
+				model = "opencode/other"
+			}
+			_ = writer.Encode(map[string]any{"jsonrpc": "2.0", "id": request.ID,
+				"result": map[string]any{"sessionId": "session_test", "configOptions": []map[string]string{
+					{"id": "model", "currentValue": model},
+				}}})
+		case "session/prompt":
+			if err := os.WriteFile("prompt-reached", nil, 0600); err != nil {
+				os.Exit(1)
+			}
+			response := "hello from ACP"
+			if len(request.Params.Prompt) > 0 {
+				prompt := request.Params.Prompt[0].Text
+				if strings.Contains(prompt, "simulate provider failure") {
+					os.Exit(1)
+				} else if strings.Contains(prompt, "what token?") {
+					if !strings.Contains(prompt, "The original request.") ||
+						!strings.Contains(prompt, "Remember the token HARBOR42.") ||
+						!strings.Contains(prompt, "remembered") {
+						os.Exit(1)
+					}
+					response = "HARBOR42"
+				} else if strings.Contains(prompt, "Remember the token HARBOR42.") {
+					response = "remembered"
+				}
+			}
+			_ = writer.Encode(map[string]any{"jsonrpc": "2.0", "method": "session/update",
+				"params": map[string]any{"sessionId": "session_test", "update": map[string]any{
+					"sessionUpdate": "agent_message_chunk", "content": map[string]string{"type": "text", "text": response},
+				}}})
+			_ = writer.Encode(map[string]any{"jsonrpc": "2.0", "id": request.ID,
+				"result": map[string]any{"stopReason": "end_turn"}})
+		}
+	}
+	os.Exit(0)
+}
+
+func TestDevProviderRunRejectsUnknownProvider(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := Run(context.Background(), []string{"dev", "provider", "run", "--provider", "unknown", "--prompt", "hello"},
+		&stdout, &stderr, VersionInfo{})
+	if code != 2 {
+		t.Fatalf("exit=%d, stderr=%q", code, stderr.String())
+	}
+}
+
+func TestCopilotProfileEnvironmentUsesAllowlist(t *testing.T) {
+	profile := filepath.Join(t.TempDir(), "private-profile")
+	t.Setenv("PATH", "/trusted/bin")
+	t.Setenv("TMPDIR", "/tmp/taxion")
+	t.Setenv("LANG", "C.UTF-8")
+	t.Setenv("LC_ALL", "C.UTF-8")
+	t.Setenv("TERM", "dumb")
+	t.Setenv("HOME", "/host/home")
+	t.Setenv("XDG_CONFIG_HOME", "/host/config")
+	t.Setenv("GH_TOKEN", "gh-secret")
+	t.Setenv("GITHUB_TOKEN", "github-secret")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "cloud-secret")
+	t.Setenv("UNRELATED_SETTING", "must-not-leak")
+
+	got := make(map[string]string)
+	for _, entry := range copilotProfileEnvironment(profile) {
+		name, value, ok := strings.Cut(entry, "=")
+		if !ok {
+			t.Fatalf("environment entry %q has no separator", entry)
+		}
+		if _, exists := got[name]; exists {
+			t.Fatalf("environment contains duplicate %q", name)
+		}
+		got[name] = value
+	}
+
+	for name, want := range map[string]string{
+		"PATH":            "/trusted/bin",
+		"TMPDIR":          "/tmp/taxion",
+		"LANG":            "C.UTF-8",
+		"LC_ALL":          "C.UTF-8",
+		"TERM":            "dumb",
+		"HOME":            profile,
+		"XDG_CONFIG_HOME": filepath.Join(profile, ".config"),
+		"XDG_CACHE_HOME":  filepath.Join(profile, ".cache"),
+		"XDG_DATA_HOME":   filepath.Join(profile, ".local", "share"),
+	} {
+		if got[name] != want {
+			t.Errorf("%s = %q, want %q", name, got[name], want)
+		}
+	}
+	for _, name := range []string{
+		"GH_TOKEN", "GITHUB_TOKEN", "AWS_SECRET_ACCESS_KEY", "UNRELATED_SETTING",
+	} {
+		if _, exists := got[name]; exists {
+			t.Errorf("environment unexpectedly contains %s", name)
+		}
 	}
 }

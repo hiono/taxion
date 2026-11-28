@@ -249,7 +249,7 @@ func persistPlanningFact[T any](ctx context.Context, s *Store, jobID string, exp
 		return CommandReceipt{}, zero, err
 	}
 	if job.Revision != expectedRevision {
-		return CommandReceipt{}, zero, ErrIdempotencyConflict
+		return CommandReceipt{}, zero, ErrRevisionConflict
 	}
 	now := time.Now().UTC().Round(0)
 	if now.Before(job.UpdatedAt) {
@@ -287,7 +287,7 @@ func persistPlanningFact[T any](ctx context.Context, s *Store, jobID string, exp
 		return CommandReceipt{}, zero, fmt.Errorf("check planning lifecycle Job update: %w", err)
 	}
 	if affected != 1 {
-		return CommandReceipt{}, zero, ErrIdempotencyConflict
+		return CommandReceipt{}, zero, ErrRevisionConflict
 	}
 	_, err = tx.ExecContext(ctx, "INSERT INTO job_commands (command_id, job_id, command_type, payload_sha256, resulting_revision, receipt_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)", commandID, jobID, commandType, requestHash, job.Revision, string(encodedReceipt), now.Format(time.RFC3339Nano))
 	if err != nil {
