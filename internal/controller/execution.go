@@ -112,8 +112,10 @@ func (c *ExecutionController) BindWorktree(
 	if err != nil {
 		return store.CommandReceipt{}, domain.WorktreeAssignment{}, err
 	}
-	if err := assignment.Validate(job); err != nil {
-		return store.CommandReceipt{}, domain.WorktreeAssignment{}, err
+	if !filepath.IsAbs(assignment.RepositoryPath) || filepath.Clean(assignment.RepositoryPath) != assignment.RepositoryPath ||
+		!filepath.IsAbs(assignment.WorktreePath) || filepath.Clean(assignment.WorktreePath) != assignment.WorktreePath ||
+		assignment.RepositoryPath == assignment.WorktreePath {
+		return store.CommandReceipt{}, domain.WorktreeAssignment{}, errors.New("Worktree paths must be distinct absolute canonical paths")
 	}
 	var execution domain.RoleExecution
 	for _, candidate := range job.RoleExecutions {
