@@ -1139,7 +1139,7 @@ func TestDevProviderConsultsAndResumesMainSession(t *testing.T) {
 	}
 	for i, body := range want {
 		message := job.JobMessages[i]
-		if message.Body != body || (i > 0 && message.ReplyToMessageID != job.JobMessages[0].ID) {
+		if message.Body != body || (i > 0 && message.ReplyToMessageID != job.JobMessages[i-1].ID) {
 			t.Fatalf("message %d = %#v", i, message)
 		}
 	}
@@ -1225,6 +1225,11 @@ func TestDevProviderConsultPreservesPartialConversation(t *testing.T) {
 			}
 			if len(job.JobMessages) != failure.count || job.JobMessages[1].Body != "Main agent question:\nconsultation question" {
 				t.Fatalf("messages=%#v", job.JobMessages)
+			}
+			for i := 1; i < len(job.JobMessages); i++ {
+				if job.JobMessages[i].ReplyToMessageID != job.JobMessages[i-1].ID {
+					t.Fatalf("message %d lost its reply link", i)
+				}
 			}
 			if failure.count == 3 && job.JobMessages[2].Body != "Consulting agent answer:\nconsultation answer" {
 				t.Fatalf("messages=%#v", job.JobMessages)
