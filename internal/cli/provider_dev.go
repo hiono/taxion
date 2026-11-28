@@ -65,13 +65,14 @@ func runACPProvider(ctx context.Context, args []string, stdout, stderr io.Writer
 	storePath := flags.String("store", "", "Override the local Job database path")
 	consult := flags.Bool("consult", false, "Ask another agent once before answering the local Job")
 	review := flags.Bool("review", false, "Run a local planner, coder, and reviewer conversation")
+	allowTools := flags.Bool("allow-coder-tools", false, "Allow the local coder's tool requests on the host without OS isolation")
 	if err := flags.Parse(args); err != nil {
 		return 2
 	}
 	if flags.NArg() != 0 || (strings.TrimSpace(*prompt) == "" && *localJobID == "") || *timeout <= 0 ||
 		(*backend != "copilot" && *backend != "opencode") ||
-		((*consult || *review) && *localJobID == "") {
-		fmt.Fprintln(stderr, "usage: taxion dev provider run [--prompt \"...\"] [--provider copilot|opencode] [--job <local-job-id> [--consult] [--review]] [--timeout 10m]")
+		((*consult || *review) && *localJobID == "") || (*allowTools && !*review) {
+		fmt.Fprintln(stderr, "usage: taxion dev provider run [--prompt \"...\"] [--provider copilot|opencode] [--job <local-job-id> [--consult] [--review [--allow-coder-tools]]] [--timeout 10m]")
 		return 2
 	}
 	cliName, providerID := "Copilot CLI", "copilot-cli"
@@ -259,9 +260,25 @@ func runACPProvider(ctx context.Context, args []string, stdout, stderr io.Writer
 				_ = adapter.Close()
 				return report(stderr, err)
 			}
-			if err := reviewLocalJob(ctx, adapter, request, start.SessionID, conversationContext, result.Content, *consult, record); err != nil {
+			coderAdapter := adapter
+			if *allowTools {
+				fmt.Fprintln(stderr, "Coder tool requests are allowed on the host without OS isolation.")
+				coderConfig := config
+				coderConfig.AllowToolRequests = true
+				coderConfig.Identity.ConfigurationSHA256 = sha256Hex(configurationHash + "\nallow-coder-tools")
+				coderAdapter, err = provider.NewACPAdapter(coderConfig)
+				if err != nil {
+					_ = adapter.Close()
+					return report(stderr, err)
+				}
+			}
+			reviewErr := reviewLocalJob(ctx, adapter, coderAdapter, request, start.SessionID, conversationContext, result.Content, *consult, *allowTools, record)
+			if coderAdapter != adapter {
+				reviewErr = errors.Join(reviewErr, coderAdapter.Close())
+			}
+			if reviewErr != nil {
 				_ = adapter.Close()
-				return report(stderr, err)
+				return report(stderr, reviewErr)
 			}
 			if err := adapter.Close(); err != nil {
 				return report(stderr, fmt.Errorf("%s process did not close cleanly", cliName))
@@ -318,12 +335,19 @@ func runACPProvider(ctx context.Context, args []string, stdout, stderr io.Writer
 	return 0
 }
 
-func reviewLocalJob(ctx context.Context, adapter *provider.ACPAdapter, request provider.StartRequest, planner, jobContext, plan string, consult bool, record func(string, string) error) error {
+func reviewLocalJob(ctx context.Context, adapter, coderAdapter *provider.ACPAdapter, request provider.StartRequest, planner, jobContext, plan string, consult, allowTools bool, record func(string, string) error) error {
 	prompt := "Act as the coder. Work on this request using the plan; provide your complete work as text."
+	finish := "Continue and provide your complete work as text."
+	revise := "Consider the review below. Revise your work only where warranted and provide the complete result."
+	if allowTools {
+		prompt = "Act as the coder. Implement this request in the working directory using the plan, then describe your changes and checks."
+		finish = "Continue, implement the request in the working directory, then describe your changes and checks."
+		revise = "Consider the review below. Update the working directory where warranted, then describe your changes and checks."
+	}
 	if consult {
 		prompt = "Act as the coder. Before working, write one question for the planner about this request and plan. Return only the question."
 	}
-	coder, draft, err := startLocalAgent(ctx, adapter, request, prompt+"\n\n"+jobContext+"\n\nPlanner plan:\n"+plan)
+	coder, draft, err := startLocalAgent(ctx, coderAdapter, request, prompt+"\n\n"+jobContext+"\n\nPlanner plan:\n"+plan)
 	if err != nil {
 		return err
 	}
@@ -338,7 +362,7 @@ func reviewLocalJob(ctx context.Context, adapter *provider.ACPAdapter, request p
 		if err := record("Planner answer:", answer); err != nil {
 			return err
 		}
-		draft, err = sendLocalAgent(ctx, adapter, request, coder, "The planner answered your question:\n"+answer+"\n\nContinue and provide your complete work as text.")
+		draft, err = sendLocalAgent(ctx, coderAdapter, request, coder, "The planner answered your question:\n"+answer+"\n\n"+finish)
 		if err != nil {
 			return err
 		}
@@ -354,7 +378,7 @@ func reviewLocalJob(ctx context.Context, adapter *provider.ACPAdapter, request p
 	if err := record("Reviewer feedback:", feedback); err != nil {
 		return err
 	}
-	revision, err := sendLocalAgent(ctx, adapter, request, coder, "Consider the review below. Revise your work only where warranted and provide the complete result.\n\nReviewer feedback:\n"+feedback)
+	revision, err := sendLocalAgent(ctx, coderAdapter, request, coder, revise+"\n\nReviewer feedback:\n"+feedback)
 	if err != nil {
 		return err
 	}

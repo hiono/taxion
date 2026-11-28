@@ -1346,10 +1346,50 @@ func TestDevProviderReviewCycle(t *testing.T) {
 	}
 }
 
+func TestDevProviderReviewAllowsOnlyCoderToolsWhenRequested(t *testing.T) {
+	for _, test := range []struct {
+		allow   bool
+		consult bool
+	}{{}, {allow: true}, {allow: true, consult: true}} {
+		t.Run(fmt.Sprintf("allow=%t/consult=%t", test.allow, test.consult), func(t *testing.T) {
+			helper := fakeOpenCode(t)
+			work := t.TempDir()
+			if err := os.WriteFile(filepath.Join(work, "test-tool-permission"), nil, 0600); err != nil {
+				t.Fatal(err)
+			}
+			path := filepath.Join(t.TempDir(), "jobs.sqlite")
+			var stdout, stderr bytes.Buffer
+			if code := Run(context.Background(), []string{"dev", "job", "create", "--store", path,
+				"--request", "Original task: test review cycle"}, &stdout, &stderr, VersionInfo{}); code != 0 {
+				t.Fatalf("create exit=%d, stderr=%q", code, stderr.String())
+			}
+			jobID := strings.TrimPrefix(strings.Split(stdout.String(), "\n")[1], "ID: ")
+			stdout.Reset()
+			stderr.Reset()
+			args := []string{"dev", "provider", "run", "--provider", "opencode", "--command", helper,
+				"--working-directory", work, "--store", path, "--job", jobID, "--review"}
+			if test.allow {
+				args = append(args, "--allow-coder-tools")
+			}
+			if test.consult {
+				args = append(args, "--consult")
+			}
+			if code := Run(context.Background(), args, &stdout, &stderr, VersionInfo{}); code != 0 {
+				t.Fatalf("review exit=%d, stdout=%q, stderr=%q", code, stdout.String(), stderr.String())
+			}
+			_, err := os.Stat(filepath.Join(work, "coder-artifact"))
+			if (err == nil) != test.allow {
+				t.Fatalf("coder artifact: %v, allow=%v", err, test.allow)
+			}
+		})
+	}
+}
+
 func TestDevProviderReviewRequiresLocalJob(t *testing.T) {
 	for _, args := range [][]string{
 		{"dev", "provider", "run", "--prompt", "test", "--review"},
 		{"dev", "provider", "run", "--prompt", "test", "--review", "--consult"},
+		{"dev", "provider", "run", "--prompt", "test", "--allow-coder-tools"},
 	} {
 		var stdout, stderr bytes.Buffer
 		if code := Run(context.Background(), args, &stdout, &stderr, VersionInfo{}); code != 2 {
@@ -1632,6 +1672,37 @@ func TestDevProviderACPHelper(t *testing.T) {
 					response = "HARBOR42"
 				} else if strings.Contains(prompt, "Remember the token HARBOR42.") {
 					response = "remembered"
+				}
+			}
+			if _, err := os.Stat("test-tool-permission"); err == nil && workflowRole != "" {
+				_ = writer.Encode(map[string]any{"jsonrpc": "2.0", "id": 77, "method": "session/request_permission",
+					"params": map[string]any{"options": []map[string]string{
+						{"optionId": "allow", "kind": "allow_once"},
+						{"optionId": "reject", "kind": "reject_once"},
+					}}})
+				if !scanner.Scan() {
+					os.Exit(1)
+				}
+				var reply struct {
+					Result struct {
+						Outcome struct {
+							Outcome  string `json:"outcome"`
+							OptionID string `json:"optionId"`
+						} `json:"outcome"`
+					} `json:"result"`
+				}
+				if json.Unmarshal(scanner.Bytes(), &reply) != nil {
+					os.Exit(1)
+				}
+				if reply.Result.Outcome.Outcome == "selected" {
+					if workflowRole != "coder" || reply.Result.Outcome.OptionID != "allow" {
+						os.Exit(1)
+					}
+					if err := os.WriteFile("coder-artifact", []byte("coder output"), 0600); err != nil {
+						os.Exit(1)
+					}
+				} else if reply.Result.Outcome.Outcome != "cancelled" {
+					os.Exit(1)
 				}
 			}
 			_ = writer.Encode(map[string]any{"jsonrpc": "2.0", "method": "session/update",

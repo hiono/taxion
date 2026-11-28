@@ -77,6 +77,8 @@ taxion dev job create --request "Local untrusted DRAFT for development."
 
 作成したJobの依頼をProviderへ渡す場合、`taxion dev provider run --job <job-id>`を使います。別の指示を渡す場合は`--prompt`を指定します。これは認可済みJobの実行ではありません。
 
+`--review --allow-coder-tools`を指定すると、Coderのツール権限要求を許可し、作業ディレクトリで直接編集させます。OS隔離はなく、ディレクトリ外やネットワークにもアクセス可能です。PlannerとReviewerのツール権限要求は拒否しますが、Provider自体もOSで隔離されていません。ReviewerはCoderの報告テキストを確認し、実際の変更を独立に検証しません。
+
 ## Jobの表示
 
 ```sh

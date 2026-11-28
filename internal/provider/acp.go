@@ -33,12 +33,13 @@ const maxACPQueuedUpdateBytes = 8 * 1024 * 1024
 // Tool permission requests are denied by default; this adapter does not infer
 // Job authority from ACP prompts or tool metadata.
 type ACPConfig struct {
-	Command          string
-	Args             []string
-	WorkingDirectory string
-	HomeDirectory    string
-	Identity         Identity
-	RequiredModel    string
+	Command           string
+	Args              []string
+	WorkingDirectory  string
+	HomeDirectory     string
+	Identity          Identity
+	RequiredModel     string
+	AllowToolRequests bool
 	// Environment lists non-secret host variables explicitly passed to the CLI.
 	Environment []string
 }
@@ -96,26 +97,27 @@ type acpSession struct {
 }
 
 type acpProcess struct {
-	cmd             *exec.Cmd
-	stdin           io.WriteCloser
-	pending         sync.Map
-	updates         chan json.RawMessage
-	done            chan struct{}
-	readerDone      chan struct{}
-	stop            chan struct{}
-	failed          chan struct{}
-	failMu          sync.Mutex
-	failErr         error
-	failOnce        sync.Once
-	stopOnce        sync.Once
-	closing         atomic.Bool
-	readerStarted   atomic.Bool
-	updateMu        sync.Mutex
-	updateConsumers int
-	updateBytes     int64
-	updateWake      chan struct{}
-	writeGate       chan struct{}
-	nextID          atomic.Uint64
+	cmd               *exec.Cmd
+	stdin             io.WriteCloser
+	allowToolRequests bool
+	pending           sync.Map
+	updates           chan json.RawMessage
+	done              chan struct{}
+	readerDone        chan struct{}
+	stop              chan struct{}
+	failed            chan struct{}
+	failMu            sync.Mutex
+	failErr           error
+	failOnce          sync.Once
+	stopOnce          sync.Once
+	closing           atomic.Bool
+	readerStarted     atomic.Bool
+	updateMu          sync.Mutex
+	updateConsumers   int
+	updateBytes       int64
+	updateWake        chan struct{}
+	writeGate         chan struct{}
+	nextID            atomic.Uint64
 }
 
 type acpMessage struct {
@@ -210,6 +212,9 @@ func (a *ACPAdapter) Capabilities(ctx context.Context) (Capabilities, error) {
 	}
 	if err := ctx.Err(); err != nil {
 		return Capabilities{}, err
+	}
+	if a.config.AllowToolRequests {
+		return Capabilities{Identity: a.config.Identity}, nil
 	}
 	return Capabilities{
 		Identity:                   a.config.Identity,
@@ -1065,6 +1070,7 @@ func (a *ACPAdapter) startProcess() (*acpProcess, error) {
 	}
 	command.Env = nil
 	process := newACPProcess(command, stdin)
+	process.allowToolRequests = a.config.AllowToolRequests
 	process.readerStarted.Store(true)
 	go process.read(stdoutRead)
 	go func() {
@@ -1116,7 +1122,24 @@ func (p *acpProcess) read(stdout io.Reader) {
 					"id":      json.RawMessage(message.ID),
 				}
 				if message.Method == "session/request_permission" || message.Method == "requestPermission" {
-					response["result"] = map[string]any{"outcome": map[string]string{"outcome": "cancelled"}}
+					outcome := map[string]string{"outcome": "cancelled"}
+					if p.allowToolRequests {
+						var params struct {
+							Options []struct {
+								OptionID string `json:"optionId"`
+								Kind     string `json:"kind"`
+							} `json:"options"`
+						}
+						if json.Unmarshal(message.Params, &params) == nil {
+							for _, option := range params.Options {
+								if option.Kind == "allow_once" && option.OptionID != "" {
+									outcome = map[string]string{"outcome": "selected", "optionId": option.OptionID}
+									break
+								}
+							}
+						}
+					}
+					response["result"] = map[string]any{"outcome": outcome}
 					ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 					err := p.write(ctx, response)
 					cancel()
