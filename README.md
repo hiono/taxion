@@ -31,6 +31,7 @@ Taxion は、最初から完全な要求仕様や実装手順を利用者へ要�
 - `taxion job create --request "..."`：OIDC認証後、原文依頼とIntakeProvenanceを同一Job transactionで保存したDRAFT Jobを作成します。
 - `taxion job authorize-planning ... <job-id>`：OIDC再認証後、DRAFT Jobに束縛したbounded read-only PlanningAuthorizationを発行・永続化します。
 - `taxion job start-planning --authorization-id <grant-id> <job-id>`：OIDC再認証後、grantを再検証し、Taskless PLANNER RoleExecutionとProvider Start intentを永続化します。Providerは起動しません。
+- `taxion job message --body "..." <job-id>`：OIDC再認証後、Jobの所有者からControllerへの補足を保存します。`--to <role-execution-id>` で宛先、`--reply-to <message-id>` で返信先を指定できます。保存のみで、Agentへの自動配送は行いません。
 - `taxion dev job create --request "..."`：開発・永続化テスト専用の未認証ローカルDRAFT Jobを作成します。
 - `taxion dev provider login`：Copilot CLIをTaxion専用のローカルプロファイルへログインします。
 - `taxion dev provider run --prompt "..."`：Copilot CLIをACP stdioで起動し、自然言語promptを1回送信して応答を表示します。ツール権限要求はすべて拒否します。これはProvider接続のスモークテストであり、承認済みJobのCoder実行ではありません。

@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -15,6 +16,7 @@ type conflictReplayCommunicationStore struct {
 	job     domain.Job
 	message domain.JobMessage
 	calls   int
+	fail    error
 }
 
 func (s *conflictReplayCommunicationStore) GetJob(context.Context, string) (domain.Job, error) {
@@ -23,19 +25,33 @@ func (s *conflictReplayCommunicationStore) GetJob(context.Context, string) (doma
 
 func (s *conflictReplayCommunicationStore) AddJobMessage(_ context.Context, jobID string, expectedRevision uint64, commandID string, _ domain.JobMessageRequest) (store.CommandReceipt, domain.JobMessage, error) {
 	s.calls++
+	if s.fail != nil {
+		return store.CommandReceipt{}, domain.JobMessage{}, s.fail
+	}
 	if s.calls == 1 {
 		s.job.Revision++
-		s.message = domain.JobMessage{CommandID: commandID}
-		s.job.JobMessages = append(s.job.JobMessages, s.message)
-		return store.CommandReceipt{}, domain.JobMessage{}, store.ErrIdempotencyConflict
+		return store.CommandReceipt{}, domain.JobMessage{}, store.ErrRevisionConflict
 	}
 	if expectedRevision != s.job.Revision {
-		return store.CommandReceipt{}, domain.JobMessage{}, store.ErrIdempotencyConflict
+		return store.CommandReceipt{}, domain.JobMessage{}, store.ErrRevisionConflict
 	}
+	s.message = domain.JobMessage{CommandID: commandID}
 	return store.CommandReceipt{CommandID: commandID, JobID: jobID, Revision: s.job.Revision}, s.message, nil
 }
 
-func TestPersistMessageReplaysConcurrentIdenticalCommandAfterRevisionConflict(t *testing.T) {
+func TestPersistMessageDoesNotRetryIdempotencyConflict(t *testing.T) {
+	fake := &conflictReplayCommunicationStore{job: domain.Job{ID: "job_message", Revision: 1}, fail: store.ErrIdempotencyConflict}
+	controller, err := NewCommunicationController(fake)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = controller.persistMessage(context.Background(), fake.job.ID, "cmd_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", domain.JobMessageRequest{})
+	if !errors.Is(err, store.ErrIdempotencyConflict) || fake.calls != 1 {
+		t.Fatalf("error = %v, calls = %d; want idempotency conflict without retry", err, fake.calls)
+	}
+}
+
+func TestPersistMessageRetriesAfterRevisionConflict(t *testing.T) {
 	const commandID = "cmd_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	fake := &conflictReplayCommunicationStore{job: domain.Job{ID: "job_message_replay", Revision: 1}}
 	controller, err := NewCommunicationController(fake)

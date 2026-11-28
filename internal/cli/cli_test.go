@@ -391,6 +391,69 @@ func runCLIWithFakeOIDC(t *testing.T, server *httptest.Server, args []string) (i
 	}
 }
 
+func TestJobMessageSavesAndRetriesOnlyForOwner(t *testing.T) {
+	server := newCLIAuthServer(t)
+	t.Setenv("TAXION_OIDC_ISSUER", server.URL)
+	t.Setenv("TAXION_OIDC_CLIENT_ID", "taxion-cli-test")
+	t.Setenv("TAXION_OIDC_AUDIENCE", "taxion-cli-test")
+	t.Setenv("TAXION_OIDC_REDIRECT_URI", "http://127.0.0.1:0/callback")
+	principal := authenticateCLIPrincipal(t, server)
+	path := filepath.Join(t.TempDir(), "jobs.sqlite")
+	ctx := context.Background()
+	database, err := store.Open(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const jobID = "job_cli_message"
+	_, err = database.CreateTrustedDraftJob(ctx, jobID, "Plan the work.",
+		"cmd_11111111111111111111111111111111", principal.AuthenticatedAt(), principal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	const commandID = "cmd_22222222222222222222222222222222"
+	args := []string{"job", "message", "--store", path, "--body", "安全性を優先してください。",
+		"--command-id", commandID, jobID}
+	for range 2 {
+		code, output, stderr := runCLIWithFakeOIDC(t, server, args)
+		if code != 0 || !strings.Contains(output, "Job message saved (not delivered)") ||
+			!strings.Contains(output, "Revision: 2") {
+			t.Fatalf("job message exit=%d, output=%q, stderr=%q", code, output, stderr)
+		}
+	}
+	other := newCLIAuthServer(t)
+	t.Setenv("TAXION_OIDC_ISSUER", other.URL)
+	code, _, stderr := runCLIWithFakeOIDC(t, other, args)
+	if code != 1 || !strings.Contains(stderr, "does not own the Job") {
+		t.Fatalf("non-owner exit=%d, stderr=%q", code, stderr)
+	}
+
+	database, err = store.Open(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	job, err := database.GetJob(ctx, jobID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(job.JobMessages) != 1 || job.JobMessages[0].Body != "安全性を優先してください。" ||
+		job.JobMessages[0].Recipient.ID != domain.ControllerActorID || job.Revision != 2 {
+		t.Fatalf("persisted Job messages = %#v, revision = %d", job.JobMessages, job.Revision)
+	}
+}
+
+func TestJobMessageRejectsMissingBodyBeforeAuthentication(t *testing.T) {
+	t.Setenv("TAXION_OIDC_ISSUER", "")
+	var stdout, stderr bytes.Buffer
+	if code := Run(context.Background(), []string{"job", "message", "job_missing"}, &stdout, &stderr, VersionInfo{}); code != 2 {
+		t.Fatalf("exit = %d, stderr = %q", code, stderr.String())
+	}
+}
+
 func TestAuthorizePlanningIssuesBoundedGrantAndSupportsIdempotentRetry(t *testing.T) {
 	server := newCLIAuthServer(t)
 	t.Setenv("TAXION_OIDC_ISSUER", server.URL)
@@ -517,6 +580,32 @@ func TestAuthorizePlanningIssuesBoundedGrantAndSupportsIdempotentRetry(t *testin
 		grant.ReadOnlyBoundary.Mode != domain.PlanningReadOnlyBoundarySnapshot ||
 		grant.ReadOnlyBoundary.Reference != "snapshot_123" || grant.ReadOnlyBoundary.SHA256 != strings.Repeat("c", 64) {
 		t.Fatalf("persisted PlanningAuthorization = %#v", grant)
+	}
+	const messageCommand = "cmd_33333333333333333333333333333333"
+	roleID := job.RoleExecutions[0].ID
+	code, _, stderr = runCLIWithFakeOIDC(t, server, []string{"job", "message", "--store", path,
+		"--body", "Please clarify the constraints.", "--to", roleID, "--command-id", messageCommand, jobID})
+	if code != 0 {
+		t.Fatalf("message to Planner exit=%d, stderr=%q", code, stderr)
+	}
+	code, _, stderr = runCLIWithFakeOIDC(t, server, []string{"job", "message", "--store", path,
+		"--body", "Additional context.", "--reply-to", domain.JobMessageID(messageCommand), jobID})
+	if code != 0 {
+		t.Fatalf("message reply exit=%d, stderr=%q", code, stderr)
+	}
+	code, _, _ = runCLIWithFakeOIDC(t, server, []string{"job", "message", "--store", path,
+		"--body", "Invalid recipient.", "--to", "missing_role", jobID})
+	if code != 1 {
+		t.Fatalf("message to missing role exit=%d, want 1", code)
+	}
+	job, err = database.GetJob(context.Background(), jobID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(job.JobMessages) != 2 || job.JobMessages[0].Recipient.ID != roleID ||
+		job.JobMessages[0].Recipient.Kind != domain.ActorPlanner ||
+		job.JobMessages[1].ReplyToMessageID != job.JobMessages[0].ID {
+		t.Fatalf("persisted messages = %#v", job.JobMessages)
 	}
 }
 
