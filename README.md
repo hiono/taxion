@@ -54,6 +54,8 @@ OpenCodeでは送信前にACP Sessionが`opencode/big-pickle`を選択中と報�
 
 JobはSQLiteへtransactionで保存し、Command receiptとpayload hashを照合します。既定の保存先はOSのユーザー設定ディレクトリ配下の taxion/jobs.sqlite です。`--store` で保存先を明示できます。
 
+UnixではSQLiteを開く前にデータベースと既存のjournalファイルの権限を所有者のみの読み書きに制限します。保存先には、ほかのユーザーがファイルを置き換えられないディレクトリを指定してください。
+
 PlanningAuthorizationの発行・永続化と、Taskless PLANNERのRoleExecution / Provider Start intentの記録まで利用できます。開発用ProviderスモークテストではCopilot CLIの実起動と応答取得を確認できますが、結果はJobへ結び付かず、承認済みJobのPlanner / Coder実行ではありません。Provider turn / effect / resume、JobContractの承認、Coder / Reviewer実行、Handoff、Job完了は未実装です。Start intentの記録をProvider実行やplanning完了の証拠として扱いません。機能の実装状態はコード、テスト、対象HEADのCIによって確認します。
 
 ## 仕様・設計・受入れ

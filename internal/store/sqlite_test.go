@@ -13,8 +13,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -48,6 +50,67 @@ func newTestJob(t *testing.T, id, request string) domain.Job {
 		t.Fatalf("NewDraftJob() error = %v", err)
 	}
 	return job
+}
+
+func TestOpenRestrictsDatabaseAndJournalPermissions(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix file permissions are not supported on Windows")
+	}
+	_, path := newTestStore(t)
+	assertPrivate := func() {
+		t.Helper()
+		for _, suffix := range []string{"", "-wal", "-shm"} {
+			info, err := os.Stat(path + suffix)
+			if err != nil {
+				t.Fatalf("stat %q: %v", suffix, err)
+			}
+			if got := info.Mode().Perm(); got != 0o600 {
+				t.Errorf("%s permissions = %04o, want 0600", suffix, got)
+			}
+		}
+	}
+	assertPrivate()
+
+	for _, suffix := range []string{"", "-wal", "-shm"} {
+		if err := os.Chmod(path+suffix, 0o644); err != nil {
+			t.Fatalf("make %q world-readable: %v", suffix, err)
+		}
+	}
+	second, err := Open(context.Background(), path)
+	if err != nil {
+		t.Fatalf("reopen Store: %v", err)
+	}
+	defer second.Close()
+	assertPrivate()
+}
+
+func TestOpenRejectsJournalSymlinkWithoutChangingTarget(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix file permissions are not supported on Windows")
+	}
+	_, path := newTestStore(t)
+	target := filepath.Join(t.TempDir(), "target")
+	if err := os.WriteFile(target, []byte("unrelated"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.Stat(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, path+"-journal"); err != nil {
+		t.Fatal(err)
+	}
+	if reopened, err := Open(context.Background(), path); err == nil {
+		_ = reopened.Close()
+		t.Fatal("Open accepted a journal symlink")
+	}
+	after, err := os.Stat(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if before.Mode() != after.Mode() {
+		t.Fatalf("journal symlink target permissions changed from %v to %v", before.Mode(), after.Mode())
+	}
 }
 
 func TestPlanningFactTransactionAcquiresWriterLockBeforeReading(t *testing.T) {
