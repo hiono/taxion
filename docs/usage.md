@@ -75,6 +75,8 @@ taxion dev job create --request "Local untrusted DRAFT for development."
 
 この明示的な`dev`コマンドは、開発および永続化テスト専用の未認証DRAFT Jobを作成します。IntakeProvenanceを持たず、Trusted Ingress、認証済みJob intake、JobApprovalを表すものではありません。
 
+作成したJobの依頼をProviderへ渡す場合、`taxion dev provider run --job <job-id>`を使います。別の指示を渡す場合は`--prompt`を指定します。これは認可済みJobの実行ではありません。
+
 ## Jobの表示
 
 ```sh

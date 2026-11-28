@@ -1100,6 +1100,37 @@ func TestDevProviderConversationPersistsAndReusesLocalJobHistory(t *testing.T) {
 	}
 }
 
+func TestDevProviderUsesLocalJobRequestWhenPromptOmitted(t *testing.T) {
+	helper := fakeOpenCode(t)
+	path := filepath.Join(t.TempDir(), "jobs.sqlite")
+	var stdout, stderr bytes.Buffer
+	if code := Run(context.Background(), []string{"dev", "job", "create", "--store", path,
+		"--request", "Remember the token HARBOR42."}, &stdout, &stderr, VersionInfo{}); code != 0 {
+		t.Fatalf("create exit=%d, stderr=%q", code, stderr.String())
+	}
+	jobID := strings.TrimPrefix(strings.Split(stdout.String(), "\n")[1], "ID: ")
+	stdout.Reset()
+	stderr.Reset()
+	code := Run(context.Background(), []string{"dev", "provider", "run", "--provider", "opencode",
+		"--command", helper, "--working-directory", t.TempDir(), "--store", path,
+		"--job", jobID}, &stdout, &stderr, VersionInfo{})
+	if code != 0 || !strings.Contains(stdout.String(), "remembered") {
+		t.Fatalf("run exit=%d, stdout=%q, stderr=%q", code, stdout.String(), stderr.String())
+	}
+	database, err := store.Open(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	job, err := database.GetJob(context.Background(), jobID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(job.JobMessages) != 2 || job.JobMessages[0].Body != job.Request || job.JobMessages[1].Body != "remembered" {
+		t.Fatalf("stored conversation=%#v", job.JobMessages)
+	}
+}
+
 func TestDevProviderConversationPreservesAnswerWhenCloseFails(t *testing.T) {
 	helper := fakeOpenCode(t)
 	work := t.TempDir()
@@ -1232,12 +1263,14 @@ func TestDevProviderConsultRequiresLocalJob(t *testing.T) {
 
 func TestDevProviderReviewCycle(t *testing.T) {
 	for _, test := range []struct {
-		name         string
-		consult      bool
-		fail         string
-		messageCount int
+		name          string
+		consult       bool
+		defaultPrompt bool
+		fail          string
+		messageCount  int
 	}{
 		{name: "review", messageCount: 6},
+		{name: "review-job-request", defaultPrompt: true, messageCount: 6},
 		{name: "review-fails", fail: "review-fail", messageCount: 3},
 		{name: "consult-and-review", consult: true, messageCount: 8},
 		{name: "planner-fails", consult: true, fail: "planner-fail", messageCount: 3},
@@ -1252,8 +1285,12 @@ func TestDevProviderReviewCycle(t *testing.T) {
 			}
 			path := filepath.Join(t.TempDir(), "jobs.sqlite")
 			var stdout, stderr bytes.Buffer
+			request := "Original task"
+			if test.defaultPrompt {
+				request = "Original task: test review cycle"
+			}
 			if code := Run(context.Background(), []string{"dev", "job", "create", "--store", path,
-				"--request", "Original task"}, &stdout, &stderr, VersionInfo{}); code != 0 {
+				"--request", request}, &stdout, &stderr, VersionInfo{}); code != 0 {
 				t.Fatalf("create exit=%d, stderr=%q", code, stderr.String())
 			}
 			jobID := strings.TrimPrefix(strings.Split(stdout.String(), "\n")[1], "ID: ")
@@ -1261,7 +1298,13 @@ func TestDevProviderReviewCycle(t *testing.T) {
 			stderr.Reset()
 			args := []string{"dev", "provider", "run", "--provider", "opencode",
 				"--command", helper, "--working-directory", work, "--store", path, "--job", jobID,
-				"--prompt", "test review cycle", "--review"}
+				"--review"}
+			prompt := "test review cycle"
+			if test.defaultPrompt {
+				prompt = request
+			} else {
+				args = append(args, "--prompt", prompt)
+			}
 			if test.consult {
 				args = append(args, "--consult")
 			}
@@ -1281,7 +1324,7 @@ func TestDevProviderReviewCycle(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			want := []string{"test review cycle", "Planner plan:\nplan"}
+			want := []string{prompt, "Planner plan:\nplan"}
 			if test.consult {
 				want = append(want, "Coder question:\ncoder question", "Planner answer:\nplanner answer")
 			}

@@ -56,7 +56,7 @@ func loginACPProvider(ctx context.Context, args []string, stdout, stderr io.Writ
 func runACPProvider(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("taxion dev provider run", flag.ContinueOnError)
 	flags.SetOutput(stderr)
-	prompt := flags.String("prompt", "", "Natural-language prompt")
+	prompt := flags.String("prompt", "", "Natural-language prompt (defaults to the local Job request)")
 	backend := flags.String("provider", "copilot", "Provider: copilot or opencode")
 	command := flags.String("command", "", "Provider CLI executable")
 	workingDirectory := flags.String("working-directory", ".", "Provider working directory")
@@ -68,10 +68,10 @@ func runACPProvider(ctx context.Context, args []string, stdout, stderr io.Writer
 	if err := flags.Parse(args); err != nil {
 		return 2
 	}
-	if flags.NArg() != 0 || strings.TrimSpace(*prompt) == "" || *timeout <= 0 ||
+	if flags.NArg() != 0 || (strings.TrimSpace(*prompt) == "" && *localJobID == "") || *timeout <= 0 ||
 		(*backend != "copilot" && *backend != "opencode") ||
 		((*consult || *review) && *localJobID == "") {
-		fmt.Fprintln(stderr, "usage: taxion dev provider run --prompt \"...\" [--provider copilot|opencode] [--job <local-job-id> [--consult] [--review]] [--timeout 10m]")
+		fmt.Fprintln(stderr, "usage: taxion dev provider run [--prompt \"...\"] [--provider copilot|opencode] [--job <local-job-id> [--consult] [--review]] [--timeout 10m]")
 		return 2
 	}
 	cliName, providerID := "Copilot CLI", "copilot-cli"
@@ -144,6 +144,9 @@ func runACPProvider(ctx context.Context, args []string, stdout, stderr io.Writer
 		if job.IntakeProvenance != nil || job.State != domain.JobDraft {
 			return report(stderr, errors.New("dev provider conversation requires an untrusted local DRAFT Job"))
 		}
+		if strings.TrimSpace(promptText) == "" {
+			promptText = job.Request
+		}
 		communication, err = controller.NewCommunicationController(database)
 		if err != nil {
 			return report(stderr, err)
@@ -155,7 +158,7 @@ func runACPProvider(ctx context.Context, args []string, stdout, stderr io.Writer
 		question, err = communication.SendFromController(ctx, controller.SystemMessageRequest{
 			JobID: job.ID, CommandID: commandID,
 			Recipient: domain.ActorRef{Kind: domain.ActorOrchestrator, ID: domain.OrchestratorActorID},
-			Body:      *prompt,
+			Body:      promptText,
 		})
 		if err != nil {
 			return report(stderr, err)
