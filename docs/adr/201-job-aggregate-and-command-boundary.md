@@ -20,7 +20,7 @@ Job、Task、RoleExecution、通信、Provider実行、Worktree、成果・証�
 - TaskはJob内の任意の作業分解であり、必ずJobIDを持ちます。
 - RoleExecutionはRoleによる個々の実行であり、JobIDを持ちます。Taskless PlannerはTaskIDを持ちません。
 - Taskの親子包含、Task間の前提条件、Role間の協調は別の関係として扱います。Role間協調はappend-only JobMessageで記録します。
-- IntakeProvenance、JobContractRevision、JobApproval、PlanningAuthorization、JobQuestionAuthorization、JobProgressNote、JobMessage、Provider operation / observation、Worktree ownership、JobOutput、JobEvidence、JobUsage、Effect decisionはJobAggregateに属します。
+- IntakeProvenance、JobContractRevision、JobApproval、PlanningAuthorization、JobProgressNote、JobMessage、Provider operation / observation、Worktree ownership、JobOutput、JobEvidence、JobUsage、Effect decisionはJobAggregateに属します。
 - IntakeProvenanceは認証済みPrincipal、server-derived ingress source、受信時刻、request identity、原文依頼digestを保持するappend-only factです。認証境界はADR-501に従います。
 - GoalはJobContractRevisionに含め、承認前に確定します。Goal未設定のDRAFT Jobは実装Taskを開始しません。
 
@@ -28,13 +28,13 @@ Job、Task、RoleExecution、通信、Provider実行、Worktree、成果・証�
 
 - JobAggregateの変更はexpected revisionと安定したidempotency identityを持つ明示的Commandで実行します。
 - 一つのJobに属するCommandと関連factsは一つのtransactionで確定します。同じCommand ID・同じ内容の再送は同じreceiptへ収束させ、異なる内容の再利用は拒否します。
-- SQLiteの`user_version`はJobAggregateの保存形式とappend-only guardの互換性を表します。Storeは接続時にversionを先行確認し、未対応の新versionをjournal mode等の変更前に拒否します。migration時は`BEGIN IMMEDIATE`取得後にもversionを再確認し、対応可能な旧versionだけをupgradeします。upgrade前から稼働中の旧processが新しいJobMessageを破壊しないよう、`job_aggregates.payload_json`のUPDATE triggerで既存JobMessage配列の順序付きprefix保持を強制します。
+- SQLiteの保存形式は現在のJobAggregate契約に合わせます。未対応のschema versionは変更前に拒否します。旧processとの並行稼働、旧schemaとの互換性維持、旧データ移行のためのtrigger・fallbackは設けません。
 - Job、Task、RoleExecution、Message、Provider operation、Worktree ownership、Output、Evidence、Usage、Effect decisionに独立したproduction write pathを設けません。
 - Coreはドメイン整合性を検証し、Controllerは認証・承認・Provider等の外部事実を検証します。
 
 ### Authorization and collaboration
 
-- JobApproval、PlanningAuthorization、JobQuestionAuthorizationは異なるimmutable factsとして保持します。発行条件と権限はADR-504〜506に従います。
+- JobApprovalとPlanningAuthorizationは異なるimmutable factsとして保持します。発行条件と権限はADR-504 / ADR-505に従います。
 - Question / Answerは情報交換であり、Taskや実行責任を移転しません。Handoffは受信RoleとTask scopeを明示するJobAggregate Commandとします。
 - Handoffは送信側Providerの停止、terminal result / usage、成果identity、Worktree ownership releaseを確認してから受信側実行を許可します。
 
@@ -54,4 +54,4 @@ Planner、Coder、Reviewer、修正、人間の介入、Job完了を同じJobで
 
 ## Relationship to other ADRs
 
-ADR-200はDomain Modelの基本方針、ADR-202は不変条件、ADR-300はCollaborationの基本方針、ADR-301は内部通信、ADR-400はExecution & Runtimeの基本方針、ADR-408はWorktree、ADR-409はProvider operation、ADR-501はintake identity、ADR-504〜507は権限、ADR-801は証拠水準、ADR-802はJob完了を定義します。
+ADR-200はDomain Modelの基本方針、ADR-202は不変条件、ADR-300はCollaborationの基本方針、ADR-301は内部通信、ADR-400はExecution & Runtimeの基本方針、ADR-408はWorktree、ADR-409はProvider operation、ADR-501はintake identity、ADR-504 / ADR-505 / ADR-507は権限、ADR-801は証拠水準、ADR-802はJob完了を定義します。
