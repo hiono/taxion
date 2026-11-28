@@ -112,6 +112,9 @@ func (c *ExecutionController) BindWorktree(
 	if err != nil {
 		return store.CommandReceipt{}, domain.WorktreeAssignment{}, err
 	}
+	if err := assignment.Validate(job); err != nil {
+		return store.CommandReceipt{}, domain.WorktreeAssignment{}, err
+	}
 	var execution domain.RoleExecution
 	for _, candidate := range job.RoleExecutions {
 		if candidate.ID == roleExecutionID {
