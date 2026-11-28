@@ -3,6 +3,9 @@ package controller
 import (
 	"context"
 	"errors"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -276,4 +279,34 @@ func TestExecutionControllerExactReplayAndCommandConflict(t *testing.T) {
 	if len(job.ExecutionPermissions) != 1 {
 		t.Fatalf("permission count = %d, want exactly one", len(job.ExecutionPermissions))
 	}
+}
+
+func newControllerTestGitWorktree(t *testing.T) (string, string, string) {
+	t.Helper()
+	repositoryPath := filepath.Join(t.TempDir(), "repository")
+	if err := os.MkdirAll(repositoryPath, 0o755); err != nil {
+		t.Fatalf("create test repository: %v", err)
+	}
+	runControllerTestGit(t, repositoryPath, "init", "--quiet")
+	runControllerTestGit(t, repositoryPath, "config", "user.name", "Taxion Test")
+	runControllerTestGit(t, repositoryPath, "config", "user.email", "taxion-test@example.invalid")
+	if err := os.WriteFile(filepath.Join(repositoryPath, "README.md"), []byte("baseline\n"), 0o644); err != nil {
+		t.Fatalf("write test repository baseline: %v", err)
+	}
+	runControllerTestGit(t, repositoryPath, "add", "README.md")
+	runControllerTestGit(t, repositoryPath, "commit", "--quiet", "-m", "baseline")
+	baselineCommit := runControllerTestGit(t, repositoryPath, "rev-parse", "HEAD")
+	worktreePath := filepath.Join(t.TempDir(), "worktree")
+	runControllerTestGit(t, repositoryPath, "worktree", "add", "--quiet", "--detach", worktreePath, baselineCommit)
+	return repositoryPath, worktreePath, baselineCommit
+}
+
+func runControllerTestGit(t *testing.T, directory string, args ...string) string {
+	t.Helper()
+	commandArgs := append([]string{"-C", directory}, args...)
+	output, err := exec.Command("git", commandArgs...).CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s: %v: %s", strings.Join(args, " "), err, output)
+	}
+	return strings.TrimSpace(string(output))
 }
