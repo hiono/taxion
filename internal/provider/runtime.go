@@ -72,14 +72,6 @@ func (r *Runtime) Start(ctx context.Context, request StartRequest) (StartResult,
 	}
 	defer cancel()
 	ctx = boundedContext
-	capabilities, err := r.verifiedCapabilities(ctx)
-	if err != nil {
-		return StartResult{}, err
-	}
-	if !capabilities.HasEvidenceAtLeast(CapabilityStartIdempotency, r.minimumEvidence) &&
-		!capabilities.HasEvidenceAtLeast(CapabilityStartLookup, r.minimumEvidence) {
-		return StartResult{}, ErrUnsupportedCapability
-	}
 	result, err := withCredential(ctx, r.broker, r.identity, func(lease CredentialLease) (StartResult, error) {
 		result, err := r.adapter.Start(ctx, request, lease)
 		if err != nil {
@@ -114,14 +106,6 @@ func (r *Runtime) Send(ctx context.Context, request TurnRequest) (TurnResult, er
 	}
 	defer cancel()
 	ctx = boundedContext
-	capabilities, err := r.verifiedCapabilities(ctx)
-	if err != nil {
-		return TurnResult{}, err
-	}
-	if !capabilities.HasEvidenceAtLeast(CapabilitySendIdempotency, r.minimumEvidence) &&
-		!capabilities.HasEvidenceAtLeast(CapabilitySendLookup, r.minimumEvidence) {
-		return TurnResult{}, ErrUnsupportedCapability
-	}
 	result, err := withCredential(ctx, r.broker, r.identity, func(lease CredentialLease) (TurnResult, error) {
 		result, err := r.adapter.Send(ctx, request, lease)
 		if err != nil {
@@ -143,7 +127,7 @@ func (r *Runtime) Send(ctx context.Context, request TurnRequest) (TurnResult, er
 	if result.OperationID != request.OperationID || result.TurnID != request.TurnID ||
 		result.SessionID != request.SessionID ||
 		(result.Status != "COMPLETED" && result.Status != "FAILED" && result.Status != "UNKNOWN") ||
-		result.TokensUsed > request.MaxTokens {
+		(result.TokensUsed > request.MaxTokens && result.Status != "FAILED") {
 		return TurnResult{}, errors.Join(ErrProviderInvalidResult, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown})
 	}
 	if result.Status == "UNKNOWN" {
@@ -303,7 +287,7 @@ func (r *Runtime) Result(ctx context.Context, request ResultRequest) (Result, er
 		return Result{}, safeAdapterError(err)
 	}
 	if result.OperationID != request.OperationID || result.SessionID != request.SessionID ||
-		result.TurnID != request.TurnID || !result.Final || sha256Hex(result.Content) != result.ResultSHA256 ||
+		(request.TurnID != "" && result.TurnID != request.TurnID) || !result.Final || sha256Hex(result.Content) != result.ResultSHA256 ||
 		!validSHA256(result.EvidenceSHA256) {
 		return Result{}, errors.Join(ErrProviderInvalidResult, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown})
 	}
