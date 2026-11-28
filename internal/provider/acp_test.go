@@ -467,12 +467,14 @@ func (a *syntheticACPTestAdapter) Capabilities(ctx context.Context) (Capabilitie
 		}
 	}
 	return Capabilities{
-		Identity:         identity,
-		StartIdempotency: true,
-		SendIdempotency:  true,
+		Identity:                   identity,
+		StartIdempotency:           true,
+		SendIdempotency:            true,
+		ReadOnlyContextEnforcement: true,
 		Evidence: []CapabilityEvidence{
 			evidence(CapabilityStartIdempotency),
 			evidence(CapabilitySendIdempotency),
+			evidence(CapabilityReadOnlyContextEnforcement),
 		},
 	}, nil
 }

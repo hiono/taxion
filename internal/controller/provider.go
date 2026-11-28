@@ -37,6 +37,7 @@ type PlanningProviderRuntime interface {
 	Identity() provider.Identity
 	Capabilities(context.Context) (provider.Capabilities, error)
 	Start(context.Context, provider.StartRequest) (provider.StartResult, error)
+	StartClaimed(context.Context, provider.StartRequest, func() error) (provider.StartResult, error)
 	Send(context.Context, provider.TurnRequest) (provider.TurnResult, error)
 	Resume(context.Context, provider.ResumeRequest) (provider.ResumeResult, error)
 	Stop(context.Context, provider.StopRequest) (provider.StopResult, error)
@@ -118,6 +119,11 @@ func (c *ProviderController) StartPlanning(
 	if err := request.Validate(); err != nil {
 		return store.CommandReceipt{}, domain.RoleExecution{}, domain.ProviderStartIntent{}, provider.StartResult{}, err
 	}
+	if !existingIntent {
+		if err := c.requirePlanningBoundary(ctx); err != nil {
+			return store.CommandReceipt{}, domain.RoleExecution{}, domain.ProviderStartIntent{}, provider.StartResult{}, err
+		}
+	}
 
 	initialRevision := job.Revision
 	receipt, execution, intent, err := c.store.StartTasklessPlanner(
@@ -154,19 +160,47 @@ func (c *ProviderController) StartPlanning(
 		}
 	}
 
-	if receipt.Revision != initialRevision+1 {
+	if !intent.ClaimBeforeDispatch && receipt.Revision != initialRevision+1 {
 		return c.reconcileStart(ctx, receipt, execution, intent, request, currentGrant, principal)
 	}
 	if err := currentGrant.ValidateFor(current, principal.PrincipalID(), c.now()); err != nil {
 		return receipt, execution, intent, provider.StartResult{}, err
 	}
-	result, err := c.runtime.Start(ctx, request)
+	if err := c.requirePlanningBoundary(ctx); err != nil {
+		return receipt, execution, intent, provider.StartResult{}, err
+	}
+	claimed := false
+	var result provider.StartResult
+	if intent.ClaimBeforeDispatch {
+		result, err = c.runtime.StartClaimed(ctx, request, func() error {
+			job, err := c.store.GetJob(ctx, jobID)
+			if err != nil {
+				return err
+			}
+			if _, found := latestStartObservation(job, intent.ID); found {
+				return errors.New("Provider Start was already claimed")
+			}
+			commandID, err := newProviderDispatchCommandID()
+			if err != nil {
+				return err
+			}
+			_, _, err = c.store.AddProviderStartObservation(ctx, jobID, job.Revision, intent.ID,
+				commandID, domain.ProviderStartUnknown, "", "", "", false, principal)
+			claimed = err == nil
+			return err
+		})
+	} else {
+		result, err = c.runtime.Start(ctx, request)
+	}
 	if err != nil {
+		if intent.ClaimBeforeDispatch && !claimed {
+			return receipt, execution, intent, provider.StartResult{}, err
+		}
 		if providerOperationMayHaveStarted(err) {
 			if persistErr := c.recordStartObservation(ctx, jobID, intent.ID, domain.ProviderStartUnknown, "", "", "", false, principal); persistErr != nil {
 				return receipt, execution, intent, provider.StartResult{}, errors.Join(err, fmt.Errorf("persist UNKNOWN Provider Start observation: %w", persistErr))
 			}
-		} else if evidence, definitive := providerDefinitiveFailureEvidence(intent.ID, err); definitive {
+		} else if evidence, definitive := providerDefinitiveFailureEvidence(intent.ID, err); definitive && !intent.ClaimBeforeDispatch {
 			if persistErr := c.recordStartObservation(ctx, jobID, intent.ID, domain.ProviderStartFailed, "", "", evidence, false, principal); persistErr != nil {
 				return receipt, execution, intent, provider.StartResult{}, errors.Join(err, fmt.Errorf("persist FAILED Provider Start observation: %w", persistErr))
 			}
@@ -518,7 +552,8 @@ func (c *ProviderController) reconcileStart(
 				ReceiptID: lookup.ReceiptID, EvidenceSHA256: lookup.EvidenceSHA256,
 			}, nil
 		}
-	} else if !canRetry {
+	}
+	if !canRetry {
 		if err := c.recordStartObservation(ctx, intent.JobID, intent.ID, domain.ProviderStartUnknown, "", "", "", false, principal); err != nil {
 			return receipt, execution, intent, provider.StartResult{}, fmt.Errorf("persist unresolved Provider Start: %w", err)
 		}
@@ -536,15 +571,14 @@ func (c *ProviderController) reconcileStart(
 	if err := currentGrant.ValidateFor(current, principal.PrincipalID(), c.now()); err != nil {
 		return receipt, execution, intent, provider.StartResult{}, err
 	}
+	if err := c.requirePlanningBoundary(ctx); err != nil {
+		return receipt, execution, intent, provider.StartResult{}, err
+	}
 	result, err := c.runtime.Start(ctx, request)
 	if err != nil {
 		if providerOperationMayHaveStarted(err) {
 			if persistErr := c.recordStartObservation(ctx, intent.JobID, intent.ID, domain.ProviderStartUnknown, "", "", "", false, principal); persistErr != nil {
 				return receipt, execution, intent, provider.StartResult{}, errors.Join(err, fmt.Errorf("persist UNKNOWN Provider Start observation: %w", persistErr))
-			}
-		} else if evidence, definitive := providerDefinitiveFailureEvidence(intent.ID, err); definitive {
-			if persistErr := c.recordStartObservation(ctx, intent.JobID, intent.ID, domain.ProviderStartFailed, "", "", evidence, false, principal); persistErr != nil {
-				return receipt, execution, intent, provider.StartResult{}, errors.Join(err, fmt.Errorf("persist FAILED Provider Start observation: %w", persistErr))
 			}
 		}
 		return receipt, execution, intent, provider.StartResult{}, err
@@ -612,6 +646,18 @@ func providerIdentityMatches(identity provider.Identity, grant domain.PlanningAu
 	return identity.ProviderID == grant.ProviderID &&
 		identity.AccountID == grant.AccountID &&
 		identity.ConfigurationSHA256 == grant.ConfigurationSHA256
+}
+
+func (c *ProviderController) requirePlanningBoundary(ctx context.Context) error {
+	capabilities, err := c.runtime.Capabilities(ctx)
+	if err != nil {
+		return err
+	}
+	if capabilities.Identity != c.runtime.Identity() ||
+		!capabilities.HasEvidenceAtLeast(provider.CapabilityReadOnlyContextEnforcement, provider.EvidenceLive) {
+		return provider.ErrUnsupportedCapability
+	}
+	return nil
 }
 
 func validatePlanningContext(grant domain.PlanningAuthorization, documents []provider.ContextDocument) error {
@@ -919,6 +965,11 @@ func (c *ProviderController) SendPlanning(
 	if err := request.Validate(); err != nil {
 		return store.CommandReceipt{}, domain.PlanningTurnIntent{}, domain.PlanningTurnObservation{}, provider.TurnResult{}, provider.ErrProviderInvalidRequest
 	}
+	if !existingIntent {
+		if err := c.requirePlanningBoundary(ctx); err != nil {
+			return store.CommandReceipt{}, domain.PlanningTurnIntent{}, domain.PlanningTurnObservation{}, provider.TurnResult{}, err
+		}
+	}
 	receipt, turn, err := c.store.AddPlanningTurnIntent(
 		ctx, jobID, job.Revision, execution.ID, sessionID, commandID, promptSHA256, reservedTokens, principal,
 	)
@@ -959,6 +1010,9 @@ func (c *ProviderController) reconcileTurn(
 	}
 	dispatchOwner := false
 	if !previousFound {
+		if err := c.requirePlanningBoundary(ctx); err != nil {
+			return receipt, turn, domain.PlanningTurnObservation{}, provider.TurnResult{}, err
+		}
 		var claimed bool
 		var claimErr error
 		previous, claimed, claimErr = c.claimPlanningTurnDispatch(ctx, job.ID, turn.ID, principal)
@@ -1115,6 +1169,11 @@ func (c *ProviderController) reconcileTurn(
 	}
 	if err := grant.ValidateFor(current, principal.PrincipalID(), c.now()); err != nil {
 		return receipt, turn, domain.PlanningTurnObservation{}, provider.TurnResult{}, err
+	}
+	if !dispatchOwner {
+		if err := c.requirePlanningBoundary(ctx); err != nil {
+			return receipt, turn, previous, provider.TurnResult{}, err
+		}
 	}
 	result, err := c.runtime.Send(ctx, request)
 	if err != nil {
