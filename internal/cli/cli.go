@@ -39,7 +39,7 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer, version V
 	}
 	switch args[0] {
 	case "init":
-		return initAgentSkill(args[1:], stdout, stderr)
+		return initAgentSkill(args[1:], stdout, stderr, version)
 	case "ready":
 		return ready(args[1:], stdout, stderr, version)
 	case "doctor":

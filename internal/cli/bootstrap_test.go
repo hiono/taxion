@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -23,7 +24,9 @@ func TestInitInstallsSkillWithoutOverwriting(t *testing.T) {
 		t.Fatalf("init = %d: %s", code, errOut.String())
 	}
 	content, err := os.ReadFile(path)
-	if err != nil || !bytes.Equal(content, agentSkill) {
+	executable, execErr := os.Executable()
+	pathJSON, jsonErr := json.Marshal(executable)
+	if err != nil || execErr != nil || jsonErr != nil || !bytes.Contains(content, pathJSON) || !bytes.Contains(content, agentSkill) {
 		t.Fatalf("skill content: %q, err: %v", content, err)
 	}
 	if code := run(); code != 0 {

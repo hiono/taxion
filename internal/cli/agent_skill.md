@@ -1,14 +1,14 @@
----
-name: taxion-local
-description: Operate Taxion's local collaboration CLI for an approved coding task.
----
-
 # Taxion local operation
 
-Use the Taxion binary that installed this skill. Check `taxion version`, then
-run `taxion ready` for the current commands and `taxion doctor` for local
-prerequisites. If another Taxion version is on PATH, use the intended binary's
-absolute path instead.
+Invoke the executable identified above directly, not another `taxion` on PATH.
+The path and version are JSON strings, not shell commands. Check its `version`
+matches the expected version, then run its `ready` for current commands and
+`doctor` for local prerequisites. If the executable is missing or the version
+differs, stop and report the mismatch.
+
+Use this skill in a new session without an incompatible Taxion management skill.
+If another active skill requires an unsupported `ready --check-skill`, stop and
+report the conflict; this skill does not establish that skill's compatibility.
 
 Run only an approved task in the intended working directory. `taxion run` sends
 the request and workspace changes to the provider and runs the Coder on the host

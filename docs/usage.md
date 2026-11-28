@@ -21,15 +21,15 @@ PlannerとReviewerは文章専用の設定で起動し、Coderの作業報告と
 
 ### 外部エージェントによる操作
 
-v0.1.0より後の版では、対象プロジェクトに専用Skillを設置し、操作手順と環境を確認できます。
+v0.1.0には次の3コマンドがありません。これらを含む版を入手するか、対象のソースから `go build -o ./taxion ./cmd/taxion` でビルドし、そのバイナリを使用します。以下はビルドしたバイナリを使う例です。
 
 ```sh
-taxion init --dir /path/to/work
-taxion ready
-taxion doctor
+./taxion init --dir /path/to/work
+./taxion ready
+./taxion doctor
 ```
 
-`init` は `.agents/skills/taxion-local/SKILL.md` を作成し、異なる既存ファイルを上書きしません。新しいエージェントセッションでこのSkillを読み込んでください。`doctor` はLinuxとCopilot CLI、Git、`diff`の有無を確認します。認証やProviderへの接続は確認しません。使用するTaxionバイナリがPATH上の別バージョンと異なる場合は、全コマンドに同じ絶対パスを指定してください。
+`init` は `.agents/skills/taxion-local/SKILL.md` に実行したバイナリのパスとバージョンを記録し、異なる既存ファイルを上書きしません。新しいエージェントセッションでこのSkillを読み込んでください。互換性のない別のTaxion管理Skillが有効なセッションでは、そのSkillを使わずに操作できるとは限りません。`doctor` はLinuxとCopilot CLI、Git、`diff`の有無を確認します。認証やProviderへの接続は確認しません。
 
 外部エージェントは、依頼内容と作業ディレクトリを利用者と共有し、Coderのホスト実行が許可されていることを確認します。ProviderとCoderはOS隔離されないため、信頼できる作業ディレクトリを使います。依頼と差分はProviderへ送られるため、秘密情報を含めないでください。
 
