@@ -44,7 +44,7 @@ taxion dev provider login
 taxion dev provider run --prompt "この依頼を一文で要約してください"
 ```
 
-Copilot CLIはTaxion専用のprivate profileで認証します。Providerのtool permission requestはすべて拒否されます。このコマンドはACP接続と応答取得の確認用であり、Jobに束縛したPlanner / Coder実行ではありません。
+Copilot CLIはTaxion専用のprivate profileで認証します。Providerのtool permission requestはすべて拒否されます。このコマンドはACP接続と応答取得の確認用であり、Jobに束縛したPlanner / Coder実行ではありません。GitHub Actions artifactから取得した場合は、ZIP展開後に`chmod +x ./taxion`を実行してください。
 
 JobはSQLiteへtransactionで保存し、Command receiptとpayload hashを照合します。既定の保存先はOSのユーザー設定ディレクトリ配下の taxion/jobs.sqlite です。`--store` で保存先を明示できます。
 
