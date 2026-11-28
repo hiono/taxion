@@ -442,10 +442,17 @@ func (a *ACPAdapter) Start(ctx context.Context, request StartRequest, _ Credenti
 	a.mu.Lock()
 	reservationOwned := a.startingRole[request.RoleExecutionID] == reservation &&
 		a.startingOp[request.OperationID] == reservation
-	if a.closed || !reservationOwned || a.byRole[request.RoleExecutionID] != nil {
+	if a.closed || !reservationOwned || a.byRole[request.RoleExecutionID] != nil || a.processes[process] == nil {
 		a.mu.Unlock()
 		closeOnFailure()
 		return StartResult{}, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown}
+	}
+	select {
+	case <-process.done:
+		a.mu.Unlock()
+		closeOnFailure()
+		return StartResult{}, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown}
+	default:
 	}
 	if _, exists := a.byID[session.sessionID]; exists {
 		a.mu.Unlock()
