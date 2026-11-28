@@ -198,6 +198,8 @@ Duplicate-key detection runs before struct decoding because the standard Go JSON
 
 ### 7.2 Upper-level Planner workflow
 
+This workflow is not connected or implemented yet. The requirements below remain prerequisites for a future implementation; the proposal Controller alone does not enforce complete Usage.
+
 The upper-level workflow is responsible for sequencing Provider completion, Result persistence, and JobContract proposal. It does not reconstruct contract data or bypass the proposal Controller.
 
 For the exact Job / Taskless PLANNER RoleExecution / Session / Turn tuple, the workflow:

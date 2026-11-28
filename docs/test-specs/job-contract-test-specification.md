@@ -86,6 +86,8 @@
 
 ## Upper-level Planner workflow tests
 
+These are acceptance scenarios for an unimplemented workflow, not evidence of a current product path.
+
 | ID | Scenario | Input / setup | Expected result |
 |---|---|---|---|
 | JC-239 | Completed Planner workflow | Exact Taskless PLANNER Turn is COMPLETED, Usage is complete, and no Result is persisted | Persist final Result first, then append JobContractRevision bound to that Result |
