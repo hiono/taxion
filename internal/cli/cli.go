@@ -37,6 +37,14 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer, version V
 		fmt.Fprintf(stdout, "taxion %s (%s, %s, %s)\n", valueOr(version.Version, "dev"), valueOr(version.Revision, "unknown"), valueOr(version.BuiltAt, "unknown"), valueOr(version.Channel, "development"))
 		return 0
 	}
+	switch args[0] {
+	case "init":
+		return initAgentSkill(args[1:], stdout, stderr, version)
+	case "ready":
+		return ready(args[1:], stdout, stderr, version)
+	case "doctor":
+		return doctor(args[1:], stdout, stderr)
+	}
 	if args[0] == "auth" {
 		if len(args) != 2 || args[1] != "login" {
 			fmt.Fprintln(stderr, "コマンドを確認してください: taxion auth login")
@@ -721,6 +729,9 @@ func printUsage(w io.Writer) {
 	fmt.Fprint(w, `Taxion — turn human intent into continuous collaborative work
 
 Usage:
+  taxion init [--dir <project-directory>]
+  taxion ready
+  taxion doctor
   taxion run --request "..." --allow-coder-tools [--consult] [--working-directory .]
   taxion provider login
   taxion auth login

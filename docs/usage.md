@@ -19,6 +19,32 @@ PlannerとReviewerは文章専用の設定で起動し、Coderの作業報告と
 
 この経路はOIDC認証、JobApproval、操作単位の許可やJob完了を記録しません。会話の一巡はレビュー合格や作業完了の保証ではありません。
 
+### 外部エージェントによる操作
+
+v0.1.0には次の3コマンドがありません。これらを含む版を入手するか、次のようにソースからビルドします。
+
+```sh
+git clone https://github.com/hiono/taxion.git
+cd taxion
+go build -o ./taxion ./cmd/taxion
+./taxion init --dir /path/to/work
+./taxion ready
+./taxion doctor
+```
+
+`init` は `.agents/skills/taxion-local/SKILL.md` に実行したバイナリのパス、バージョン、SHA-256を記録し、異なる既存ファイルを上書きしません。対象プロジェクト内で新しいエージェントセッションを開始し、このSkillを読み込んでください。互換性のない別のTaxion管理Skillが有効なセッションでは、そのSkillを使わずに操作できるとは限りません。`doctor` はLinuxとCopilot CLI、Git、`diff`の有無を確認します。認証やProviderへの接続は確認しません。
+
+外部エージェントは、依頼内容と作業ディレクトリを利用者と共有し、Coderのホスト実行が許可されていることを確認します。ProviderとCoderはOS隔離されないため、信頼できる作業ディレクトリを使います。依頼と差分はProviderへ送られるため、秘密情報を含めないでください。
+
+1. Skillに記録されたバイナリの `version` とCopilot CLIの有無を確認します。ログインが必要な場合は、同じバイナリの `provider login` を使用します。
+2. 利用者の依頼を `--request`、対象を `--working-directory` に指定し、同じバイナリの `run` を実行します。依頼文はシェルでコマンドとして解釈せず、一つの引数として渡します。`--consult` は必要な場合だけ指定します。
+3. 表示されたJob IDと、指定した場合は `--store` のパスを控えます。保存内容は同じバイナリの `job show --store <path> <job-id>` で確認できます。既定の保存先を使った場合は `--store` を省略します。
+4. 実際のファイル変更、確認できたテスト結果、Reviewerの指摘を確認して報告します。会話の終了だけで成功やレビュー合格と判断せず、Gitへのマージが必要な場合は最新の対象を独立してレビューします。
+
+実行が失敗・中断した場合は、保存された会話と作業ディレクトリを確認します。v0.1.0には同じJobの自動再開やProvider操作の結果照会がないため、結果が不明な実行を自動で再送しません。保存済みの変更と会話を残し、未確認の状態を報告します。
+
+v0.1.0には `init`、`ready`、`doctor` はありません。すでに有効な別バージョンの運用Skillとの互換性は保証しません。
+
 ## OIDC認証
 
 Trusted Job作成では、管理者が設定したOIDC issuer / client ID / audienceを使用します。Identity Providerにはloopback redirect URIを登録してください。
