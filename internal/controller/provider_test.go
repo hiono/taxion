@@ -496,7 +496,7 @@ func TestProviderTaskStartDispatchClaimIsExclusive(t *testing.T) {
 			claims++
 		}
 		if result.err != nil {
-			if !strings.Contains(strings.ToLower(result.err.Error()), "revision") {
+			if !errors.Is(result.err, store.ErrRevisionConflict) {
 				t.Fatalf("dispatch claim failed for an unexpected reason: %v", result.err)
 			}
 			conflicts++
@@ -563,7 +563,7 @@ func TestProviderPlanningTurnDispatchClaimIsExclusive(t *testing.T) {
 			claims++
 		}
 		if result.err != nil {
-			if !strings.Contains(strings.ToLower(result.err.Error()), "revision") {
+			if !errors.Is(result.err, store.ErrRevisionConflict) {
 				t.Fatalf("dispatch claim failed for an unexpected reason: %v", result.err)
 			}
 			conflicts++
