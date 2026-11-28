@@ -3,7 +3,7 @@
 Date: 2026-11-21
 Status: Draft
 対象Issue: #29
-基準ADR: ADR-201 / ADR-202 / ADR-400 / ADR-409 / ADR-500 / ADR-504 / ADR-505 / ADR-506 / ADR-507 / ADR-801
+基準ADR: ADR-201 / ADR-202 / ADR-400 / ADR-409 / ADR-500 / ADR-504 / ADR-505 / ADR-507 / ADR-801
 上位仕様: Product Contract §4.2 / §4.7、Product Acceptance AT-002 / AT-008 / AT-012 / AT-019
 
 ## 1. 目的
@@ -182,7 +182,7 @@ Capabilityは個別に扱う。未検証のCapabilityを利用可能と推定し
 | JobAggregate / Command / Operation intent | ADR-201 |
 | 全状態経路の不変条件 | ADR-202 |
 | Controller / Runtime境界 | ADR-400、docs/design/runtime-boundaries.md |
-| Job authority / prohibited effects | ADR-500 / ADR-504 / ADR-505 / ADR-506 / ADR-507 |
+| Job authority / prohibited effects | ADR-500 / ADR-504 / ADR-505 / ADR-507 |
 | Evidence level | ADR-801 |
 | Bounded planning | Product Contract §4.2、AT-002 |
 | Interruption / recovery | Product Contract §4.7、AT-008、AT-012 |

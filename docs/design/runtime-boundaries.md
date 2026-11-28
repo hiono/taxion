@@ -90,7 +90,7 @@ Context Managerは各turnで必要なContextだけを選択し、Skill / Fileを
 3. 自然言語BodyをJobMessageとしてJobAggregateへappend-onlyで保存する。MessageKind、BatchID、通信専用grantは要求しない。
 4. Orchestratorは保存済みメッセージをRecipientの既存RoleExecution / Sessionへ渡し、受信側は元のJob / Contextで回答する。配送専用の状態機械は設けない。
 5. 情報交換はTask assignment、Execution Permission、JobApproval、Worktree ownershipを変更しない。
-6. Provider Send / Turnや外部副作用はメッセージ受け渡しと別のoperationとして扱い、必要な認可をADR-506 / ADR-507に従って検証する。
+6. Provider Send / Turnや外部副作用はメッセージ受け渡しと別のoperationとして扱い、必要な認可をADR-505 / ADR-507に従って検証する。
 7. 実行責任とWorktree ownershipの移転は通常メッセージと分離し、既存のHandoff条件を検証する。
 
 ### 4.4 External A2A communication
@@ -151,4 +151,4 @@ Provider SDK / credential / capability / operation / recoveryの境界実装は[
 
 ## 8. Traceability
 
-ADR-200 Domain Model、ADR-201 JobAggregate / Command、ADR-202 invariant enforcement、ADR-300 Collaboration、ADR-301 JobMessage、ADR-400 Execution & Runtime、ADR-408 Worktree、ADR-409 Provider operation、ADR-501 Trusted Ingress / HUMAN Principal、ADR-504 JobApproval、ADR-505 PlanningAuthorization、ADR-506 JobQuestionAuthorization、ADR-507 Execution Permission、ADR-700 Interface & Integration、ADR-701 A2A、ADR-801 Evidence、ADR-802 Job completionを具体化する。
+ADR-200 Domain Model、ADR-201 JobAggregate / Command、ADR-202 invariant enforcement、ADR-300 Collaboration、ADR-301 JobMessage、ADR-400 Execution & Runtime、ADR-408 Worktree、ADR-409 Provider operation、ADR-501 Trusted Ingress / HUMAN Principal、ADR-504 JobApproval、ADR-505 PlanningAuthorization、ADR-507 Execution Permission、ADR-700 Interface & Integration、ADR-701 A2A、ADR-801 Evidence、ADR-802 Job completionを具体化する。
