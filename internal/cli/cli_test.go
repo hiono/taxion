@@ -1385,6 +1385,30 @@ func TestDevProviderReviewAllowsOnlyCoderToolsWhenRequested(t *testing.T) {
 	}
 }
 
+func TestDevProviderReviewReceivesWorkspaceChanges(t *testing.T) {
+	helper := fakeOpenCode(t)
+	work := testGitWorkspace(t)
+	for _, file := range []string{"test-tool-permission", "require-workspace-diff"} {
+		if err := os.WriteFile(filepath.Join(work, file), nil, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	path := filepath.Join(t.TempDir(), "jobs.sqlite")
+	var stdout, stderr bytes.Buffer
+	if code := Run(context.Background(), []string{"dev", "job", "create", "--store", path,
+		"--request", "Original task: test review cycle"}, &stdout, &stderr, VersionInfo{}); code != 0 {
+		t.Fatalf("create exit=%d, stderr=%q", code, stderr.String())
+	}
+	jobID := strings.TrimPrefix(strings.Split(stdout.String(), "\n")[1], "ID: ")
+	stdout.Reset()
+	stderr.Reset()
+	if code := Run(context.Background(), []string{"dev", "provider", "run", "--provider", "opencode",
+		"--command", helper, "--working-directory", work, "--store", path, "--job", jobID,
+		"--review", "--allow-coder-tools"}, &stdout, &stderr, VersionInfo{}); code != 0 {
+		t.Fatalf("review exit=%d, stdout=%q, stderr=%q", code, stdout.String(), stderr.String())
+	}
+}
+
 func TestDevProviderReviewRequiresLocalJob(t *testing.T) {
 	for _, args := range [][]string{
 		{"dev", "provider", "run", "--prompt", "test", "--review"},
@@ -1629,6 +1653,10 @@ func TestDevProviderACPHelper(t *testing.T) {
 					if !strings.Contains(prompt, "Planner plan:\nplan") || !strings.Contains(prompt, "Coder work:\ndraft") {
 						os.Exit(1)
 					}
+					if _, err := os.Stat("require-workspace-diff"); err == nil &&
+						(!strings.Contains(prompt, "Workspace changes:") || !strings.Contains(prompt, "+coder output")) {
+						os.Exit(1)
+					}
 					workflowRole = "reviewer"
 					response = "feedback"
 				} else if strings.Contains(prompt, "Consider the review below.") {
@@ -1638,6 +1666,10 @@ func TestDevProviderACPHelper(t *testing.T) {
 					response = "revision"
 				} else if strings.Contains(prompt, "Re-review the coder's revised work") {
 					if workflowRole != "reviewer" || !strings.Contains(prompt, "Coder revision:\nrevision") {
+						os.Exit(1)
+					}
+					if _, err := os.Stat("require-workspace-diff"); err == nil &&
+						(!strings.Contains(prompt, "Workspace changes:") || !strings.Contains(prompt, "+coder output")) {
 						os.Exit(1)
 					}
 					response = "review complete"

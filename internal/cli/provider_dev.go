@@ -272,7 +272,7 @@ func runACPProvider(ctx context.Context, args []string, stdout, stderr io.Writer
 					return report(stderr, err)
 				}
 			}
-			reviewErr := reviewLocalJob(ctx, adapter, coderAdapter, request, start.SessionID, conversationContext, result.Content, *consult, *allowTools, record)
+			reviewErr := reviewLocalJob(ctx, adapter, coderAdapter, request, start.SessionID, conversationContext, result.Content, workingDir, *consult, *allowTools, stderr, record)
 			if coderAdapter != adapter {
 				reviewErr = errors.Join(reviewErr, coderAdapter.Close())
 			}
@@ -335,11 +335,20 @@ func runACPProvider(ctx context.Context, args []string, stdout, stderr io.Writer
 	return 0
 }
 
-func reviewLocalJob(ctx context.Context, adapter, coderAdapter *provider.ACPAdapter, request provider.StartRequest, planner, jobContext, plan string, consult, allowTools bool, record func(string, string) error) error {
+func reviewLocalJob(ctx context.Context, adapter, coderAdapter *provider.ACPAdapter, request provider.StartRequest, planner, jobContext, plan, workingDir string, consult, allowTools bool, stderr io.Writer, record func(string, string) error) error {
 	prompt := "Act as the coder. Work on this request using the plan; provide your complete work as text."
 	finish := "Continue and provide your complete work as text."
 	revise := "Consider the review below. Revise your work only where warranted and provide the complete result."
+	var baseline *workspaceBaseline
 	if allowTools {
+		var err error
+		baseline, err = captureWorkspaceBaseline(ctx, workingDir)
+		if err != nil {
+			return err
+		}
+		if baseline == nil {
+			fmt.Fprintln(stderr, "Git workspace diff unavailable; Reviewer cannot inspect actual file changes.")
+		}
 		prompt = "Act as the coder. Implement this request in the working directory using the plan, then describe your changes and checks."
 		finish = "Continue, implement the request in the working directory, then describe your changes and checks."
 		revise = "Consider the review below. Update the working directory where warranted, then describe your changes and checks."
@@ -370,8 +379,16 @@ func reviewLocalJob(ctx context.Context, adapter, coderAdapter *provider.ACPAdap
 	if err := record("Coder work:", draft); err != nil {
 		return err
 	}
+	reviewContext := ""
+	if allowTools {
+		changes, err := baseline.diff(ctx)
+		if err != nil {
+			return err
+		}
+		reviewContext = "\n\nReview the supplied changes and state any missing context. Do not claim to have inspected omitted files.\n\nWorkspace changes:\n" + changes
+	}
 	reviewer, feedback, err := startLocalAgent(ctx, adapter, request, "Act as the reviewer. Review the coder's work against the request and plan; give concrete feedback, or say no changes are needed.\n\n"+
-		jobContext+"\n\nPlanner plan:\n"+plan+"\n\nCoder work:\n"+draft)
+		jobContext+"\n\nPlanner plan:\n"+plan+"\n\nCoder work:\n"+draft+reviewContext)
 	if err != nil {
 		return err
 	}
@@ -385,7 +402,15 @@ func reviewLocalJob(ctx context.Context, adapter, coderAdapter *provider.ACPAdap
 	if err := record("Coder revision:", revision); err != nil {
 		return err
 	}
-	final, err := sendLocalAgent(ctx, adapter, request, reviewer, "Re-review the coder's revised work against the original request and your previous feedback.\n\nCoder revision:\n"+revision)
+	reviewContext = ""
+	if allowTools {
+		changes, err := baseline.diff(ctx)
+		if err != nil {
+			return err
+		}
+		reviewContext = "\n\nReview the supplied changes and state any missing context. Do not claim to have inspected omitted files.\n\nWorkspace changes:\n" + changes
+	}
+	final, err := sendLocalAgent(ctx, adapter, request, reviewer, "Re-review the coder's revised work against the original request and your previous feedback.\n\nCoder revision:\n"+revision+reviewContext)
 	if err != nil {
 		return err
 	}
