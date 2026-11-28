@@ -1540,7 +1540,7 @@ func TestACPProcessBoundsQueuedUpdateBytes(t *testing.T) {
 	process.beginUpdateConsumer()
 	chunk := strings.Repeat("x", 2*1024*1024)
 	notification := `{"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"` + chunk + `"}}}}` + "\n"
-	frameBytes := int64(len(notification))
+	frameBytes := int64(len(strings.TrimSuffix(notification, "\n")))
 	frameCount := int(maxACPQueuedUpdateBytes/frameBytes) + 1
 	go process.read(strings.NewReader(strings.Repeat(notification, frameCount)))
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -1558,8 +1558,11 @@ func TestACPProcessBoundsQueuedUpdateBytes(t *testing.T) {
 			time.Sleep(time.Millisecond)
 		}
 	}
-	if process.updateBytes < maxACPQueuedUpdateBytes-frameBytes {
-		t.Fatalf("queued bytes = %d, want queue near %d-byte limit", process.updateBytes, maxACPQueuedUpdateBytes)
+	process.updateMu.Lock()
+	queuedBytes := process.updateBytes
+	process.updateMu.Unlock()
+	if queuedBytes < maxACPQueuedUpdateBytes-frameBytes {
+		t.Fatalf("queued bytes = %d, want queue near %d-byte limit", queuedBytes, maxACPQueuedUpdateBytes)
 	}
 	select {
 	case <-process.readerDone:
