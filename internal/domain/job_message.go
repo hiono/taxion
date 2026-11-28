@@ -60,25 +60,6 @@ func NewJobMessage(job Job, commandID string, request JobMessageRequest, now tim
 	if !validCommandID(commandID) || now.IsZero() || now.Before(job.UpdatedAt) {
 		return JobMessage{}, errors.New("JobMessage command identity or timestamp is invalid")
 	}
-	if err := request.Sender.Validate(job); err != nil {
-		return JobMessage{}, fmt.Errorf("invalid JobMessage sender: %w", err)
-	}
-	if err := request.Recipient.Validate(job); err != nil {
-		return JobMessage{}, fmt.Errorf("invalid JobMessage recipient: %w", err)
-	}
-	if request.Sender == request.Recipient {
-		return JobMessage{}, errors.New("JobMessage sender and recipient must differ")
-	}
-	if !utf8.ValidString(request.Body) || strings.TrimSpace(request.Body) == "" || len(request.Body) > maxJobMessageBodyBytes {
-		return JobMessage{}, errors.New("JobMessage body must be non-empty valid UTF-8 within the size limit")
-	}
-	if request.ReplyToMessageID != "" {
-		repliedTo, found := jobMessageByID(job, request.ReplyToMessageID)
-		if !found || repliedTo.CreatedRevision >= job.Revision+1 ||
-			repliedTo.Recipient != request.Sender || repliedTo.Sender != request.Recipient {
-			return JobMessage{}, errors.New("JobMessage reply must target an earlier message between the same actors")
-		}
-	}
 
 	message := JobMessage{
 		ID: JobMessageID(commandID), CommandID: commandID, JobID: job.ID,
