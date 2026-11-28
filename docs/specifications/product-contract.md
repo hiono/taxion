@@ -149,6 +149,8 @@ Provider Adapterのoperation・credential・recovery検証項目は[Provider Ada
 
 質問・回答・依頼・通知・レビュー指摘は通常の自然言語メッセージです。情報交換だけではTask assignment、JobApproval、Execution Permission、Worktree ownershipを変更しません。実行責任の移転は独立したHandoff操作とします。Provider実行はADR-301、ADR-505およびADR-507に従い、メッセージの保存・転送とは別に扱います。
 
+承認済みJobでTaskless PlannerがProvider turnを行う実行権限は未定義であり、現在はそのturnを実行できません。Execution PermissionはTaskに束縛されたCoder / Reviewerを対象とし、DRAFT用のPlanningAuthorizationは承認済みJobに適用できないためです。この未定義部分はJobMessageの保存・転送を妨げません。
+
 JobMessageの保存とProvider Send / Turnの実行を分離します。Provider operationの受理・結果・UNKNOWN・再試行はProvider operationの事実として管理し、メッセージ専用のRecipient状態機械を重複して設けません。通常の情報交換にFan-out BatchIDやDeliveryObservationの状態機械を必須化しません。
 
 ### 5.2 External Agent A2A
