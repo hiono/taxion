@@ -881,6 +881,12 @@ func TestProviderControllerDoesNotCompleteOrResendWhenSavingResponseFails(t *tes
 	runtime.capabilities.Evidence = append(runtime.capabilities.Evidence,
 		provider.CapabilityEvidence{Capability: provider.CapabilityFinalOutput, Identity: runtime.identity, TestID: "controller-test", EvidenceSHA256: strings.Repeat("d", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
 	)
+	runtime.lookupResult.ResultSHA256 = sha256String("different response")
+	if _, _, observation, _, err := controller.SendPlanning(ctx, jobID, execution.ID, "session_1",
+		commandID, "inspect the accepted repository snapshot", 100, principal); err == nil || observation.Status != domain.PlanningTurnUnknown {
+		t.Fatalf("mismatched recovered output must remain UNKNOWN: observation=%#v err=%v", observation, err)
+	}
+	runtime.lookupResult.ResultSHA256 = sha256String("final provider result")
 	if _, _, observation, _, err := failing.SendPlanning(ctx, jobID, execution.ID, "session_1",
 		commandID, "inspect the accepted repository snapshot", 100, principal); err == nil || observation.Status != domain.PlanningTurnUnknown {
 		t.Fatalf("recovered output save failure: observation=%#v err=%v", observation, err)
@@ -942,10 +948,36 @@ func TestProviderControllerPreservesResponseWhenTerminalObservationFails(t *test
 		Status: domain.PlanningTurnCompleted, ReceiptID: "receipt_1", UsageID: "usage_1",
 		EvidenceSHA256: strings.Repeat("e", 64),
 	}
+	runtime.lookupResult.Status = domain.PlanningTurnFailed
+	if _, _, observation, _, err := controller.SendPlanning(ctx, jobID, execution.ID, "session_1",
+		commandID, "inspect the accepted repository snapshot", 100, principal); err == nil || observation.Status != domain.PlanningTurnUnknown {
+		t.Fatalf("failure conflicting with saved response must remain UNKNOWN: observation=%#v err=%v", observation, err)
+	}
+	runtime.lookupResult.Status = domain.PlanningTurnCompleted
+	runtime.lookupResult.ResultSHA256 = sha256String("different response")
+	if _, _, observation, _, err := controller.SendPlanning(ctx, jobID, execution.ID, "session_1",
+		commandID, "inspect the accepted repository snapshot", 100, principal); err == nil || observation.Status != domain.PlanningTurnUnknown {
+		t.Fatalf("mismatched saved response must remain UNKNOWN: observation=%#v err=%v", observation, err)
+	}
+	runtime.capabilities.SendLookup = false
+	runtime.capabilities.SendIdempotency = true
+	runtime.capabilities.Evidence = append(runtime.capabilities.Evidence,
+		provider.CapabilityEvidence{Capability: provider.CapabilitySendIdempotency, Identity: runtime.identity, TestID: "controller-test", EvidenceSHA256: strings.Repeat("d", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
+	)
+	runtime.sendResult = provider.TurnResult{
+		OperationID: turn.OperationID, TurnID: turn.ID, SessionID: "session_1",
+		Status: domain.PlanningTurnFailed, TokensUsed: 10, EvidenceSHA256: strings.Repeat("f", 64),
+	}
+	if _, _, observation, _, err := controller.SendPlanning(ctx, jobID, execution.ID, "session_1",
+		commandID, "inspect the accepted repository snapshot", 100, principal); err == nil || observation.Status != domain.PlanningTurnUnknown {
+		t.Fatalf("retry conflicting with saved response must remain UNKNOWN: observation=%#v err=%v", observation, err)
+	}
+	runtime.capabilities.SendLookup = true
+	runtime.lookupResult.ResultSHA256 = sha256String("turn output")
 	_, _, observation, result, err := controller.SendPlanning(ctx, jobID, execution.ID, "session_1",
 		commandID, "inspect the accepted repository snapshot", 100, principal)
 	if err != nil || observation.Status != domain.PlanningTurnCompleted ||
-		result.Output != "turn output" || runtime.sendCalls != 1 {
+		result.Output != "turn output" || runtime.sendCalls != 2 {
 		t.Fatalf("reconciled response=%#v observation=%#v sends=%d err=%v", result, observation, runtime.sendCalls, err)
 	}
 }

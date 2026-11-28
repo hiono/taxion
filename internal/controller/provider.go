@@ -1025,13 +1025,16 @@ func (c *ProviderController) reconcileTurn(
 						}
 						return receipt, turn, observation, provider.TurnResult{}, errors.New("Provider Turn terminal state awaits complete Usage evidence")
 					}
+					current, err := c.store.GetJob(ctx, job.ID)
+					if err != nil {
+						return receipt, turn, previous, provider.TurnResult{}, err
+					}
+					content, found := plannerTurnMessage(current, turn)
+					if lookup.Status == domain.PlanningTurnFailed && found {
+						return receipt, turn, previous, provider.TurnResult{}, errors.New("Provider lookup failure conflicts with saved Planner response")
+					}
 					if lookup.Status == domain.PlanningTurnCompleted {
-						current, err := c.store.GetJob(ctx, job.ID)
-						if err != nil {
-							return receipt, turn, previous, provider.TurnResult{}, err
-						}
-						if _, found := plannerTurnMessage(current, turn); !found {
-							var content string
+						if !found {
 							haveResult := false
 							for _, final := range current.ProviderResultObservations {
 								if final.OperationID == turn.OperationID && final.TurnID == turn.ID &&
@@ -1047,6 +1050,14 @@ func (c *ProviderController) reconcileTurn(
 								}
 								content = final.Content
 							}
+						}
+						if lookup.ResultSHA256 != "" {
+							digest := sha256.Sum256([]byte(content))
+							if hex.EncodeToString(digest[:]) != lookup.ResultSHA256 {
+								return receipt, turn, previous, provider.TurnResult{}, errors.New("Provider lookup result conflicts with Planner response")
+							}
+						}
+						if !found {
 							if err := c.validatePlannerTurnCompletion(ctx, turn, usage.Tokens, usage.EvidenceSHA256, principal); err != nil {
 								return receipt, turn, previous, provider.TurnResult{}, err
 							}
@@ -1067,7 +1078,7 @@ func (c *ProviderController) reconcileTurn(
 						}
 						return receipt, turn, unknown, provider.TurnResult{}, err
 					}
-					current, err := c.store.GetJob(ctx, job.ID)
+					current, err = c.store.GetJob(ctx, job.ID)
 					if err != nil {
 						return receipt, turn, observation, provider.TurnResult{}, err
 					}
@@ -1144,6 +1155,16 @@ func (c *ProviderController) reconcileTurn(
 			return receipt, turn, observation, provider.TurnResult{}, persistErr
 		}
 		return receipt, turn, observation, provider.TurnResult{}, provider.ErrProviderInvalidResult
+	}
+	if !dispatchOwner {
+		current, err := c.store.GetJob(ctx, job.ID)
+		if err != nil {
+			return receipt, turn, previous, provider.TurnResult{}, err
+		}
+		if content, found := plannerTurnMessage(current, turn); found &&
+			(result.Status != domain.PlanningTurnCompleted || content != result.Output) {
+			return receipt, turn, previous, provider.TurnResult{}, errors.New("Provider retry conflicts with saved Planner response")
+		}
 	}
 	if result.Status == domain.PlanningTurnCompleted && strings.TrimSpace(result.Output) != "" {
 		if err := c.validatePlannerTurnCompletion(ctx, turn, result.TokensUsed, result.EvidenceSHA256, principal); err != nil {
