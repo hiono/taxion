@@ -1106,6 +1106,133 @@ func TestDevProviderConversationPersistsAndReusesLocalJobHistory(t *testing.T) {
 	}
 }
 
+func TestDevProviderConsultsAndResumesMainSession(t *testing.T) {
+	helper := fakeOpenCode(t)
+	path := filepath.Join(t.TempDir(), "jobs.sqlite")
+	var stdout, stderr bytes.Buffer
+	if code := Run(context.Background(), []string{"dev", "job", "create", "--store", path,
+		"--request", "Original task"}, &stdout, &stderr, VersionInfo{}); code != 0 {
+		t.Fatalf("create exit=%d, stderr=%q", code, stderr.String())
+	}
+	jobID := strings.TrimPrefix(strings.Split(stdout.String(), "\n")[1], "ID: ")
+	stdout.Reset()
+	stderr.Reset()
+	code := Run(context.Background(), []string{"dev", "provider", "run", "--provider", "opencode",
+		"--command", helper, "--working-directory", t.TempDir(), "--store", path, "--job", jobID,
+		"--prompt", "test consultation", "--consult"}, &stdout, &stderr, VersionInfo{})
+	if code != 0 || !strings.Contains(stdout.String(), "final answer with consultation") {
+		t.Fatalf("consult exit=%d, stdout=%q, stderr=%q", code, stdout.String(), stderr.String())
+	}
+	database, err := store.Open(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	job, err := database.GetJob(context.Background(), jobID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"test consultation", "Main agent question:\nconsultation question",
+		"Consulting agent answer:\nconsultation answer", "Main agent answer:\nfinal answer with consultation"}
+	if len(job.JobMessages) != len(want) {
+		t.Fatalf("messages=%#v", job.JobMessages)
+	}
+	for i, body := range want {
+		message := job.JobMessages[i]
+		if message.Body != body || (i > 0 && message.ReplyToMessageID != job.JobMessages[0].ID) {
+			t.Fatalf("message %d = %#v", i, message)
+		}
+	}
+}
+
+func TestDevProviderConsultRequiresLocalJob(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if code := Run(context.Background(), []string{"dev", "provider", "run", "--prompt", "test", "--consult"},
+		&stdout, &stderr, VersionInfo{}); code != 2 {
+		t.Fatalf("exit=%d, stderr=%q", code, stderr.String())
+	}
+}
+
+func TestDevProviderConsultPreservesLongAnswer(t *testing.T) {
+	helper := fakeOpenCode(t)
+	path := filepath.Join(t.TempDir(), "jobs.sqlite")
+	var stdout, stderr bytes.Buffer
+	if code := Run(context.Background(), []string{"dev", "job", "create", "--store", path,
+		"--request", "Original task"}, &stdout, &stderr, VersionInfo{}); code != 0 {
+		t.Fatalf("create exit=%d, stderr=%q", code, stderr.String())
+	}
+	jobID := strings.TrimPrefix(strings.Split(stdout.String(), "\n")[1], "ID: ")
+	stdout.Reset()
+	stderr.Reset()
+	code := Run(context.Background(), []string{"dev", "provider", "run", "--provider", "opencode",
+		"--command", helper, "--working-directory", t.TempDir(), "--store", path, "--job", jobID,
+		"--prompt", "test long consultation", "--consult"}, &stdout, &stderr, VersionInfo{})
+	if code != 0 || !strings.Contains(stdout.String(), "final answer with consultation") {
+		t.Fatalf("consult exit=%d, stderr=%q", code, stderr.String())
+	}
+	database, err := store.Open(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	job, err := database.GetJob(context.Background(), jobID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "Consulting agent answer:\n" + strings.Repeat("あ", 22000)
+	if len(job.JobMessages) != 4 || job.JobMessages[2].Body != want {
+		t.Fatalf("long answer was not preserved")
+	}
+}
+
+func TestDevProviderConsultPreservesPartialConversation(t *testing.T) {
+	for _, failure := range []struct {
+		marker string
+		count  int
+	}{
+		{"consult-fail", 2},
+		{"resume-fail", 3},
+	} {
+		t.Run(failure.marker, func(t *testing.T) {
+			helper := fakeOpenCode(t)
+			work := t.TempDir()
+			if err := os.WriteFile(filepath.Join(work, failure.marker), nil, 0600); err != nil {
+				t.Fatal(err)
+			}
+			path := filepath.Join(t.TempDir(), "jobs.sqlite")
+			var stdout, stderr bytes.Buffer
+			if code := Run(context.Background(), []string{"dev", "job", "create", "--store", path,
+				"--request", "Original task"}, &stdout, &stderr, VersionInfo{}); code != 0 {
+				t.Fatalf("create exit=%d, stderr=%q", code, stderr.String())
+			}
+			jobID := strings.TrimPrefix(strings.Split(stdout.String(), "\n")[1], "ID: ")
+			stdout.Reset()
+			stderr.Reset()
+			code := Run(context.Background(), []string{"dev", "provider", "run", "--provider", "opencode",
+				"--command", helper, "--working-directory", work, "--store", path, "--job", jobID,
+				"--prompt", "test consultation", "--consult"}, &stdout, &stderr, VersionInfo{})
+			if code != 1 {
+				t.Fatalf("exit=%d, stdout=%q, stderr=%q", code, stdout.String(), stderr.String())
+			}
+			database, err := store.Open(context.Background(), path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer database.Close()
+			job, err := database.GetJob(context.Background(), jobID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(job.JobMessages) != failure.count || job.JobMessages[1].Body != "Main agent question:\nconsultation question" {
+				t.Fatalf("messages=%#v", job.JobMessages)
+			}
+			if failure.count == 3 && job.JobMessages[2].Body != "Consulting agent answer:\nconsultation answer" {
+				t.Fatalf("messages=%#v", job.JobMessages)
+			}
+		})
+	}
+}
+
 func TestDevProviderConversationRejectsTrustedJob(t *testing.T) {
 	helper := fakeOpenCode(t)
 	server := newCLIAuthServer(t)
@@ -1178,7 +1305,9 @@ func TestDevProviderACPHelper(t *testing.T) {
 		os.Exit(1)
 	}
 	scanner := bufio.NewScanner(os.Stdin)
+	scanner.Buffer(make([]byte, 64*1024), 8*1024*1024)
 	writer := json.NewEncoder(os.Stdout)
+	primaryStarted := false
 	for scanner.Scan() {
 		var request struct {
 			ID     json.RawMessage `json:"id"`
@@ -1214,6 +1343,28 @@ func TestDevProviderACPHelper(t *testing.T) {
 				prompt := request.Params.Prompt[0].Text
 				if strings.Contains(prompt, "simulate provider failure") {
 					os.Exit(1)
+				} else if strings.Contains(prompt, "Before answering, write one question") {
+					primaryStarted = true
+					response = "consultation question"
+				} else if strings.Contains(prompt, "Answer the main agent's question using this Job context:") {
+					if _, err := os.Stat("consult-fail"); err == nil {
+						os.Exit(1)
+					}
+					if !strings.Contains(prompt, "Original task") || !strings.Contains(prompt, "consultation question") {
+						os.Exit(1)
+					}
+					response = "consultation answer"
+					if strings.Contains(prompt, "test long consultation") {
+						response = strings.Repeat("あ", 22000)
+					}
+				} else if strings.Contains(prompt, "The other agent answered your question:") {
+					if _, err := os.Stat("resume-fail"); err == nil {
+						os.Exit(1)
+					}
+					if !primaryStarted || (!strings.Contains(prompt, "consultation answer") && !strings.Contains(prompt, strings.Repeat("あ", 22000))) {
+						os.Exit(1)
+					}
+					response = "final answer with consultation"
 				} else if strings.Contains(prompt, "what token?") {
 					if !strings.Contains(prompt, "The original request.") ||
 						!strings.Contains(prompt, "Remember the token HARBOR42.") ||
