@@ -124,9 +124,8 @@ func (c *ProviderController) StartPlanning(
 		}
 	}
 
-	initialRevision := job.Revision
 	receipt, execution, intent, err := c.store.StartTasklessPlanner(
-		ctx, jobID, initialRevision, authorizationID, commandID, principal,
+		ctx, jobID, job.Revision, authorizationID, commandID, principal,
 	)
 	if err != nil {
 		return receipt, execution, intent, provider.StartResult{}, err
@@ -159,9 +158,6 @@ func (c *ProviderController) StartPlanning(
 		}
 	}
 
-	if !intent.ClaimBeforeDispatch && receipt.Revision != initialRevision+1 {
-		return c.reconcileStart(ctx, receipt, execution, intent, request, currentGrant, principal)
-	}
 	if err := currentGrant.ValidateFor(current, principal.PrincipalID(), c.now()); err != nil {
 		return receipt, execution, intent, provider.StartResult{}, err
 	}
@@ -169,39 +165,30 @@ func (c *ProviderController) StartPlanning(
 		return receipt, execution, intent, provider.StartResult{}, err
 	}
 	claimed := false
-	var result provider.StartResult
-	if intent.ClaimBeforeDispatch {
-		result, err = c.runtime.StartClaimed(ctx, request, func() error {
-			job, err := c.store.GetJob(ctx, jobID)
-			if err != nil {
-				return err
-			}
-			if _, found := latestStartObservation(job, intent.ID); found {
-				return errors.New("Provider Start was already claimed")
-			}
-			commandID, err := newProviderDispatchCommandID()
-			if err != nil {
-				return err
-			}
-			_, _, err = c.store.AddProviderStartObservation(ctx, jobID, job.Revision, intent.ID,
-				commandID, domain.ProviderStartUnknown, "", "", "", false, principal)
-			claimed = err == nil
+	result, err := c.runtime.StartClaimed(ctx, request, func() error {
+		job, err := c.store.GetJob(ctx, jobID)
+		if err != nil {
 			return err
-		})
-	} else {
-		result, err = c.runtime.Start(ctx, request)
-	}
+		}
+		if _, found := latestStartObservation(job, intent.ID); found {
+			return errors.New("Provider Start was already claimed")
+		}
+		commandID, err := newProviderDispatchCommandID()
+		if err != nil {
+			return err
+		}
+		_, _, err = c.store.AddProviderStartObservation(ctx, jobID, job.Revision, intent.ID,
+			commandID, domain.ProviderStartUnknown, "", "", "", false, principal)
+		claimed = err == nil
+		return err
+	})
 	if err != nil {
-		if intent.ClaimBeforeDispatch && !claimed {
+		if !claimed {
 			return receipt, execution, intent, provider.StartResult{}, err
 		}
 		if providerOperationMayHaveStarted(err) {
 			if persistErr := c.recordStartObservation(ctx, jobID, intent.ID, domain.ProviderStartUnknown, "", "", "", false, principal); persistErr != nil {
 				return receipt, execution, intent, provider.StartResult{}, errors.Join(err, fmt.Errorf("persist UNKNOWN Provider Start observation: %w", persistErr))
-			}
-		} else if evidence, definitive := providerDefinitiveFailureEvidence(intent.ID, err); definitive && !intent.ClaimBeforeDispatch {
-			if persistErr := c.recordStartObservation(ctx, jobID, intent.ID, domain.ProviderStartFailed, "", "", evidence, false, principal); persistErr != nil {
-				return receipt, execution, intent, provider.StartResult{}, errors.Join(err, fmt.Errorf("persist FAILED Provider Start observation: %w", persistErr))
 			}
 		}
 		return receipt, execution, intent, provider.StartResult{}, err
@@ -734,15 +721,6 @@ func providerOperationMayHaveStarted(err error) bool {
 	var operationError *provider.OperationError
 	return errors.As(err, &operationError) && operationError != nil &&
 		operationError.Class == provider.FailureAmbiguous
-}
-
-func providerDefinitiveFailureEvidence(operationID string, err error) (string, bool) {
-	var operationError *provider.OperationError
-	if !errors.As(err, &operationError) || operationError == nil ||
-		operationError.Class != provider.FailureDefinitive {
-		return "", false
-	}
-	return sha256String("taxion:provider-start-definitive-failure:" + operationID + ":" + string(operationError.Class) + ":" + operationError.Code), true
 }
 
 func startResultFromObservation(observation domain.ProviderStartObservation) provider.StartResult {
