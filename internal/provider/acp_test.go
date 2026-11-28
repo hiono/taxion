@@ -1553,7 +1553,10 @@ func TestACPProcessBoundsQueuedUpdateBytes(t *testing.T) {
 		case <-process.readerDone:
 			t.Fatal("reader completed instead of blocking at the queued-byte limit")
 		case <-ctx.Done():
-			t.Fatalf("reader did not fill queue to byte limit: queued=%d bytes=%d", len(process.updates), process.updateBytes)
+			process.updateMu.Lock()
+			queuedBytes := process.updateBytes
+			process.updateMu.Unlock()
+			t.Fatalf("reader did not fill queue to byte limit: queued=%d bytes=%d", len(process.updates), queuedBytes)
 		default:
 			time.Sleep(time.Millisecond)
 		}
