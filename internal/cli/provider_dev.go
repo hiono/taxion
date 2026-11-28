@@ -268,25 +268,32 @@ func runACPProvider(ctx context.Context, args []string, stdout, stderr io.Writer
 		fmt.Fprintln(stdout, "Local Job conversation saved (not an authorized Job execution)")
 		return 0
 	}
-	closeErr := adapter.Close()
-	if closeErr != nil {
-		return report(stderr, fmt.Errorf("%s process did not close cleanly", cliName))
-	}
-	fmt.Fprintf(stdout, "Provider: %s\nSession: %s\nToken usage: not reported by ACP\n\n%s\n", identity.ProviderID, start.SessionID, result.Content)
+	var saveErr error
 	if communication != nil {
 		commandID, err := domain.NewID("cmd")
-		if err != nil {
-			return report(stderr, err)
+		if err == nil {
+			_, err = communication.SendFromOrchestrator(ctx, controller.SystemMessageRequest{
+				JobID: jobID, CommandID: commandID,
+				Recipient:        domain.ActorRef{Kind: domain.ActorController, ID: domain.ControllerActorID},
+				ReplyToMessageID: question.Message.ID,
+				Body:             result.Content,
+			})
 		}
-		if _, err := communication.SendFromOrchestrator(ctx, controller.SystemMessageRequest{
-			JobID: jobID, CommandID: commandID,
-			Recipient:        domain.ActorRef{Kind: domain.ActorController, ID: domain.ControllerActorID},
-			ReplyToMessageID: question.Message.ID,
-			Body:             result.Content,
-		}); err != nil {
-			return report(stderr, err)
-		}
+		saveErr = err
+	}
+	closeErr := adapter.Close()
+	if closeErr != nil {
+		closeErr = fmt.Errorf("%s process did not close cleanly", cliName)
+	}
+	fmt.Fprintf(stdout, "Provider: %s\nSession: %s\nToken usage: not reported by ACP\n\n%s\n", identity.ProviderID, start.SessionID, result.Content)
+	if saveErr != nil {
+		return report(stderr, errors.Join(saveErr, closeErr))
+	}
+	if communication != nil {
 		fmt.Fprintln(stdout, "\nLocal Job conversation saved (not an authorized Job execution)")
+	}
+	if closeErr != nil {
+		return report(stderr, closeErr)
 	}
 	return 0
 }
