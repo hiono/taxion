@@ -23,6 +23,7 @@ CodeRabbitのレビュー指摘と「Prompt to fix issue」を組み合わせる
 - 対象箇所は確認できたfile path、symbol、line等で示します。根拠には、実際に確認したADR、Product Contract、Acceptance Criteria、関連実装、テスト等を参照可能な形で示します。
 - 参照先が未確認、存在しない、または対象HEADと一致しない場合は、その状態を明記し、確認済みであるかのように提示しません。
 - 指摘がない場合は、レビュー対象のidentityと判定を明示し、不要な修正プロンプトを生成しません。
+- 変更に関係する場合、Role / operationごとの権限とeffect boundaryに未定義の組み合わせがないか、制限や除外が別のAPI経路・設定でも維持されるか、関連仕様間でoptionalな条件が必須化されていないかを確認します。過去の実例は、[Taskless PLANNERのProvider turn権限の欠落](https://github.com/hiono/taxion/pull/70#discussion_r4726585164)、[Git submodule diff設定](https://github.com/hiono/taxion/pull/67#discussion_r4726434542)・[出力上限を迂回するReadFrom](https://github.com/hiono/taxion/pull/67#discussion_r4726434548)・[Git repository環境変数の継承](https://github.com/hiono/taxion/pull/67#discussion_r4726434557)、[任意のUsageを要求する関連仕様](https://github.com/hiono/taxion/pull/62#discussion_r4726091724)、[Markdown表の列数不一致による情報欠落](https://github.com/hiono/taxion/pull/65#discussion_r4726276212)です。これらは現行変更にも必ず当てはまる指摘ではなく、適用可能性をコード・仕様・テストで検証する観点です。新しい権限や認可機構を追加する要件ではありません。
 
 ### Correction prompt
 

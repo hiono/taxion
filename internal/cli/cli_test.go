@@ -1036,11 +1036,12 @@ func TestRunCollaboratesAndSavesLocalJob(t *testing.T) {
 				args = append(args, "--consult")
 			}
 			code := Run(context.Background(), args, &stdout, &stderr, VersionInfo{})
-			if code != 0 || !strings.Contains(stdout.String(), "Reviewer re-review:\nreview complete") ||
+			if code != 0 || !strings.Contains(stdout.String(), "Reviewer re-review:\n"+localReviewEvidenceNotice) ||
+				!strings.Contains(stdout.String(), "review complete") ||
 				!strings.Contains(stdout.String(), "Local collaboration saved") {
 				t.Fatalf("exit=%d, stdout=%q, stderr=%q", code, stdout.String(), stderr.String())
 			}
-			if data, err := os.ReadFile(filepath.Join(work, "coder-artifact")); err != nil || string(data) != "coder output" {
+			if data, err := os.ReadFile(filepath.Join(work, "coder-artifact")); err != nil || string(data) != "revised output" {
 				t.Fatalf("coder artifact=%q, err=%v", data, err)
 			}
 			database, err := store.Open(context.Background(), path)
@@ -1110,7 +1111,8 @@ func fakeOpenCode(t *testing.T) string {
 	}
 	helper := filepath.Join(t.TempDir(), "opencode")
 	quoted := "'" + strings.ReplaceAll(executable, "'", "'\\''") + "'"
-	script := fmt.Sprintf("#!/bin/sh\n[ \"$1\" = acp ] || exit 1\nTAXION_TEST_CLI_HELPER=1 exec %s -test.run=^TestDevProviderACPHelper$\n", quoted)
+	sessionFile := "'" + strings.ReplaceAll(filepath.Join(t.TempDir(), "reviewer-session-id"), "'", "'\\''") + "'"
+	script := fmt.Sprintf("#!/bin/sh\n[ \"$1\" = acp ] || exit 1\nTAXION_TEST_CLI_HELPER=1 TAXION_TEST_REVIEW_SESSION_FILE=%s exec %s -test.run=^TestDevProviderACPHelper$\n", sessionFile, quoted)
 	if err := os.WriteFile(helper, []byte(script), 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -1128,14 +1130,15 @@ func fakeCopilot(t *testing.T) string {
 	}
 	helper := filepath.Join(t.TempDir(), "copilot")
 	quoted := "'" + strings.ReplaceAll(executable, "'", "'\\''") + "'"
+	sessionFile := "'" + strings.ReplaceAll(filepath.Join(t.TempDir(), "reviewer-session-id"), "'", "'\\''") + "'"
 	script := fmt.Sprintf(`#!/bin/sh
 case "$*" in
   "--acp --stdio") text_only=0 ;;
   "--acp --stdio --available-tools=__taxion_no_tools__ --disable-builtin-mcps --no-custom-instructions") text_only=1 ;;
   *) exit 1 ;;
 esac
-TAXION_TEST_CLI_HELPER=1 TAXION_TEST_COPILOT=1 TAXION_TEST_TEXT_ONLY="$text_only" exec %s -test.run=^TestDevProviderACPHelper$
-`, quoted)
+TAXION_TEST_CLI_HELPER=1 TAXION_TEST_COPILOT=1 TAXION_TEST_TEXT_ONLY="$text_only" TAXION_TEST_REVIEW_SESSION_FILE=%s exec %s -test.run=^TestDevProviderACPHelper$
+`, sessionFile, quoted)
 	if err := os.WriteFile(helper, []byte(script), 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -1397,7 +1400,7 @@ func TestDevProviderReviewCycle(t *testing.T) {
 		fail          string
 		messageCount  int
 	}{
-		{name: "review", messageCount: 6},
+		{name: "review-text-only-empty-workspace", messageCount: 6},
 		{name: "review-job-request", defaultPrompt: true, messageCount: 6},
 		{name: "review-fails", fail: "review-fail", messageCount: 3},
 		{name: "consult-and-review", consult: true, messageCount: 8},
@@ -1440,7 +1443,8 @@ func TestDevProviderReviewCycle(t *testing.T) {
 			if (test.fail == "" && code != 0) || (test.fail != "" && code != 1) {
 				t.Fatalf("exit=%d, stdout=%q, stderr=%q", code, stdout.String(), stderr.String())
 			}
-			if test.fail == "" && !strings.Contains(stdout.String(), "Reviewer re-review:\nreview complete") {
+			if test.fail == "" && (!strings.Contains(stdout.String(), "Reviewer re-review:\n"+localReviewEvidenceNotice) ||
+				!strings.Contains(stdout.String(), "review complete")) {
 				t.Fatalf("missing final review in output: %q", stdout.String())
 			}
 			database, err := store.Open(context.Background(), path)
@@ -1456,8 +1460,8 @@ func TestDevProviderReviewCycle(t *testing.T) {
 			if test.consult {
 				want = append(want, "Coder question:\ncoder question", "Planner answer:\nplanner answer")
 			}
-			want = append(want, "Coder work:\ndraft", "Reviewer feedback:\nfeedback",
-				"Coder revision:\nrevision", "Reviewer re-review:\nreview complete")
+			want = append(want, "Coder work:\ndraft", "Reviewer feedback:\n"+localReviewEvidenceNotice+"\n\nfeedback",
+				"Coder revision:\nrevision", "Reviewer re-review:\n"+localReviewEvidenceNotice+"\n\nreview complete")
 			want = want[:test.messageCount]
 			if len(job.JobMessages) != len(want) {
 				t.Fatalf("messages=%#v", job.JobMessages)
@@ -1481,7 +1485,7 @@ func TestDevProviderReviewAllowsOnlyCoderToolsWhenRequested(t *testing.T) {
 	}{{}, {allow: true}, {allow: true, consult: true}} {
 		t.Run(fmt.Sprintf("allow=%t/consult=%t", test.allow, test.consult), func(t *testing.T) {
 			helper := fakeOpenCode(t)
-			work := t.TempDir()
+			work := testGitWorkspace(t)
 			if err := os.WriteFile(filepath.Join(work, "test-tool-permission"), nil, 0600); err != nil {
 				t.Fatal(err)
 			}
@@ -1505,9 +1509,13 @@ func TestDevProviderReviewAllowsOnlyCoderToolsWhenRequested(t *testing.T) {
 			if code := Run(context.Background(), args, &stdout, &stderr, VersionInfo{}); code != 0 {
 				t.Fatalf("review exit=%d, stdout=%q, stderr=%q", code, stdout.String(), stderr.String())
 			}
-			_, err := os.Stat(filepath.Join(work, "coder-artifact"))
-			if (err == nil) != test.allow {
-				t.Fatalf("coder artifact: %v, allow=%v", err, test.allow)
+			data, err := os.ReadFile(filepath.Join(work, "coder-artifact"))
+			if test.allow {
+				if err != nil || string(data) != "revised output" {
+					t.Fatalf("coder artifact=%q, err=%v", data, err)
+				}
+			} else if !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("Coder wrote without tool permission: content=%q, err=%v", data, err)
 			}
 		})
 	}
@@ -1534,6 +1542,155 @@ func TestDevProviderReviewReceivesWorkspaceChanges(t *testing.T) {
 		"--command", helper, "--working-directory", work, "--store", path, "--job", jobID,
 		"--review", "--allow-coder-tools"}, &stdout, &stderr, VersionInfo{}); code != 0 {
 		t.Fatalf("review exit=%d, stdout=%q, stderr=%q", code, stdout.String(), stderr.String())
+	}
+}
+
+func installReviewSource(t *testing.T, directory, sourcePath, content string) {
+	t.Helper()
+	path := filepath.Join(directory, filepath.FromSlash(sourcePath))
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+		t.Fatal(err)
+	}
+	testGit(t, directory, "add", "--", sourcePath)
+	testGit(t, directory, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "review source fixture")
+}
+
+func TestLocalReviewEvidenceWithoutSourcesNeedsNoGitWorkspace(t *testing.T) {
+	evidence, complete, err := captureLocalReviewEvidence(context.Background(), t.TempDir(), nil)
+	if err != nil || complete || !strings.Contains(evidence, "No additional source files were explicitly selected") ||
+		!strings.Contains(evidence, "do not claim independent code/spec verification") {
+		t.Fatalf("evidence=%q complete=%t err=%v", evidence, complete, err)
+	}
+}
+
+func TestLocalReviewSourcesRequireExplicitTrackedLocalPaths(t *testing.T) {
+	paths, err := normalizeLocalReviewSourcePaths([]string{"docs/contract.md", "docs/contract.md"})
+	if err != nil || len(paths) != 1 || paths[0] != "docs/contract.md" {
+		t.Fatalf("paths=%v err=%v", paths, err)
+	}
+	for _, invalid := range []string{"", "../outside.txt", filepath.Join("..", "outside.txt"), filepath.Join(t.TempDir(), "absolute.txt")} {
+		if _, err := normalizeLocalReviewSourcePaths([]string{invalid}); err == nil {
+			t.Errorf("accepted non-local path %q", invalid)
+		}
+	}
+	work := testGitWorkspace(t)
+	if err := validateLocalReviewSources(context.Background(), work, []string{"tracked.txt"}); err != nil {
+		t.Fatalf("tracked source rejected: %v", err)
+	}
+	if err := validateLocalReviewSources(context.Background(), work, []string{"missing.txt"}); err == nil {
+		t.Fatal("untracked source was accepted")
+	}
+}
+
+func TestDevProviderReviewRejectsInvalidSourcesBeforeProviderStarts(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake provider test helper uses a shell script")
+	}
+	for _, test := range []struct {
+		name  string
+		setup func(t *testing.T, path string)
+	}{
+		{name: "missing", setup: func(t *testing.T, path string) {
+			t.Helper()
+			if err := os.Remove(path); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{name: "symlink", setup: func(t *testing.T, path string) {
+			t.Helper()
+			if err := os.Remove(path); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink("tracked.txt", path); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{name: "binary", setup: func(t *testing.T, path string) {
+			t.Helper()
+			if err := os.WriteFile(path, []byte("text\x00binary"), 0600); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{name: "oversized", setup: func(t *testing.T, path string) {
+			t.Helper()
+			if err := os.WriteFile(path, []byte(strings.Repeat("x", maxLocalReviewEvidenceBytes+1)), 0600); err != nil {
+				t.Fatal(err)
+			}
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			helper := fakeOpenCode(t)
+			work := testGitWorkspace(t)
+			const sourcePath = "docs/review-contract.txt"
+			installReviewSource(t, work, sourcePath, "review context\n")
+			test.setup(t, filepath.Join(work, filepath.FromSlash(sourcePath)))
+			if err := os.WriteFile(filepath.Join(work, "test-tool-permission"), nil, 0600); err != nil {
+				t.Fatal(err)
+			}
+			storePath := filepath.Join(t.TempDir(), "jobs.sqlite")
+			var stdout, stderr bytes.Buffer
+			if code := Run(context.Background(), []string{"dev", "job", "create", "--store", storePath,
+				"--request", "Original task"}, &stdout, &stderr, VersionInfo{}); code != 0 {
+				t.Fatalf("create exit=%d, stderr=%q", code, stderr.String())
+			}
+			jobID := strings.TrimPrefix(strings.Split(stdout.String(), "\n")[1], "ID: ")
+			stdout.Reset()
+			stderr.Reset()
+			providerStarted := filepath.Join(t.TempDir(), "provider-started")
+			t.Setenv("TAXION_TEST_PROVIDER_STARTED", providerStarted)
+			args := []string{"dev", "provider", "run", "--provider", "opencode", "--command", helper,
+				"--working-directory", work, "--store", storePath, "--job", jobID,
+				"--review", "--allow-coder-tools", "--review-source", sourcePath}
+			if code := Run(context.Background(), args, &stdout, &stderr, VersionInfo{}); code != 1 {
+				t.Fatalf("review exit=%d, stdout=%q, stderr=%q", code, stdout.String(), stderr.String())
+			}
+			if _, err := os.Stat(providerStarted); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("Provider started for invalid source: stat err=%v", err)
+			}
+			if _, err := os.Stat(filepath.Join(work, "coder-artifact")); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("Coder side effect occurred for invalid source: stat err=%v", err)
+			}
+		})
+	}
+}
+
+func TestDevProviderReviewUsesExplicitCurrentSourcesInAnotherRepository(t *testing.T) {
+	helper := fakeOpenCode(t)
+	work := testGitWorkspace(t)
+	const sourcePath = "docs/feature-contract.md"
+	installReviewSource(t, work, sourcePath, "SOURCE_BEFORE_CODER\n")
+	for _, file := range []string{"test-tool-permission", "require-workspace-diff", "require-explicit-review-source", "mutate-review-source"} {
+		if err := os.WriteFile(filepath.Join(work, file), nil, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(work, "unrelated.txt"), []byte("NEVER_SEND_UNRELATED"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(work, "ignored.secret"), []byte("NEVER_SEND_IGNORED"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "jobs.sqlite")
+	var stdout, stderr bytes.Buffer
+	if code := Run(context.Background(), []string{"dev", "job", "create", "--store", path,
+		"--request", "Original task: test review cycle"}, &stdout, &stderr, VersionInfo{}); code != 0 {
+		t.Fatalf("create exit=%d, stderr=%q", code, stderr.String())
+	}
+	jobID := strings.TrimPrefix(strings.Split(stdout.String(), "\n")[1], "ID: ")
+	stdout.Reset()
+	stderr.Reset()
+	args := []string{"dev", "provider", "run", "--provider", "opencode", "--command", helper,
+		"--working-directory", work, "--store", path, "--job", jobID, "--review", "--allow-coder-tools",
+		"--review-source", sourcePath}
+	if code := Run(context.Background(), args, &stdout, &stderr, VersionInfo{}); code != 0 {
+		t.Fatalf("review exit=%d, stdout=%q, stderr=%q", code, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "Reviewer re-review:\n"+localReviewCoverageNotice) ||
+		!strings.Contains(stdout.String(), "review complete") {
+		t.Fatalf("missing bounded independent re-review: %q", stdout.String())
 	}
 }
 
@@ -1711,13 +1868,18 @@ func TestDevProviderACPHelper(t *testing.T) {
 	writer := json.NewEncoder(os.Stdout)
 	primaryStarted := false
 	workflowRole := ""
+	coderRevision := false
+	coderToolsAllowed := false
 	productCycle := false
+	sessionCount := 0
+	sessionID := ""
 	for scanner.Scan() {
 		var request struct {
 			ID     json.RawMessage `json:"id"`
 			Method string          `json:"method"`
 			Params struct {
-				Prompt []struct {
+				SessionID string `json:"sessionId"`
+				Prompt    []struct {
 					Text string `json:"text"`
 				} `json:"prompt"`
 			} `json:"params"`
@@ -1727,18 +1889,26 @@ func TestDevProviderACPHelper(t *testing.T) {
 		}
 		switch request.Method {
 		case "initialize":
+			if marker := os.Getenv("TAXION_TEST_PROVIDER_STARTED"); marker != "" {
+				if err := os.WriteFile(marker, nil, 0600); err != nil {
+					os.Exit(1)
+				}
+			}
 			_ = writer.Encode(map[string]any{"jsonrpc": "2.0", "id": request.ID,
 				"result": map[string]any{"protocolVersion": 1}})
 		case "session/new":
+			sessionCount++
+			sessionID = fmt.Sprintf("session_test_%d_%d", os.Getpid(), sessionCount)
 			model := "opencode/big-pickle"
 			if _, err := os.Stat("different-model"); err == nil {
 				model = "opencode/other"
 			}
 			_ = writer.Encode(map[string]any{"jsonrpc": "2.0", "id": request.ID,
-				"result": map[string]any{"sessionId": "session_test", "configOptions": []map[string]string{
+				"result": map[string]any{"sessionId": sessionID, "configOptions": []map[string]string{
 					{"id": "model", "currentValue": model},
 				}}})
 		case "session/prompt":
+			sessionID = request.Params.SessionID
 			if err := os.WriteFile("prompt-reached", nil, 0600); err != nil {
 				os.Exit(1)
 			}
@@ -1758,7 +1928,13 @@ func TestDevProviderACPHelper(t *testing.T) {
 					if !strings.Contains(prompt, "Original task") || !strings.Contains(prompt, "Planner plan:\nplan") {
 						os.Exit(1)
 					}
+					if !strings.Contains(prompt, "Before working, write one question") &&
+						(!strings.Contains(prompt, "list changed files, relevant code/spec/acceptance sources you actually inspected") ||
+							!strings.Contains(prompt, "state explicitly when a source was unavailable")) {
+						os.Exit(1)
+					}
 					workflowRole = "coder"
+					coderRevision = false
 					response = "draft"
 					if strings.Contains(prompt, "Before working, write one question") {
 						response = "coder question"
@@ -1772,7 +1948,8 @@ func TestDevProviderACPHelper(t *testing.T) {
 					}
 					response = "planner answer"
 				} else if strings.Contains(prompt, "The planner answered your question:") {
-					if workflowRole != "coder" || !strings.Contains(prompt, "planner answer") {
+					if workflowRole != "coder" || !strings.Contains(prompt, "planner answer") ||
+						!strings.Contains(prompt, "list changed files, relevant code/spec/acceptance sources you actually inspected") {
 						os.Exit(1)
 					}
 					response = "draft"
@@ -1783,6 +1960,32 @@ func TestDevProviderACPHelper(t *testing.T) {
 					if !strings.Contains(prompt, "Planner plan:\nplan") || !strings.Contains(prompt, "Coder work:\ndraft") {
 						os.Exit(1)
 					}
+					if _, err := os.Stat("require-explicit-review-source"); err == nil {
+						expected := "SOURCE_AFTER_CODER"
+						if strings.Contains(prompt, "Act as an independent reviewer in a fresh session.") {
+							expected = "SOURCE_AFTER_REVISION"
+						}
+						sourceStart := strings.Index(prompt, "Read-only source inputs explicitly selected by the user")
+						if sourceStart < 0 {
+							os.Exit(1)
+						}
+						sourceEnd := strings.Index(prompt[sourceStart:], "\n\nOriginal request and Job context:")
+						if sourceEnd < 0 {
+							os.Exit(1)
+						}
+						sourceEvidence := prompt[sourceStart : sourceStart+sourceEnd]
+						if !strings.Contains(sourceEvidence, "docs/feature-contract.md") ||
+							!strings.Contains(sourceEvidence, expected) || strings.Contains(sourceEvidence, "SOURCE_BEFORE_CODER") ||
+							!strings.Contains(prompt, "SHA-256") {
+							os.Exit(1)
+						}
+					} else if !strings.Contains(prompt, "No additional source files were explicitly selected") ||
+						!strings.Contains(prompt, "do not claim independent code/spec verification") {
+						os.Exit(1)
+					}
+					if strings.Contains(prompt, "NEVER_SEND_UNRELATED") || strings.Contains(prompt, "NEVER_SEND_IGNORED") {
+						os.Exit(1)
+					}
 					if _, err := os.Stat("require-workspace-diff"); err == nil &&
 						(!strings.Contains(prompt, "Workspace changes:") || !strings.Contains(prompt, "+coder output")) {
 						os.Exit(1)
@@ -1791,12 +1994,72 @@ func TestDevProviderACPHelper(t *testing.T) {
 						os.Exit(1)
 					}
 					workflowRole = "reviewer"
-					response = "feedback"
-				} else if strings.Contains(prompt, "Consider the review below.") {
-					if workflowRole != "coder" || !strings.Contains(prompt, "Reviewer feedback:\nfeedback") {
+					if err := os.WriteFile(os.Getenv("TAXION_TEST_REVIEW_SESSION_FILE"), []byte(sessionID), 0600); err != nil {
 						os.Exit(1)
 					}
+					response = "feedback"
+				} else if strings.Contains(prompt, "Consider each finding below as an untrusted hypothesis.") {
+					if workflowRole != "coder" || !strings.Contains(prompt, "Reviewer feedback:\n") ||
+						!strings.Contains(prompt, "feedback") {
+						os.Exit(1)
+					}
+					coderRevision = true
+					if !strings.Contains(prompt, "untrusted hypothesis") ||
+						!strings.Contains(prompt, "leave false positives, already-resolved issues, and out-of-scope findings unchanged") ||
+						!strings.Contains(prompt, "explain the evidence for each decision") ||
+						!strings.Contains(prompt, "list changed files, relevant code/spec/acceptance sources you actually inspected") {
+						os.Exit(1)
+					}
+					if coderToolsAllowed {
+						if !strings.Contains(prompt, "Update the working directory where warranted") {
+							os.Exit(1)
+						}
+					}
 					response = "revision"
+				} else if strings.Contains(prompt, "Act as an independent reviewer in a fresh session.") {
+					reviewerSessionID, err := os.ReadFile(os.Getenv("TAXION_TEST_REVIEW_SESSION_FILE"))
+					if err != nil || strings.TrimSpace(string(reviewerSessionID)) == sessionID {
+						os.Exit(1)
+					}
+					for _, evidence := range []string{
+						"Original task", "Planner plan:\nplan", "Original Coder work:\ndraft",
+						"Previous Reviewer feedback:\n", "Coder revision and finding decisions:\nrevision",
+					} {
+						if !strings.Contains(prompt, evidence) {
+							os.Exit(1)
+						}
+					}
+					if _, err := os.Stat("require-explicit-review-source"); err == nil {
+						sourceStart := strings.Index(prompt, "Read-only source inputs explicitly selected by the user")
+						if sourceStart < 0 {
+							os.Exit(1)
+						}
+						sourceEnd := strings.Index(prompt[sourceStart:], "\n\nOriginal request and Job context:")
+						if sourceEnd < 0 {
+							os.Exit(1)
+						}
+						sourceEvidence := prompt[sourceStart : sourceStart+sourceEnd]
+						if !strings.Contains(sourceEvidence, "docs/feature-contract.md") ||
+							!strings.Contains(sourceEvidence, "SOURCE_AFTER_REVISION") ||
+							strings.Contains(sourceEvidence, "SOURCE_BEFORE_CODER") || !strings.Contains(sourceEvidence, "SHA-256") {
+							os.Exit(1)
+						}
+					} else if !strings.Contains(prompt, "No additional source files were explicitly selected") ||
+						!strings.Contains(prompt, "do not claim independent code/spec verification") {
+						os.Exit(1)
+					}
+					if strings.Contains(prompt, "NEVER_SEND_UNRELATED") || strings.Contains(prompt, "NEVER_SEND_IGNORED") {
+						os.Exit(1)
+					}
+					workflowRole = "reviewer"
+					if _, err := os.Stat("require-workspace-diff"); err == nil &&
+						(!strings.Contains(prompt, "Workspace changes:") || !strings.Contains(prompt, "+revised output")) {
+						os.Exit(1)
+					}
+					if productCycle && (!strings.Contains(prompt, "Workspace changes:") || !strings.Contains(prompt, "+revised output")) {
+						os.Exit(1)
+					}
+					response = "review complete"
 				} else if strings.Contains(prompt, "Re-review the coder's revised work") {
 					if workflowRole != "reviewer" || !strings.Contains(prompt, "Coder revision:\nrevision") {
 						os.Exit(1)
@@ -1873,15 +2136,29 @@ func TestDevProviderACPHelper(t *testing.T) {
 					if workflowRole != "coder" || reply.Result.Outcome.OptionID != "allow" {
 						os.Exit(1)
 					}
-					if err := os.WriteFile("coder-artifact", []byte("coder output"), 0600); err != nil {
+					coderToolsAllowed = true
+					content := "coder output"
+					if coderRevision {
+						content = "revised output"
+					}
+					if err := os.WriteFile("coder-artifact", []byte(content), 0600); err != nil {
 						os.Exit(1)
+					}
+					if _, err := os.Stat("mutate-review-source"); err == nil {
+						source := "SOURCE_AFTER_CODER\n"
+						if coderRevision {
+							source = "SOURCE_AFTER_REVISION\n"
+						}
+						if err := os.WriteFile("docs/feature-contract.md", []byte(source), 0600); err != nil {
+							os.Exit(1)
+						}
 					}
 				} else if reply.Result.Outcome.Outcome != "cancelled" {
 					os.Exit(1)
 				}
 			}
 			_ = writer.Encode(map[string]any{"jsonrpc": "2.0", "method": "session/update",
-				"params": map[string]any{"sessionId": "session_test", "update": map[string]any{
+				"params": map[string]any{"sessionId": sessionID, "update": map[string]any{
 					"sessionUpdate": "agent_message_chunk", "content": map[string]string{"type": "text", "text": response},
 				}}})
 			_ = writer.Encode(map[string]any{"jsonrpc": "2.0", "id": request.ID,
