@@ -1260,21 +1260,35 @@ func (j Job) Validate() error {
 		seenBoundaryDecisions[decision.ID] = struct{}{}
 	}
 	budgetUsed := make(map[string]uint64)
+	budgetLimits := make(map[string]uint64, len(j.PlanningAuthorizations))
+	for _, grant := range j.PlanningAuthorizations {
+		budgetLimits[grant.ID] = grant.Budget.MaxTokens
+	}
+	overrunTurnRevision := make(map[string]uint64)
 	for _, turn := range j.PlanningTurnIntents {
 		amount := turn.ReservedTokens
+		status := PlanningTurnUnknown
 		observations := observationsByTurn[turn.ID]
 		if len(observations) > 0 && observations[len(observations)-1].Status != PlanningTurnUnknown {
 			amount = observations[len(observations)-1].TokensUsed
+			status = observations[len(observations)-1].Status
 		}
-		if ^uint64(0)-budgetUsed[turn.PlanningAuthorizationID] < amount {
+		grantID := turn.PlanningAuthorizationID
+		if ^uint64(0)-budgetUsed[grantID] < amount {
 			return fmt.Errorf("%w: planning token usage overflow", ErrInvalidJob)
 		}
-		budgetUsed[turn.PlanningAuthorizationID] += amount
-	}
-	for grantID, used := range budgetUsed {
-		for _, grant := range j.PlanningAuthorizations {
-			if grant.ID == grantID && used > grant.Budget.MaxTokens {
+		budgetUsed[grantID] += amount
+		if limit, found := budgetLimits[grantID]; found && budgetUsed[grantID] > limit {
+			if status != PlanningTurnFailed || overrunTurnRevision[grantID] != 0 {
 				return fmt.Errorf("%w: planning token usage exceeds authorization budget", ErrInvalidJob)
+			}
+			overrunTurnRevision[grantID] = turn.CreatedRevision
+		}
+	}
+	for grantID, revision := range overrunTurnRevision {
+		for _, turn := range j.PlanningTurnIntents {
+			if turn.PlanningAuthorizationID == grantID && turn.CreatedRevision > revision {
+				return fmt.Errorf("%w: planning continued after an over-budget FAILED turn", ErrInvalidJob)
 			}
 		}
 	}
