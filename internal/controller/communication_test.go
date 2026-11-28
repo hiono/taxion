@@ -97,6 +97,10 @@ func TestCommunicationControllerPersistsCoderPlannerQuestionAndAnswer(t *testing
 	if err != nil {
 		t.Fatalf("StartTaskExecution Coder: %v", err)
 	}
+	coderExecution, _ = bindProviderTestWorktree(
+		t, database, executionController, jobID, "cmd_c3333333333333333333333333333333",
+		revision.Contract.TargetRepositories[0], coderExecution,
+	)
 
 	providerController, err := NewProviderControllerWithExecution(database, runtime, executionController)
 	if err != nil {
