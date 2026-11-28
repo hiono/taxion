@@ -14,6 +14,8 @@ Accepted
 
 **Coding executionはGit repository内で行い、TaskごとにGit Worktreeを割り当てます。同じWorktreeのmutating RoleExecutionは逐次実行し、独立Taskだけを別Worktreeで並行実行します。**
 
+この判断はTrusted Jobの実行に適用します。ローカルの `taxion run` は利用者が指定した作業ディレクトリを直接使い、Worktreeの作成・所有権管理や他プロセスとの排他を行いません。
+
 - 最初のJob-native開発環境はGit Worktreeとします。DRAFT intakeとPlannerのbounded read-only context取得にはWorktreeを要求しません。
 - Task間の独立性と明示的依存関係を確認してWorktreeを割り当てます。並行実行数はJobApprovalで承認されたMaxConcurrentExecutionsを上限とし、独立性が不明な場合は逐次実行します。
 - Worktreeの作成、割当て、識別、解放はControllerが管理し、repository identity、path、baseline commit、ownerを永続化します。

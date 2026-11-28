@@ -44,6 +44,12 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer, version V
 		}
 		return login(ctx, stdout, stderr)
 	}
+	if args[0] == "run" {
+		return runACPProvider(ctx, args[1:], stdout, stderr, true)
+	}
+	if args[0] == "provider" && len(args) >= 2 && args[1] == "login" {
+		return loginACPProvider(ctx, args[2:], stdout, stderr)
+	}
 	if args[0] == "dev" {
 		if len(args) >= 3 && args[1] == "job" && args[2] == "create" {
 			return createLocalJob(ctx, args[3:], stdout, stderr)
@@ -53,14 +59,14 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer, version V
 			case "login":
 				return loginACPProvider(ctx, args[3:], stdout, stderr)
 			case "run":
-				return runACPProvider(ctx, args[3:], stdout, stderr)
+				return runACPProvider(ctx, args[3:], stdout, stderr, false)
 			}
 		}
 		fmt.Fprintln(stderr, "commands: taxion dev job create, taxion dev provider login, taxion dev provider run")
 		return 2
 	}
 	if args[0] != "job" || len(args) < 2 {
-		fmt.Fprintln(stderr, "コマンドを確認してください: taxion auth login、taxion dev job create、taxion job <create|authorize-planning|start-planning|message|approve|amend|show|list>")
+		fmt.Fprintln(stderr, "コマンドを確認してください: taxion run、taxion provider login、taxion auth login、taxion dev、taxion job <create|authorize-planning|start-planning|message|approve|amend|show|list>")
 		return 2
 	}
 
@@ -715,6 +721,8 @@ func printUsage(w io.Writer) {
 	fmt.Fprint(w, `Taxion — turn human intent into continuous collaborative work
 
 Usage:
+  taxion run --request "..." --allow-coder-tools [--consult] [--working-directory .]
+  taxion provider login
   taxion auth login
   taxion job create --request "Trusted OIDC-authenticated DRAFT"
   taxion job authorize-planning [scope options] <job-id>

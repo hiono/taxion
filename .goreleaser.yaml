@@ -16,7 +16,7 @@ builds:
     flags:
       - -trimpath
     ldflags:
-      - -s -w
+      - -s -w -X main.releaseVersion={{.Version}} -X main.releaseRevision={{.FullCommit}} -X main.releaseBuiltAt={{.Date}} -X main.releaseChannel={{if .IsSnapshot}}development{{else}}release{{end}}
 archives:
   - id: taxion
     ids:

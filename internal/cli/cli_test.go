@@ -996,6 +996,106 @@ func TestDevProviderRunRequiresPrompt(t *testing.T) {
 	}
 }
 
+func TestRunRequiresRequestAndCoderOptIn(t *testing.T) {
+	for _, args := range [][]string{
+		{"run"},
+		{"run", "--request", "edit a file"},
+		{"run", "--allow-coder-tools"},
+		{"run", "--request", "edit a file", "--allow-coder-tools", "--job", "job_existing"},
+		{"run", "--request", "edit a file", "--allow-coder-tools", "--provider", "opencode"},
+	} {
+		var stdout, stderr bytes.Buffer
+		if code := Run(context.Background(), args, &stdout, &stderr, VersionInfo{}); code != 2 {
+			t.Fatalf("args=%v exit=%d, stderr=%q", args, code, stderr.String())
+		}
+	}
+}
+
+func TestRunCollaboratesAndSavesLocalJob(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("taxion run currently supports Linux only")
+	}
+	for _, consult := range []bool{false, true} {
+		t.Run(fmt.Sprintf("consult=%t", consult), func(t *testing.T) {
+			helper := fakeCopilot(t)
+			t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+			work := testGitWorkspace(t)
+			for _, file := range []string{"test-tool-permission", "require-workspace-diff"} {
+				if err := os.WriteFile(filepath.Join(work, file), nil, 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			path := filepath.Join(t.TempDir(), "jobs.sqlite")
+			var stdout, stderr bytes.Buffer
+			args := []string{"run",
+				"--command", helper, "--working-directory", work, "--store", path,
+				"--request", "Original task: test review cycle; product text-only review", "--allow-coder-tools"}
+			if consult {
+				args = append(args, "--consult")
+			}
+			code := Run(context.Background(), args, &stdout, &stderr, VersionInfo{})
+			if code != 0 || !strings.Contains(stdout.String(), "Reviewer re-review:\nreview complete") ||
+				!strings.Contains(stdout.String(), "Local collaboration saved") {
+				t.Fatalf("exit=%d, stdout=%q, stderr=%q", code, stdout.String(), stderr.String())
+			}
+			if data, err := os.ReadFile(filepath.Join(work, "coder-artifact")); err != nil || string(data) != "coder output" {
+				t.Fatalf("coder artifact=%q, err=%v", data, err)
+			}
+			database, err := store.Open(context.Background(), path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer database.Close()
+			jobs, err := database.ListJobs(context.Background(), 10)
+			if err != nil || len(jobs) != 1 {
+				t.Fatalf("jobs=%v err=%v", jobs, err)
+			}
+			job, err := database.GetJob(context.Background(), jobs[0].ID)
+			wantMessages := 6
+			if consult {
+				wantMessages = 8
+				if !strings.Contains(stdout.String(), "Planner answer:\nplanner answer") {
+					t.Fatalf("missing planner answer: %q", stdout.String())
+				}
+			}
+			if err != nil || len(job.JobMessages) != wantMessages ||
+				!strings.Contains(job.JobMessages[len(job.JobMessages)-1].Body, "review complete") {
+				t.Fatalf("job=%#v err=%v", job, err)
+			}
+		})
+	}
+}
+
+func TestRunPreservesRequestWhenProviderFails(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("taxion run currently supports Linux only")
+	}
+	helper := fakeCopilot(t)
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	path := filepath.Join(t.TempDir(), "jobs.sqlite")
+	var stdout, stderr bytes.Buffer
+	code := Run(context.Background(), []string{"run",
+		"--command", helper, "--working-directory", t.TempDir(), "--store", path,
+		"--request", "simulate provider failure", "--allow-coder-tools"},
+		&stdout, &stderr, VersionInfo{})
+	if code != 1 || !strings.Contains(stdout.String(), "Local Job ID:") {
+		t.Fatalf("exit=%d, stdout=%q, stderr=%q", code, stdout.String(), stderr.String())
+	}
+	database, err := store.Open(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	jobs, err := database.ListJobs(context.Background(), 10)
+	if err != nil || len(jobs) != 1 {
+		t.Fatalf("jobs=%v err=%v", jobs, err)
+	}
+	job, err := database.GetJob(context.Background(), jobs[0].ID)
+	if err != nil || len(job.JobMessages) != 1 || job.JobMessages[0].Body != "simulate provider failure" {
+		t.Fatalf("job=%#v err=%v", job, err)
+	}
+}
+
 func fakeOpenCode(t *testing.T) string {
 	t.Helper()
 	if runtime.GOOS == "windows" {
@@ -1008,6 +1108,31 @@ func fakeOpenCode(t *testing.T) string {
 	helper := filepath.Join(t.TempDir(), "opencode")
 	quoted := "'" + strings.ReplaceAll(executable, "'", "'\\''") + "'"
 	script := fmt.Sprintf("#!/bin/sh\n[ \"$1\" = acp ] || exit 1\nTAXION_TEST_CLI_HELPER=1 exec %s -test.run=^TestDevProviderACPHelper$\n", quoted)
+	if err := os.WriteFile(helper, []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	return helper
+}
+
+func fakeCopilot(t *testing.T) string {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("test helper uses a shell script")
+	}
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	helper := filepath.Join(t.TempDir(), "copilot")
+	quoted := "'" + strings.ReplaceAll(executable, "'", "'\\''") + "'"
+	script := fmt.Sprintf(`#!/bin/sh
+case "$*" in
+  "--acp --stdio") text_only=0 ;;
+  "--acp --stdio --available-tools=__taxion_no_tools__ --disable-builtin-mcps --no-custom-instructions") text_only=1 ;;
+  *) exit 1 ;;
+esac
+TAXION_TEST_CLI_HELPER=1 TAXION_TEST_COPILOT=1 TAXION_TEST_TEXT_ONLY="$text_only" exec %s -test.run=^TestDevProviderACPHelper$
+`, quoted)
 	if err := os.WriteFile(helper, []byte(script), 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -1574,7 +1699,7 @@ func TestDevProviderACPHelper(t *testing.T) {
 		return
 	}
 	config, err := os.ReadFile(filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "opencode", "opencode.json"))
-	if err != nil || string(config) != `{"model":"opencode/big-pickle"}` ||
+	if (os.Getenv("TAXION_TEST_COPILOT") != "1" && (err != nil || string(config) != `{"model":"opencode/big-pickle"}`)) ||
 		os.Getenv("TAXION_TEST_HOST_SECRET") != "" {
 		os.Exit(1)
 	}
@@ -1583,6 +1708,7 @@ func TestDevProviderACPHelper(t *testing.T) {
 	writer := json.NewEncoder(os.Stdout)
 	primaryStarted := false
 	workflowRole := ""
+	productCycle := false
 	for scanner.Scan() {
 		var request struct {
 			ID     json.RawMessage `json:"id"`
@@ -1616,6 +1742,7 @@ func TestDevProviderACPHelper(t *testing.T) {
 			response := "hello from ACP"
 			if len(request.Params.Prompt) > 0 {
 				prompt := request.Params.Prompt[0].Text
+				productCycle = productCycle || strings.Contains(prompt, "product text-only review")
 				if strings.Contains(prompt, "simulate provider failure") {
 					os.Exit(1)
 				} else if strings.Contains(prompt, "Act as the planner.") {
@@ -1657,6 +1784,9 @@ func TestDevProviderACPHelper(t *testing.T) {
 						(!strings.Contains(prompt, "Workspace changes:") || !strings.Contains(prompt, "+coder output")) {
 						os.Exit(1)
 					}
+					if productCycle && (!strings.Contains(prompt, "Workspace changes:") || !strings.Contains(prompt, "+coder output")) {
+						os.Exit(1)
+					}
 					workflowRole = "reviewer"
 					response = "feedback"
 				} else if strings.Contains(prompt, "Consider the review below.") {
@@ -1670,6 +1800,9 @@ func TestDevProviderACPHelper(t *testing.T) {
 					}
 					if _, err := os.Stat("require-workspace-diff"); err == nil &&
 						(!strings.Contains(prompt, "Workspace changes:") || !strings.Contains(prompt, "+coder output")) {
+						os.Exit(1)
+					}
+					if productCycle && (!strings.Contains(prompt, "Workspace changes:") || !strings.Contains(prompt, "+coder output")) {
 						os.Exit(1)
 					}
 					response = "review complete"
@@ -1706,7 +1839,14 @@ func TestDevProviderACPHelper(t *testing.T) {
 					response = "remembered"
 				}
 			}
-			if _, err := os.Stat("test-tool-permission"); err == nil && workflowRole != "" {
+			if productCycle && workflowRole != "" {
+				textOnly := os.Getenv("TAXION_TEST_TEXT_ONLY") == "1"
+				if textOnly != (workflowRole != "coder") {
+					os.Exit(1)
+				}
+			}
+			_, toolTestErr := os.Stat("test-tool-permission")
+			if workflowRole != "" && (toolTestErr == nil || productCycle && workflowRole != "coder") {
 				_ = writer.Encode(map[string]any{"jsonrpc": "2.0", "id": 77, "method": "session/request_permission",
 					"params": map[string]any{"options": []map[string]string{
 						{"optionId": "allow", "kind": "allow_once"},
