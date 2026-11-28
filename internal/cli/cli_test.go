@@ -1236,6 +1236,75 @@ func TestDevProviderConsultRequiresLocalJob(t *testing.T) {
 	}
 }
 
+func TestDevProviderReviewCycle(t *testing.T) {
+	for _, fail := range []bool{false, true} {
+		t.Run(fmt.Sprintf("review-fails=%v", fail), func(t *testing.T) {
+			helper := fakeOpenCode(t)
+			work := t.TempDir()
+			if fail {
+				if err := os.WriteFile(filepath.Join(work, "review-fail"), nil, 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			path := filepath.Join(t.TempDir(), "jobs.sqlite")
+			var stdout, stderr bytes.Buffer
+			if code := Run(context.Background(), []string{"dev", "job", "create", "--store", path,
+				"--request", "Original task"}, &stdout, &stderr, VersionInfo{}); code != 0 {
+				t.Fatalf("create exit=%d, stderr=%q", code, stderr.String())
+			}
+			jobID := strings.TrimPrefix(strings.Split(stdout.String(), "\n")[1], "ID: ")
+			stdout.Reset()
+			stderr.Reset()
+			code := Run(context.Background(), []string{"dev", "provider", "run", "--provider", "opencode",
+				"--command", helper, "--working-directory", work, "--store", path, "--job", jobID,
+				"--prompt", "test review cycle", "--review"}, &stdout, &stderr, VersionInfo{})
+			if (!fail && code != 0) || (fail && code != 1) {
+				t.Fatalf("exit=%d, stdout=%q, stderr=%q", code, stdout.String(), stderr.String())
+			}
+			if !fail && !strings.Contains(stdout.String(), "Reviewer re-review:\nreview complete") {
+				t.Fatalf("missing final review in output: %q", stdout.String())
+			}
+			database, err := store.Open(context.Background(), path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer database.Close()
+			job, err := database.GetJob(context.Background(), jobID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := []string{"test review cycle", "Planner plan:\nplan", "Coder work:\ndraft",
+				"Reviewer feedback:\nfeedback", "Coder revision:\nrevision", "Reviewer re-review:\nreview complete"}
+			if fail {
+				want = want[:3]
+			}
+			if len(job.JobMessages) != len(want) {
+				t.Fatalf("messages=%#v", job.JobMessages)
+			}
+			for i, body := range want {
+				message := job.JobMessages[i]
+				if message.Body != body ||
+					(i > 0 && (message.Sender.Kind != domain.ActorOrchestrator ||
+						message.ReplyToMessageID != job.JobMessages[i-1].ID)) {
+					t.Fatalf("message %d = %#v", i, message)
+				}
+			}
+		})
+	}
+}
+
+func TestDevProviderReviewRequiresLocalJobAndExcludesConsult(t *testing.T) {
+	for _, args := range [][]string{
+		{"dev", "provider", "run", "--prompt", "test", "--review"},
+		{"dev", "provider", "run", "--prompt", "test", "--job", "job_test", "--review", "--consult"},
+	} {
+		var stdout, stderr bytes.Buffer
+		if code := Run(context.Background(), args, &stdout, &stderr, VersionInfo{}); code != 2 {
+			t.Fatalf("args=%v exit=%d, stderr=%q", args, code, stderr.String())
+		}
+	}
+}
+
 func TestDevProviderConsultPreservesLongAnswer(t *testing.T) {
 	helper := fakeOpenCode(t)
 	path := filepath.Join(t.TempDir(), "jobs.sqlite")
@@ -1396,6 +1465,7 @@ func TestDevProviderACPHelper(t *testing.T) {
 	scanner.Buffer(make([]byte, 64*1024), 8*1024*1024)
 	writer := json.NewEncoder(os.Stdout)
 	primaryStarted := false
+	workflowRole := ""
 	for scanner.Scan() {
 		var request struct {
 			ID     json.RawMessage `json:"id"`
@@ -1431,6 +1501,37 @@ func TestDevProviderACPHelper(t *testing.T) {
 				prompt := request.Params.Prompt[0].Text
 				if strings.Contains(prompt, "simulate provider failure") {
 					os.Exit(1)
+				} else if strings.Contains(prompt, "Act as the planner.") {
+					if !strings.Contains(prompt, "Original task") || !strings.Contains(prompt, "test review cycle") {
+						os.Exit(1)
+					}
+					workflowRole = "planner"
+					response = "plan"
+				} else if strings.Contains(prompt, "Act as the coder.") {
+					if !strings.Contains(prompt, "Original task") || !strings.Contains(prompt, "Planner plan:\nplan") {
+						os.Exit(1)
+					}
+					workflowRole = "coder"
+					response = "draft"
+				} else if strings.Contains(prompt, "Act as the reviewer.") {
+					if _, err := os.Stat("review-fail"); err == nil {
+						os.Exit(1)
+					}
+					if !strings.Contains(prompt, "Planner plan:\nplan") || !strings.Contains(prompt, "Coder work:\ndraft") {
+						os.Exit(1)
+					}
+					workflowRole = "reviewer"
+					response = "feedback"
+				} else if strings.Contains(prompt, "Consider the review below.") {
+					if workflowRole != "coder" || !strings.Contains(prompt, "Reviewer feedback:\nfeedback") {
+						os.Exit(1)
+					}
+					response = "revision"
+				} else if strings.Contains(prompt, "Re-review the coder's revised work") {
+					if workflowRole != "reviewer" || !strings.Contains(prompt, "Coder revision:\nrevision") {
+						os.Exit(1)
+					}
+					response = "review complete"
 				} else if strings.Contains(prompt, "Before answering, write one question") {
 					primaryStarted = true
 					response = "consultation question"

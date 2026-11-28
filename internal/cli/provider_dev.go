@@ -64,12 +64,14 @@ func runACPProvider(ctx context.Context, args []string, stdout, stderr io.Writer
 	localJobID := flags.String("job", "", "Local untrusted Job ID")
 	storePath := flags.String("store", "", "Override the local Job database path")
 	consult := flags.Bool("consult", false, "Ask another agent once before answering the local Job")
+	review := flags.Bool("review", false, "Run a local planner, coder, and reviewer conversation")
 	if err := flags.Parse(args); err != nil {
 		return 2
 	}
 	if flags.NArg() != 0 || strings.TrimSpace(*prompt) == "" || *timeout <= 0 ||
-		(*backend != "copilot" && *backend != "opencode") || (*consult && *localJobID == "") {
-		fmt.Fprintln(stderr, "usage: taxion dev provider run --prompt \"...\" [--provider copilot|opencode] [--timeout 10m]")
+		(*backend != "copilot" && *backend != "opencode") ||
+		((*consult || *review) && *localJobID == "") || (*consult && *review) {
+		fmt.Fprintln(stderr, "usage: taxion dev provider run --prompt \"...\" [--provider copilot|opencode] [--job <local-job-id> [--consult|--review]] [--timeout 10m]")
 		return 2
 	}
 	cliName, providerID := "Copilot CLI", "copilot-cli"
@@ -173,6 +175,9 @@ func runACPProvider(ctx context.Context, args []string, stdout, stderr io.Writer
 	if *consult {
 		promptText += "\n\nBefore answering, write one question for another agent to help with this request. Return only the question."
 		maxTurns = 2
+	} else if *review {
+		promptText += "\n\nAct as the planner. Give the coder a concise plan for this request. Return only the plan."
+		maxTurns = 2
 	}
 	requestHash := sha256Hex(promptText)
 	configurationHash := sha256Hex(strings.Join([]string{commandPath, strings.Join(cliArgs, " "), workingDir, profile}, "\n"))
@@ -230,10 +235,9 @@ func runACPProvider(ctx context.Context, args []string, stdout, stderr io.Writer
 		_ = adapter.Close()
 		return report(stderr, resultErr)
 	}
-	if *consult {
+	if *consult || *review {
 		replyToID := question.Message.ID
 		record := func(label, body string) error {
-			fmt.Fprintf(stdout, "%s\n%s\n\n", label, body)
 			commandID, err := domain.NewID("cmd")
 			if err != nil {
 				return err
@@ -246,8 +250,24 @@ func runACPProvider(ctx context.Context, args []string, stdout, stderr io.Writer
 			})
 			if err == nil {
 				replyToID = outcome.Message.ID
+				fmt.Fprintf(stdout, "%s\n%s\n\n", label, body)
 			}
 			return err
+		}
+		if *review {
+			if err := record("Planner plan:", result.Content); err != nil {
+				_ = adapter.Close()
+				return report(stderr, err)
+			}
+			if err := reviewLocalJob(ctx, adapter, request, conversationContext, result.Content, record); err != nil {
+				_ = adapter.Close()
+				return report(stderr, err)
+			}
+			if err := adapter.Close(); err != nil {
+				return report(stderr, fmt.Errorf("%s process did not close cleanly", cliName))
+			}
+			fmt.Fprintln(stdout, "Local Job conversation saved (not an authorized Job execution)")
+			return 0
 		}
 		if err := record("Main agent question:", result.Content); err != nil {
 			_ = adapter.Close()
@@ -298,33 +318,74 @@ func runACPProvider(ctx context.Context, args []string, stdout, stderr io.Writer
 	return 0
 }
 
+func reviewLocalJob(ctx context.Context, adapter *provider.ACPAdapter, request provider.StartRequest, jobContext, plan string, record func(string, string) error) error {
+	coder, draft, err := startLocalAgent(ctx, adapter, request, "Act as the coder. Work on this request using the plan; provide your complete work as text.\n\n"+
+		jobContext+"\n\nPlanner plan:\n"+plan)
+	if err != nil {
+		return err
+	}
+	if err := record("Coder work:", draft); err != nil {
+		return err
+	}
+	reviewer, feedback, err := startLocalAgent(ctx, adapter, request, "Act as the reviewer. Review the coder's work against the request and plan; give concrete feedback, or say no changes are needed.\n\n"+
+		jobContext+"\n\nPlanner plan:\n"+plan+"\n\nCoder work:\n"+draft)
+	if err != nil {
+		return err
+	}
+	if err := record("Reviewer feedback:", feedback); err != nil {
+		return err
+	}
+	revision, err := sendLocalAgent(ctx, adapter, request, coder, "Consider the review below. Revise your work only where warranted and provide the complete result.\n\nReviewer feedback:\n"+feedback)
+	if err != nil {
+		return err
+	}
+	if err := record("Coder revision:", revision); err != nil {
+		return err
+	}
+	final, err := sendLocalAgent(ctx, adapter, request, reviewer, "Re-review the coder's revised work against the original request and your previous feedback.\n\nCoder revision:\n"+revision)
+	if err != nil {
+		return err
+	}
+	return record("Reviewer re-review:", final)
+}
+
 func consultAgent(ctx context.Context, adapter *provider.ACPAdapter, request provider.StartRequest, mainSession, jobContext, question string, record func(string, string) error) (string, error) {
+	_, answer, err := startLocalAgent(ctx, adapter, request, "Answer the main agent's question using this Job context:\n\n"+jobContext+
+		"\n\nMain agent question:\n"+question)
+	if err != nil {
+		return "", err
+	}
+	if err := record("Consulting agent answer:", answer); err != nil {
+		return "", err
+	}
+	return sendLocalAgent(ctx, adapter, request, mainSession,
+		"The other agent answered your question:\n"+answer+"\n\nContinue and answer the original request.")
+}
+
+func startLocalAgent(ctx context.Context, adapter *provider.ACPAdapter, request provider.StartRequest, prompt string) (string, string, error) {
 	var err error
 	request.OperationID, err = domain.NewID("op")
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	request.RoleExecutionID, err = domain.NewID("exec")
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
-	request.Prompt = "Answer the main agent's question using this Job context:\n\n" + jobContext +
-		"\n\nMain agent question:\n" + question
+	request.Prompt = prompt
 	request.PromptSHA256 = sha256Hex(request.Prompt)
 	request.RequestSHA256 = request.PromptSHA256
 	start, err := adapter.Start(ctx, request, nil)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	result, err := adapter.Result(ctx, provider.ResultRequest{
 		OperationID: start.OperationID, SessionID: start.SessionID,
 	}, nil)
-	if err != nil {
-		return "", err
-	}
-	if err := record("Consulting agent answer:", result.Content); err != nil {
-		return "", err
-	}
+	return start.SessionID, result.Content, err
+}
+
+func sendLocalAgent(ctx context.Context, adapter *provider.ACPAdapter, request provider.StartRequest, session, prompt string) (string, error) {
 	operationID, err := domain.NewID("op")
 	if err != nil {
 		return "", err
@@ -333,9 +394,8 @@ func consultAgent(ctx context.Context, adapter *provider.ACPAdapter, request pro
 	if err != nil {
 		return "", err
 	}
-	prompt := "The other agent answered your question:\n" + result.Content + "\n\nContinue and answer the original request."
 	turn, err := adapter.Send(ctx, provider.TurnRequest{
-		OperationID: operationID, TurnID: turnID, SessionID: mainSession,
+		OperationID: operationID, TurnID: turnID, SessionID: session,
 		Prompt: prompt, PromptSHA256: sha256Hex(prompt),
 		MaxTokens: request.MaxTokens, Deadline: request.Deadline,
 	}, nil)
@@ -343,7 +403,7 @@ func consultAgent(ctx context.Context, adapter *provider.ACPAdapter, request pro
 		return "", err
 	}
 	if turn.Status != "COMPLETED" {
-		return "", errors.New("main agent did not complete its answer")
+		return "", errors.New("agent did not complete its response")
 	}
 	return turn.Output, nil
 }
