@@ -63,6 +63,7 @@ func TestJobMessageStoreCommandIsIdempotent(t *testing.T) {
 		Recipient: domain.ActorRef{Kind: domain.ActorHuman, ID: job.IntakeProvenance.PrincipalID},
 		Body:      "この要件の意図を確認してください。",
 	}
+
 	commandID := "cmd_dddddddddddddddddddddddddddddddd"
 	receipt, message, err := database.AddJobMessage(ctx, job.ID, job.Revision, commandID, request)
 	if err != nil {
@@ -84,5 +85,45 @@ func TestJobMessageStoreCommandIsIdempotent(t *testing.T) {
 	job, err = database.GetJob(ctx, job.ID)
 	if err != nil || len(job.JobMessages) != 1 {
 		t.Fatalf("persisted Job messages=%d err=%v", len(job.JobMessages), err)
+	}
+}
+
+func TestJobMessageCanForwardContextAcrossActorsAfterRestart(t *testing.T) {
+	database, path := newTestStore(t)
+	ctx := context.Background()
+	job, planner := createMessageTestPlanner(t, database, "job_message_forward")
+	human := domain.ActorRef{Kind: domain.ActorHuman, ID: job.IntakeProvenance.PrincipalID}
+	_, question, err := database.AddJobMessage(ctx, job.ID, job.Revision,
+		"cmd_dddddddddddddddddddddddddddddddd", domain.JobMessageRequest{
+			Sender:    domain.ActorRef{Kind: domain.ActorPlanner, ID: planner.ID},
+			Recipient: human, Body: "仕様の優先順位を確認してください。",
+		})
+	if err != nil {
+		t.Fatalf("persist question: %v", err)
+	}
+	job, err = database.GetJob(ctx, job.ID)
+	if err != nil {
+		t.Fatalf("read question: %v", err)
+	}
+	_, forwarded, err := database.AddJobMessage(ctx, job.ID, job.Revision,
+		"cmd_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", domain.JobMessageRequest{
+			Sender: human, Recipient: domain.ActorRef{Kind: domain.ActorController, ID: domain.ControllerActorID},
+			ReplyToMessageID: question.ID, Body: "この質問は安全性を優先してください。",
+		})
+	if err != nil {
+		t.Fatalf("forward question: %v", err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatalf("close store: %v", err)
+	}
+	reopened, err := Open(ctx, path)
+	if err != nil {
+		t.Fatalf("reopen store: %v", err)
+	}
+	defer reopened.Close()
+	job, err = reopened.GetJob(ctx, job.ID)
+	if err != nil || len(job.JobMessages) != 2 || job.JobMessages[1].ID != forwarded.ID ||
+		job.JobMessages[1].ReplyToMessageID != question.ID || job.JobMessages[1].Body != forwarded.Body {
+		t.Fatalf("forwarded conversation after restart: %#v, %v", job.JobMessages, err)
 	}
 }

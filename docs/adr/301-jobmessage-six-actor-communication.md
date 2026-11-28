@@ -19,7 +19,7 @@ Taxion内部の協調は同じJobの文脈で追跡する必要があります�
 - Bodyは自然言語のまま保存・受け渡し、固定JSONやWorkflow DSLへ変換しません。
 - 永続化に必要な情報はMessageID、JobID、認証済みSender、Recipient、本文、作成時刻、Command provenanceに限定します。
 - SenderはHUMANの認証済みPrincipal、CONTROLLER / ORCHESTRATORの管理identity、またはPLANNER / CODER / REVIEWERのRoleExecution identityに結び付けます。本文の自己申告でSenderやRecipientを確定しません。
-- ReplyToMessageIDは元の会話へ戻る必要がある場合だけ保持します。ThreadID、BatchID、MessageKind等の重複・分類metadataを必須化しません。
+- ReplyToMessageIDは元の会話へ戻る必要がある場合だけ保持し、同じJob内の先行メッセージを参照します。送受信Actorが元の二者に限られることは要求しません。ThreadID、BatchID、MessageKind等の重複・分類metadataを必須化しません。
 - Jobや宛先を信頼できるContextから一意に特定できない場合だけ確認します。
 
 ### Information exchange and execution

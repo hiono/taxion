@@ -72,14 +72,6 @@ func NewJobMessage(job Job, commandID string, request JobMessageRequest, now tim
 	if !utf8.ValidString(request.Body) || strings.TrimSpace(request.Body) == "" || len(request.Body) > maxJobMessageBodyBytes {
 		return JobMessage{}, errors.New("JobMessage body must be non-empty valid UTF-8 within the size limit")
 	}
-	if request.ReplyToMessageID != "" {
-		repliedTo, found := jobMessageByID(job, request.ReplyToMessageID)
-		if !found || repliedTo.CreatedRevision >= job.Revision+1 ||
-			repliedTo.Recipient != request.Sender || repliedTo.Sender != request.Recipient {
-			return JobMessage{}, errors.New("JobMessage reply must target an earlier message between the same actors")
-		}
-	}
-
 	message := JobMessage{
 		ID: JobMessageID(commandID), CommandID: commandID, JobID: job.ID,
 		Sender: request.Sender, Recipient: request.Recipient,
@@ -121,8 +113,7 @@ func (m JobMessage) Validate(job Job) error {
 	}
 	if m.ReplyToMessageID != "" {
 		repliedTo, found := jobMessageByID(job, m.ReplyToMessageID)
-		if !found || repliedTo.CreatedRevision >= m.CreatedRevision ||
-			repliedTo.Recipient != m.Sender || repliedTo.Sender != m.Recipient {
+		if !found || repliedTo.CreatedRevision >= m.CreatedRevision {
 			return errors.New("JobMessage reply correlation is invalid")
 		}
 	}

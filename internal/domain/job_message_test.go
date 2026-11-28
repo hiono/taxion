@@ -94,11 +94,18 @@ func TestJobMessageRejectsForgedActorsAndInvalidReplies(t *testing.T) {
 	}, job.UpdatedAt.Add(time.Second)); err == nil {
 		t.Fatal("JobMessage accepted a reply to a missing message")
 	}
-	if _, err := NewJobMessage(job, "cmd_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", JobMessageRequest{
+	forward, err := NewJobMessage(job, "cmd_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", JobMessageRequest{
 		Sender:           ActorRef{Kind: ActorHuman, ID: recipient.ID},
 		Recipient:        ActorRef{Kind: ActorController, ID: ControllerActorID},
-		ReplyToMessageID: question.ID, Body: "reply to another actor",
-	}, job.UpdatedAt.Add(time.Second)); err == nil {
-		t.Fatal("JobMessage accepted a reply with mismatched actors")
+		ReplyToMessageID: question.ID, Body: "この質問の背景を補足します。",
+	}, job.UpdatedAt.Add(time.Second))
+	if err != nil {
+		t.Fatalf("NewJobMessage forwarding a question: %v", err)
+	}
+	job.JobMessages = append(job.JobMessages, forward)
+	job.Revision++
+	job.UpdatedAt = forward.CreatedAt
+	if err := job.Validate(); err != nil {
+		t.Fatalf("Job.Validate with forwarded conversation: %v", err)
 	}
 }
