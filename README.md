@@ -35,6 +35,7 @@ Taxion は、最初から完全な要求仕様や実装手順を利用者へ要�
 - `taxion dev job create --request "..."`：開発・永続化テスト専用の未認証ローカルDRAFT Jobを作成します。
 - `taxion dev provider login`：Copilot CLIをTaxion専用のローカルプロファイルへログインします。
 - `taxion dev provider run --prompt "..."`：Copilot CLIをACP stdioで起動し、自然言語promptを1回送信して応答を表示します。ツール権限要求はすべて拒否します。これはProvider接続のスモークテストであり、承認済みJobのCoder実行ではありません。
+- `taxion dev provider run --provider opencode --prompt "..."`：OpenCodeの`opencode/big-pickle`を一時プロファイルで起動するスモークテストです。Jobには接続されません。
 - `taxion job show <job-id>`：Jobの現在の内容をJSONで表示します。
 - `taxion job list`：保存済みJobを一覧表示します。
 

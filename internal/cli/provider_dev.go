@@ -55,28 +55,57 @@ func runACPProvider(ctx context.Context, args []string, stdout, stderr io.Writer
 	flags := flag.NewFlagSet("taxion dev provider run", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	prompt := flags.String("prompt", "", "Natural-language prompt")
-	command := flags.String("command", "copilot", "Copilot CLI executable")
+	backend := flags.String("provider", "copilot", "Provider: copilot or opencode")
+	command := flags.String("command", "", "Provider CLI executable")
 	workingDirectory := flags.String("working-directory", ".", "Provider working directory")
 	timeout := flags.Duration("timeout", 10*time.Minute, "Provider request timeout")
 	if err := flags.Parse(args); err != nil {
 		return 2
 	}
-	if flags.NArg() != 0 || strings.TrimSpace(*prompt) == "" || *timeout <= 0 {
-		fmt.Fprintln(stderr, "usage: taxion dev provider run --prompt \"...\" [--timeout 10m]")
+	if flags.NArg() != 0 || strings.TrimSpace(*prompt) == "" || *timeout <= 0 ||
+		(*backend != "copilot" && *backend != "opencode") {
+		fmt.Fprintln(stderr, "usage: taxion dev provider run --prompt \"...\" [--provider copilot|opencode] [--timeout 10m]")
 		return 2
 	}
-	commandPath, err := exec.LookPath(*command)
+	cliName, providerID := "Copilot CLI", "copilot-cli"
+	cliArgs := []string{"--acp", "--stdio"}
+	executable := *command
+	if *backend == "opencode" {
+		cliName, providerID = "OpenCode CLI", "opencode"
+		cliArgs = []string{"acp"}
+	}
+	if executable == "" {
+		executable = *backend
+	}
+	commandPath, err := exec.LookPath(executable)
 	if err != nil {
-		fmt.Fprintln(stderr, "Copilot CLI was not found in PATH")
+		fmt.Fprintf(stderr, "%s was not found in PATH\n", cliName)
 		return 1
 	}
 	commandPath, err = filepath.Abs(commandPath)
 	if err != nil {
 		return report(stderr, err)
 	}
-	profile, err := copilotProfileDirectory()
-	if err != nil {
-		return report(stderr, err)
+	var profile string
+	if *backend == "opencode" {
+		profile, err = os.MkdirTemp("", "taxion-opencode-")
+		if err != nil {
+			return report(stderr, err)
+		}
+		defer os.RemoveAll(profile)
+		configDir := filepath.Join(profile, ".config", "opencode")
+		if err := os.MkdirAll(configDir, 0700); err != nil {
+			return report(stderr, err)
+		}
+		if err := os.WriteFile(filepath.Join(configDir, "opencode.json"),
+			[]byte(`{"model":"opencode/big-pickle"}`), 0600); err != nil {
+			return report(stderr, err)
+		}
+	} else {
+		profile, err = copilotProfileDirectory()
+		if err != nil {
+			return report(stderr, err)
+		}
 	}
 	workingDir, err := filepath.Abs(*workingDirectory)
 	if err != nil {
@@ -89,13 +118,13 @@ func runACPProvider(ctx context.Context, args []string, stdout, stderr io.Writer
 	}
 
 	requestHash := sha256Hex(*prompt)
-	configurationHash := sha256Hex(strings.Join([]string{commandPath, "--acp --stdio", workingDir, profile}, "\n"))
+	configurationHash := sha256Hex(strings.Join([]string{commandPath, strings.Join(cliArgs, " "), workingDir, profile}, "\n"))
 	identity := provider.Identity{
-		ProviderID: "copilot-cli", AccountID: "local-profile", SDKVersion: "acp-v1",
+		ProviderID: providerID, AccountID: "local-profile", SDKVersion: "acp-v1",
 		ConfigurationSHA256: configurationHash,
 	}
 	adapter, err := provider.NewACPAdapter(provider.ACPConfig{
-		Command: commandPath, Args: []string{"--acp", "--stdio"},
+		Command: commandPath, Args: cliArgs,
 		WorkingDirectory: workingDir, HomeDirectory: profile, Identity: identity,
 	})
 	if err != nil {
@@ -138,7 +167,7 @@ func runACPProvider(ctx context.Context, args []string, stdout, stderr io.Writer
 		return report(stderr, resultErr)
 	}
 	if closeErr != nil {
-		return report(stderr, errors.New("Copilot CLI process did not close cleanly"))
+		return report(stderr, fmt.Errorf("%s process did not close cleanly", cliName))
 	}
 	fmt.Fprintf(stdout, "Provider: %s\nSession: %s\nToken usage: not reported by ACP\n\n%s\n", identity.ProviderID, start.SessionID, result.Content)
 	return 0

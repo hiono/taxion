@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/rand"
@@ -11,11 +12,13 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -996,6 +999,77 @@ func TestDevProviderRunRequiresPrompt(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "--prompt") {
 		t.Fatalf("stderr = %q, want prompt guidance", stderr.String())
+	}
+}
+
+func TestDevProviderRunOpenCode(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("test helper uses a shell script")
+	}
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	helper := filepath.Join(t.TempDir(), "opencode")
+	script := fmt.Sprintf("#!/bin/sh\n[ \"$1\" = acp ] || exit 1\nTAXION_TEST_CLI_HELPER=1 exec %q -test.run=^TestDevProviderACPHelper$\n", executable)
+	if err := os.WriteFile(helper, []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("TAXION_TEST_HOST_SECRET", "must-not-be-inherited")
+	var stdout, stderr bytes.Buffer
+	code := Run(context.Background(), []string{"dev", "provider", "run", "--provider", "opencode",
+		"--command", helper, "--working-directory", t.TempDir(), "--prompt", "hello"},
+		&stdout, &stderr, VersionInfo{})
+	if code != 0 || !strings.Contains(stdout.String(), "Provider: opencode") ||
+		!strings.Contains(stdout.String(), "hello from ACP") {
+		t.Fatalf("exit=%d, stdout=%q, stderr=%q", code, stdout.String(), stderr.String())
+	}
+}
+
+func TestDevProviderACPHelper(t *testing.T) {
+	if os.Getenv("TAXION_TEST_CLI_HELPER") != "1" {
+		return
+	}
+	config, err := os.ReadFile(filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "opencode", "opencode.json"))
+	if err != nil || string(config) != `{"model":"opencode/big-pickle"}` ||
+		os.Getenv("TAXION_TEST_HOST_SECRET") != "" {
+		os.Exit(1)
+	}
+	scanner := bufio.NewScanner(os.Stdin)
+	writer := json.NewEncoder(os.Stdout)
+	for scanner.Scan() {
+		var request struct {
+			ID     json.RawMessage `json:"id"`
+			Method string          `json:"method"`
+		}
+		if json.Unmarshal(scanner.Bytes(), &request) != nil {
+			os.Exit(1)
+		}
+		switch request.Method {
+		case "initialize":
+			_ = writer.Encode(map[string]any{"jsonrpc": "2.0", "id": request.ID,
+				"result": map[string]any{"protocolVersion": 1}})
+		case "session/new":
+			_ = writer.Encode(map[string]any{"jsonrpc": "2.0", "id": request.ID,
+				"result": map[string]any{"sessionId": "session_test"}})
+		case "session/prompt":
+			_ = writer.Encode(map[string]any{"jsonrpc": "2.0", "method": "session/update",
+				"params": map[string]any{"sessionId": "session_test", "update": map[string]any{
+					"sessionUpdate": "agent_message_chunk", "content": map[string]string{"type": "text", "text": "hello from ACP"},
+				}}})
+			_ = writer.Encode(map[string]any{"jsonrpc": "2.0", "id": request.ID,
+				"result": map[string]any{"stopReason": "end_turn"}})
+		}
+	}
+	os.Exit(0)
+}
+
+func TestDevProviderRunRejectsUnknownProvider(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := Run(context.Background(), []string{"dev", "provider", "run", "--provider", "unknown", "--prompt", "hello"},
+		&stdout, &stderr, VersionInfo{})
+	if code != 2 {
+		t.Fatalf("exit=%d, stderr=%q", code, stderr.String())
 	}
 }
 
