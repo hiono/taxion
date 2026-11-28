@@ -279,8 +279,8 @@ func TestACPAdapterUsesOneProcessPerRoleAndDeniesToolRequests(t *testing.T) {
 		capabilities.Has(CapabilityStartLookup) || capabilities.Has(CapabilitySendLookup) {
 		t.Fatal("ACP transport was allowed to claim unverified recovery capabilities")
 	}
-	if !capabilities.HasEvidenceAtLeast(CapabilityReadOnlyContextEnforcement, EvidenceSynthetic) {
-		t.Fatal("ACP Taskless sessions did not report their default-deny tool permission boundary")
+	if capabilities.Has(CapabilityReadOnlyContextEnforcement) {
+		t.Fatal("denying ACP tool requests does not enforce a read-only environment")
 	}
 
 	if _, err := adapter.Start(ctx, start, nil); err != nil {
@@ -1667,7 +1667,7 @@ func TestACPAdapterBoundsResultRetentionAndPreservesOperationTombstones(t *testi
 	}
 }
 
-func TestACPAdapterDeclaresOnlySyntheticReadOnlyEnforcement(t *testing.T) {
+func TestACPAdapterDoesNotClaimReadOnlyEnforcement(t *testing.T) {
 	identity := Identity{
 		ProviderID: "copilot", AccountID: "test-account", SDKVersion: "acp-v1",
 		ConfigurationSHA256: strings.Repeat("a", 64),
@@ -1680,11 +1680,8 @@ func TestACPAdapterDeclaresOnlySyntheticReadOnlyEnforcement(t *testing.T) {
 	if err := capabilities.Validate(identity); err != nil {
 		t.Fatalf("Validate capabilities: %v", err)
 	}
-	if !capabilities.HasEvidenceAtLeast(CapabilityReadOnlyContextEnforcement, EvidenceSynthetic) {
-		t.Fatal("default-deny ACP permission handling was not declared at synthetic evidence level")
-	}
-	if capabilities.HasEvidenceAtLeast(CapabilityReadOnlyContextEnforcement, EvidenceLive) {
-		t.Fatal("fake-peer/default-deny evidence was incorrectly promoted to live evidence")
+	if capabilities.Has(CapabilityReadOnlyContextEnforcement) {
+		t.Fatal("denying ACP tool requests does not enforce a read-only environment")
 	}
 	for _, capability := range []Capability{
 		CapabilityStartIdempotency, CapabilityStartLookup, CapabilitySendIdempotency,
