@@ -281,6 +281,20 @@ func TestExecutionControllerExactReplayAndCommandConflict(t *testing.T) {
 	}
 }
 
+func TestVerifyGitWorktreeChecksRepositoryAndBaseline(t *testing.T) {
+	repositoryPath, worktreePath, baselineCommit := newControllerTestGitWorktree(t)
+	if err := verifyGitWorktree(context.Background(), repositoryPath, worktreePath, baselineCommit); err != nil {
+		t.Fatalf("verify valid Git Worktree: %v", err)
+	}
+	if err := verifyGitWorktree(context.Background(), repositoryPath, worktreePath, strings.Repeat("0", 40)); err == nil {
+		t.Fatal("verifyGitWorktree accepted a mismatched baseline commit")
+	}
+	otherRepositoryPath, _, _ := newControllerTestGitWorktree(t)
+	if err := verifyGitWorktree(context.Background(), otherRepositoryPath, worktreePath, baselineCommit); err == nil {
+		t.Fatal("verifyGitWorktree accepted a Worktree from another repository")
+	}
+}
+
 func newControllerTestGitWorktree(t *testing.T) (string, string, string) {
 	t.Helper()
 	repositoryPath := filepath.Join(t.TempDir(), "repository")
