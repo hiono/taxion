@@ -750,7 +750,7 @@ func (a *ACPAdapter) send(ctx context.Context, session *acpSession, request Turn
 		unlockPrompt()
 	}()
 	response, err := session.process.callForSession(operationCtx, session, "session/prompt", map[string]any{
-		"sessionId": request.SessionID,
+		"sessionId": session.peerSessionID,
 		"prompt":    []map[string]string{{"type": "text", "text": request.Prompt}},
 	}, onUpdate)
 	if err != nil {
