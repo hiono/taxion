@@ -20,11 +20,12 @@ func bindACPTestWorktree(
 	execution domain.RoleExecution,
 ) (domain.RoleExecution, domain.ProviderStartIntent, domain.WorktreeAssignment) {
 	t.Helper()
+	repositoryPath, worktreePath, baselineCommit := newControllerTestGitWorktree(t)
 	assignment := domain.WorktreeAssignment{
 		ID:    domain.WorktreeAssignmentID(jobID, execution.TaskID, repositoryID),
 		JobID: jobID, TaskID: execution.TaskID, RepositoryID: repositoryID,
-		RepositoryPath: t.TempDir(), WorktreePath: t.TempDir(),
-		BaselineCommit: strings.Repeat("a", 40), OwnerRoleExecutionID: execution.ID,
+		RepositoryPath: repositoryPath, WorktreePath: worktreePath,
+		BaselineCommit: baselineCommit, OwnerRoleExecutionID: execution.ID,
 	}
 	if _, _, err := controller.BindWorktree(context.Background(), execution.ID, commandID, assignment); err != nil {
 		t.Fatalf("BindWorktree: %v", err)
