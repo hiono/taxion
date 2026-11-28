@@ -408,9 +408,11 @@ func newProviderControllerFixture(t *testing.T, runtime *fakePlanningProviderRun
 	}
 	runtime.capabilities = provider.Capabilities{
 		Identity: runtime.identity, StartIdempotency: true, StartLookup: true,
+		ReadOnlyContextEnforcement: true,
 		Evidence: []provider.CapabilityEvidence{
 			{Capability: provider.CapabilityStartIdempotency, Identity: runtime.identity, TestID: "controller-test", EvidenceSHA256: strings.Repeat("c", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
 			{Capability: provider.CapabilityStartLookup, Identity: runtime.identity, TestID: "controller-test", EvidenceSHA256: strings.Repeat("d", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
+			{Capability: provider.CapabilityReadOnlyContextEnforcement, Identity: runtime.identity, TestID: "controller-test", EvidenceSHA256: strings.Repeat("e", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
 		},
 	}
 	controller, err := NewProviderController(database, runtime)
@@ -449,6 +451,71 @@ func (s *providerClaimBarrierStore) GetJob(ctx context.Context, jobID string) (d
 		}
 	}
 	return job, nil
+}
+
+func TestProviderControllerRejectsUnverifiedPlanningBeforeIntent(t *testing.T) {
+	runtime := &fakePlanningProviderRuntime{}
+	controller, database, principal, jobID, grantID, documents := newProviderControllerFixture(t, runtime)
+	runtime.capabilities.ReadOnlyContextEnforcement = false
+	_, _, _, _, err := controller.StartPlanning(context.Background(), jobID, grantID,
+		"cmd_18181818181818181818181818181818", documents, principal)
+	if !errors.Is(err, provider.ErrUnsupportedCapability) || runtime.startCalls != 0 {
+		t.Fatalf("unverified planning started: starts=%d err=%v", runtime.startCalls, err)
+	}
+	job, err := database.GetJob(context.Background(), jobID)
+	if err != nil || len(job.ProviderStartIntents) != 0 {
+		t.Fatalf("unverified planning saved an intent: %#v err=%v", job.ProviderStartIntents, err)
+	}
+	runtime.capabilities.ReadOnlyContextEnforcement = true
+	if _, _, _, _, err := controller.StartPlanning(context.Background(), jobID, grantID,
+		"cmd_18181818181818181818181818181818", documents, principal); err != nil || runtime.startCalls != 1 {
+		t.Fatalf("verified retry did not start: starts=%d err=%v", runtime.startCalls, err)
+	}
+}
+
+func TestProviderControllerRejectsTurnAfterPlanningBoundaryIsLost(t *testing.T) {
+	runtime := &fakePlanningProviderRuntime{}
+	controller, database, principal, jobID, grantID, documents := newProviderControllerFixture(t, runtime)
+	_, execution, _, _, err := controller.StartPlanning(context.Background(), jobID, grantID,
+		"cmd_18181818181818181818181818181818", documents, principal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime.capabilities.ReadOnlyContextEnforcement = false
+	_, _, _, _, err = controller.SendPlanning(context.Background(), jobID, execution.ID, "session_1",
+		"cmd_19191919191919191919191919191919", "continue", 100, principal)
+	if !errors.Is(err, provider.ErrUnsupportedCapability) || runtime.sendCalls != 0 {
+		t.Fatalf("unverified turn sent: sends=%d err=%v", runtime.sendCalls, err)
+	}
+	job, err := database.GetJob(context.Background(), jobID)
+	if err != nil || len(job.PlanningTurnIntents) != 0 {
+		t.Fatalf("unverified turn saved an intent: %#v err=%v", job.PlanningTurnIntents, err)
+	}
+	runtime.capabilities.ReadOnlyContextEnforcement = true
+	if _, _, observation, _, err := controller.SendPlanning(context.Background(), jobID, execution.ID, "session_1",
+		"cmd_19191919191919191919191919191919", "continue", 100, principal); err != nil ||
+		observation.Status != domain.PlanningTurnCompleted || runtime.sendCalls != 1 {
+		t.Fatalf("verified turn did not run: observation=%#v sends=%d err=%v", observation, runtime.sendCalls, err)
+	}
+}
+
+func TestProviderControllerDoesNotRetryStartAfterPlanningBoundaryIsLost(t *testing.T) {
+	runtime := &fakePlanningProviderRuntime{
+		startErr: &provider.OperationError{Class: provider.FailureAmbiguous, Code: provider.OperationCodeTimeout},
+	}
+	controller, _, principal, jobID, grantID, documents := newProviderControllerFixture(t, runtime)
+	commandID := "cmd_18181818181818181818181818181818"
+	_, _, _, _, _ = controller.StartPlanning(context.Background(), jobID, grantID, commandID, documents, principal)
+	runtime.startErr = nil
+	runtime.lookupResult = provider.LookupResult{
+		OperationID: domain.ProviderStartOperationID(commandID),
+		Status:      provider.LookupStatusNotFound, EvidenceSHA256: strings.Repeat("f", 64),
+	}
+	runtime.capabilities.ReadOnlyContextEnforcement = false
+	_, _, _, _, err := controller.StartPlanning(context.Background(), jobID, grantID, commandID, documents, principal)
+	if !errors.Is(err, provider.ErrUnsupportedCapability) || runtime.startCalls != 1 || runtime.lookupCalls != 1 {
+		t.Fatalf("unverified recovery: starts=%d lookups=%d err=%v", runtime.startCalls, runtime.lookupCalls, err)
+	}
 }
 
 func TestProviderPlanningTurnDispatchClaimIsExclusive(t *testing.T) {
@@ -1499,22 +1566,18 @@ func TestProviderControllerRejectsUnverifiedSDKBeforeProviderSideEffect(t *testi
 	if err != nil {
 		t.Fatalf("GetJob: %v", err)
 	}
-	if len(job.ProviderStartIntents) != 1 || len(job.ProviderStartObservations) != 0 || runtime.startCalls != 0 {
+	if len(job.ProviderStartIntents) != 0 || len(job.ProviderStartObservations) != 0 || runtime.startCalls != 0 {
 		t.Fatalf("unverified SDK version caused external execution: intents=%d observations=%d starts=%d",
 			len(job.ProviderStartIntents), len(job.ProviderStartObservations), runtime.startCalls)
 	}
 	runtime.identity.SDKVersion = "test-sdk/1"
-	runtime.lookupResult = provider.LookupResult{
-		Found: false, OperationID: domain.ProviderStartOperationID(commandID),
-		Status: provider.LookupStatusNotFound, EvidenceSHA256: strings.Repeat("f", 64),
-	}
 	if _, _, _, result, err := controller.StartPlanning(context.Background(), jobID, grantID, commandID, documents, principal); err != nil {
 		t.Fatalf("retry after trusted SDK verification: %v", err)
 	} else if result.SessionID != "session_1" {
 		t.Fatalf("unexpected Start result: %#v", result)
 	}
-	if runtime.startCalls != 1 || runtime.lookupCalls != 1 {
-		t.Fatalf("SDK retry did not use lookup-before-start: starts=%d lookups=%d", runtime.startCalls, runtime.lookupCalls)
+	if runtime.startCalls != 1 || runtime.lookupCalls != 0 {
+		t.Fatalf("preflight retry caused unexpected calls: starts=%d lookups=%d", runtime.startCalls, runtime.lookupCalls)
 	}
 }
 

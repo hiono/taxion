@@ -118,6 +118,11 @@ func (c *ProviderController) StartPlanning(
 	if err := request.Validate(); err != nil {
 		return store.CommandReceipt{}, domain.RoleExecution{}, domain.ProviderStartIntent{}, provider.StartResult{}, err
 	}
+	if !existingIntent {
+		if err := c.requirePlanningBoundary(ctx); err != nil {
+			return store.CommandReceipt{}, domain.RoleExecution{}, domain.ProviderStartIntent{}, provider.StartResult{}, err
+		}
+	}
 
 	initialRevision := job.Revision
 	receipt, execution, intent, err := c.store.StartTasklessPlanner(
@@ -158,6 +163,9 @@ func (c *ProviderController) StartPlanning(
 		return c.reconcileStart(ctx, receipt, execution, intent, request, currentGrant, principal)
 	}
 	if err := currentGrant.ValidateFor(current, principal.PrincipalID(), c.now()); err != nil {
+		return receipt, execution, intent, provider.StartResult{}, err
+	}
+	if err := c.requirePlanningBoundary(ctx); err != nil {
 		return receipt, execution, intent, provider.StartResult{}, err
 	}
 	result, err := c.runtime.Start(ctx, request)
@@ -536,6 +544,9 @@ func (c *ProviderController) reconcileStart(
 	if err := currentGrant.ValidateFor(current, principal.PrincipalID(), c.now()); err != nil {
 		return receipt, execution, intent, provider.StartResult{}, err
 	}
+	if err := c.requirePlanningBoundary(ctx); err != nil {
+		return receipt, execution, intent, provider.StartResult{}, err
+	}
 	result, err := c.runtime.Start(ctx, request)
 	if err != nil {
 		if providerOperationMayHaveStarted(err) {
@@ -612,6 +623,18 @@ func providerIdentityMatches(identity provider.Identity, grant domain.PlanningAu
 	return identity.ProviderID == grant.ProviderID &&
 		identity.AccountID == grant.AccountID &&
 		identity.ConfigurationSHA256 == grant.ConfigurationSHA256
+}
+
+func (c *ProviderController) requirePlanningBoundary(ctx context.Context) error {
+	capabilities, err := c.runtime.Capabilities(ctx)
+	if err != nil {
+		return err
+	}
+	if capabilities.Identity != c.runtime.Identity() ||
+		!capabilities.HasEvidenceAtLeast(provider.CapabilityReadOnlyContextEnforcement, provider.EvidenceLive) {
+		return provider.ErrUnsupportedCapability
+	}
+	return nil
 }
 
 func validatePlanningContext(grant domain.PlanningAuthorization, documents []provider.ContextDocument) error {
@@ -919,6 +942,11 @@ func (c *ProviderController) SendPlanning(
 	if err := request.Validate(); err != nil {
 		return store.CommandReceipt{}, domain.PlanningTurnIntent{}, domain.PlanningTurnObservation{}, provider.TurnResult{}, provider.ErrProviderInvalidRequest
 	}
+	if !existingIntent {
+		if err := c.requirePlanningBoundary(ctx); err != nil {
+			return store.CommandReceipt{}, domain.PlanningTurnIntent{}, domain.PlanningTurnObservation{}, provider.TurnResult{}, err
+		}
+	}
 	receipt, turn, err := c.store.AddPlanningTurnIntent(
 		ctx, jobID, job.Revision, execution.ID, sessionID, commandID, promptSHA256, reservedTokens, principal,
 	)
@@ -1115,6 +1143,9 @@ func (c *ProviderController) reconcileTurn(
 	}
 	if err := grant.ValidateFor(current, principal.PrincipalID(), c.now()); err != nil {
 		return receipt, turn, domain.PlanningTurnObservation{}, provider.TurnResult{}, err
+	}
+	if err := c.requirePlanningBoundary(ctx); err != nil {
+		return receipt, turn, previous, provider.TurnResult{}, err
 	}
 	result, err := c.runtime.Send(ctx, request)
 	if err != nil {

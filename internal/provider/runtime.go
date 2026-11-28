@@ -72,6 +72,15 @@ func (r *Runtime) Start(ctx context.Context, request StartRequest) (StartResult,
 	}
 	defer cancel()
 	ctx = boundedContext
+	if request.TaskID == "" {
+		capabilities, err := r.verifiedCapabilities(ctx)
+		if err != nil {
+			return StartResult{}, err
+		}
+		if !capabilities.HasEvidenceAtLeast(CapabilityReadOnlyContextEnforcement, r.minimumEvidence) {
+			return StartResult{}, ErrUnsupportedCapability
+		}
+	}
 	result, err := withCredential(ctx, r.broker, r.identity, func(lease CredentialLease) (StartResult, error) {
 		result, err := r.adapter.Start(ctx, request, lease)
 		if err != nil {

@@ -209,13 +209,19 @@ func (runtimeTestVerifier) Verify(_ context.Context, identity Identity, evidence
 		evidence.EvidenceLevel == EvidenceSynthetic, nil
 }
 
+type liveBoundaryTestVerifier struct{}
+
+func (liveBoundaryTestVerifier) Verify(_ context.Context, identity Identity, evidence CapabilityEvidence) (bool, error) {
+	return evidence.Identity == identity && evidence.EvidenceLevel == EvidenceLive, nil
+}
+
 func newTestRuntime(adapter Adapter, broker CredentialBroker) (*Runtime, error) {
 	return newRuntimeWithEvidence(adapter, broker, runtimeTestVerifier{}, EvidenceSynthetic, EvidenceSynthetic)
 }
 
 func newTestAdapter(capabilities ...Capability) *testAdapter {
 	identity := testIdentity()
-	declaration := Capabilities{Identity: identity}
+	declaration := Capabilities{Identity: identity, ReadOnlyContextEnforcement: true}
 	for _, capability := range capabilities {
 		switch capability {
 		case CapabilityStartIdempotency:
@@ -241,6 +247,7 @@ func newTestAdapter(capabilities ...Capability) *testAdapter {
 		}
 		declaration.Evidence = append(declaration.Evidence, liveEvidence(identity, capability))
 	}
+	declaration.Evidence = append(declaration.Evidence, liveEvidence(identity, CapabilityReadOnlyContextEnforcement))
 	return &testAdapter{
 		identity: identity, capabilities: declaration,
 		stopQuiescent: true, resultFinal: true, usageComplete: true,
@@ -275,6 +282,29 @@ func validResumeRequest() ResumeRequest {
 
 func validResultRequest() ResultRequest {
 	return ResultRequest{OperationID: "provider_turn_1", SessionID: "session_1", TurnID: "turn_1"}
+}
+
+func TestRuntimeRejectsUnverifiedPlanningBoundaryBeforeStart(t *testing.T) {
+	adapter := newTestAdapter()
+	broker := &testBroker{secret: []byte("runtime-test-secret")}
+	runtime, err := NewRuntime(adapter, broker, runtimeTestVerifier{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runtime.Start(context.Background(), validStartRequest()); !errors.Is(err, ErrUnsupportedCapability) {
+		t.Fatalf("synthetic read-only evidence was accepted: %v", err)
+	}
+	if adapter.startCalls != 0 || broker.acquires != 0 {
+		t.Fatalf("unverified planning started: starts=%d credentials=%d", adapter.startCalls, broker.acquires)
+	}
+	adapter.capabilities.Evidence[0].EvidenceLevel = EvidenceLive
+	runtime, err = NewRuntime(adapter, broker, liveBoundaryTestVerifier{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runtime.Start(context.Background(), validStartRequest()); err != nil || adapter.startCalls != 1 {
+		t.Fatalf("verified planning did not start: starts=%d err=%v", adapter.startCalls, err)
+	}
 }
 
 func TestRuntimeRejectsExpiredStartDeadlineBeforeCredentialAcquisition(t *testing.T) {
@@ -369,7 +399,7 @@ func TestRuntimeClosesCredentialAndReturnsUnknownWhenAdapterPanics(t *testing.T)
 func TestRuntimeAllowsOneShotStartAndSendWithoutRetryEvidence(t *testing.T) {
 	adapter := newTestAdapter(CapabilityStartIdempotency)
 	broker := &testBroker{secret: []byte("runtime-test-secret")}
-	runtime, err := NewRuntime(adapter, broker, runtimeTestVerifier{})
+	runtime, err := newTestRuntime(adapter, broker)
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
 	}
