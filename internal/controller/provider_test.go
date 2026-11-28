@@ -359,11 +359,15 @@ func (f *fakePlanningProviderRuntime) Usage(_ context.Context, request provider.
 	return result, nil
 }
 
-func newProviderControllerFixture(t *testing.T, runtime *fakePlanningProviderRuntime) (*ProviderController, *store.Store, auth.AuthenticatedPrincipal, string, string, []provider.ContextDocument) {
+func newProviderControllerFixture(t *testing.T, runtime *fakePlanningProviderRuntime, paths ...string) (*ProviderController, *store.Store, auth.AuthenticatedPrincipal, string, string, []provider.ContextDocument) {
 	t.Helper()
 	ctx := context.Background()
 	principal := newProviderTestPrincipal(t)
-	database, err := store.Open(ctx, filepath.Join(t.TempDir(), "provider-controller.sqlite"))
+	path := filepath.Join(t.TempDir(), "provider-controller.sqlite")
+	if len(paths) > 0 {
+		path = paths[0]
+	}
+	database, err := store.Open(ctx, path)
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
 	}
@@ -771,9 +775,89 @@ func TestProviderControllerPersistsTurnIntentBeforeSend(t *testing.T) {
 	}
 }
 
-func TestProviderControllerReconcilesUnknownTurnWithLookupAndCompleteUsage(t *testing.T) {
+func TestProviderControllerPersistsAndRestoresPlannerResponse(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "jobs.sqlite")
+	runtime := &fakePlanningProviderRuntime{}
+	controller, database, principal, jobID, grantID, documents := newProviderControllerFixture(t, runtime, path)
+	_, execution, _, _, err := controller.StartPlanning(ctx, jobID, grantID,
+		"cmd_18181818181818181818181818181818", documents, principal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commandID := "cmd_19191919191919191919191919191919"
+	_, _, observation, result, err := controller.SendPlanning(ctx, jobID, execution.ID, "session_1",
+		commandID, "inspect the accepted repository snapshot", 100, principal)
+	if err != nil || result.Output != "turn output" {
+		t.Fatalf("SendPlanning: result=%#v err=%v", result, err)
+	}
+	job, err := database.GetJob(ctx, jobID)
+	if err != nil || len(job.JobMessages) != 1 {
+		t.Fatalf("persisted messages=%#v err=%v", job.JobMessages, err)
+	}
+	message := job.JobMessages[0]
+	if message.Body != result.Output || message.Sender != (domain.ActorRef{Kind: domain.ActorPlanner, ID: execution.ID}) ||
+		message.Recipient != (domain.ActorRef{Kind: domain.ActorOrchestrator, ID: domain.OrchestratorActorID}) ||
+		message.CreatedRevision >= observation.CreatedRevision {
+		t.Fatalf("Planner response was not saved before completion: %#v %#v", message, observation)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := store.Open(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	controller, err = NewProviderController(reopened, runtime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, _, retry, err := controller.SendPlanning(ctx, jobID, execution.ID, "session_1",
+		commandID, "inspect the accepted repository snapshot", 100, principal)
+	if err != nil || retry.Output != result.Output || runtime.sendCalls != 1 {
+		t.Fatalf("restored response=%#v sends=%d err=%v", retry, runtime.sendCalls, err)
+	}
+	job, err = reopened.GetJob(ctx, jobID)
+	if err != nil || len(job.JobMessages) != 1 || job.JobMessages[0].ID != message.ID {
+		t.Fatalf("retry duplicated or lost the message: %#v err=%v", job.JobMessages, err)
+	}
+}
+
+type rejectPlannerMessageStore struct{ *store.Store }
+
+func (s rejectPlannerMessageStore) AddJobMessage(context.Context, string, uint64, string, domain.JobMessageRequest) (store.CommandReceipt, domain.JobMessage, error) {
+	return store.CommandReceipt{}, domain.JobMessage{}, errors.New("message store unavailable")
+}
+
+func TestProviderControllerDoesNotCompleteOrResendWhenSavingResponseFails(t *testing.T) {
+	ctx := context.Background()
 	runtime := &fakePlanningProviderRuntime{}
 	controller, database, principal, jobID, grantID, documents := newProviderControllerFixture(t, runtime)
+	_, execution, _, _, err := controller.StartPlanning(ctx, jobID, grantID,
+		"cmd_18181818181818181818181818181818", documents, principal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	failing, err := NewProviderController(rejectPlannerMessageStore{database}, runtime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commandID := "cmd_19191919191919191919191919191919"
+	_, turn, observation, result, err := failing.SendPlanning(ctx, jobID, execution.ID, "session_1",
+		commandID, "inspect the accepted repository snapshot", 100, principal)
+	if err == nil || result.Output != "turn output" || observation.Status != domain.PlanningTurnUnknown {
+		t.Fatalf("save failure: observation=%#v result=%#v err=%v", observation, result, err)
+	}
+	if _, _, _, _, err := controller.SendPlanning(ctx, jobID, execution.ID, "session_1",
+		commandID, "inspect the accepted repository snapshot", 100, principal); !errors.Is(err, provider.ErrUnsupportedCapability) || runtime.sendCalls != 1 {
+		t.Fatalf("unknown result was resent: sends=%d err=%v", runtime.sendCalls, err)
+	}
+	job, err := database.GetJob(ctx, jobID)
+	if err != nil || len(job.JobMessages) != 0 || len(job.PlanningTurnObservations) != 1 ||
+		job.PlanningTurnObservations[0].Status != domain.PlanningTurnUnknown {
+		t.Fatalf("save failure must remain UNKNOWN: %#v err=%v", job, err)
+	}
 	now := time.Now().UTC()
 	runtime.capabilities.SendLookup = true
 	runtime.capabilities.UsageIdentity = true
@@ -782,6 +866,208 @@ func TestProviderControllerReconcilesUnknownTurnWithLookupAndCompleteUsage(t *te
 		provider.CapabilityEvidence{Capability: provider.CapabilitySendLookup, Identity: runtime.identity, TestID: "controller-test", EvidenceSHA256: strings.Repeat("a", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
 		provider.CapabilityEvidence{Capability: provider.CapabilityUsageIdentity, Identity: runtime.identity, TestID: "controller-test", EvidenceSHA256: strings.Repeat("b", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
 		provider.CapabilityEvidence{Capability: provider.CapabilityUsageCompleteness, Identity: runtime.identity, TestID: "controller-test", EvidenceSHA256: strings.Repeat("c", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
+	)
+	runtime.lookupResult = provider.LookupResult{
+		Found: true, OperationID: turn.OperationID, SessionID: "session_1", TurnID: turn.ID,
+		Status: domain.PlanningTurnCompleted, ReceiptID: "receipt_1", UsageID: "usage_1",
+		EvidenceSHA256: strings.Repeat("e", 64),
+	}
+	_, _, observation, _, err = controller.SendPlanning(ctx, jobID, execution.ID, "session_1",
+		commandID, "inspect the accepted repository snapshot", 100, principal)
+	if !errors.Is(err, provider.ErrUnsupportedCapability) || observation.Status != domain.PlanningTurnUnknown || runtime.sendCalls != 1 {
+		t.Fatalf("unrecoverable output must remain UNKNOWN: observation=%#v sends=%d err=%v", observation, runtime.sendCalls, err)
+	}
+	runtime.capabilities.FinalOutputRetrieval = true
+	runtime.capabilities.Evidence = append(runtime.capabilities.Evidence,
+		provider.CapabilityEvidence{Capability: provider.CapabilityFinalOutput, Identity: runtime.identity, TestID: "controller-test", EvidenceSHA256: strings.Repeat("d", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
+	)
+	runtime.lookupResult.ResultSHA256 = sha256String("different response")
+	if _, _, observation, _, err := controller.SendPlanning(ctx, jobID, execution.ID, "session_1",
+		commandID, "inspect the accepted repository snapshot", 100, principal); err == nil || observation.Status != domain.PlanningTurnUnknown {
+		t.Fatalf("mismatched recovered output must remain UNKNOWN: observation=%#v err=%v", observation, err)
+	}
+	runtime.lookupResult.ResultSHA256 = sha256String("final provider result")
+	if _, _, observation, _, err := failing.SendPlanning(ctx, jobID, execution.ID, "session_1",
+		commandID, "inspect the accepted repository snapshot", 100, principal); err == nil || observation.Status != domain.PlanningTurnUnknown {
+		t.Fatalf("recovered output save failure: observation=%#v err=%v", observation, err)
+	}
+	runtime.capabilities.FinalOutputRetrieval = false
+	_, _, observation, recovered, err := controller.SendPlanning(ctx, jobID, execution.ID, "session_1",
+		commandID, "inspect the accepted repository snapshot", 100, principal)
+	if err != nil || observation.Status != domain.PlanningTurnCompleted ||
+		recovered.Output != "final provider result" || runtime.sendCalls != 1 || runtime.resultCalls != 1 {
+		t.Fatalf("recovered response=%#v observation=%#v sends=%d results=%d err=%v", recovered, observation, runtime.sendCalls, runtime.resultCalls, err)
+	}
+}
+
+type rejectTerminalTurnStore struct{ *store.Store }
+
+func (s rejectTerminalTurnStore) AddPlanningTurnObservation(ctx context.Context, jobID string, revision uint64,
+	turnID, commandID, status string, tokens uint64, evidence string, reconciles bool, principal auth.AuthenticatedPrincipal,
+) (store.CommandReceipt, domain.PlanningTurnObservation, error) {
+	if status == domain.PlanningTurnCompleted {
+		return store.CommandReceipt{}, domain.PlanningTurnObservation{}, errors.New("terminal observation unavailable")
+	}
+	return s.Store.AddPlanningTurnObservation(ctx, jobID, revision, turnID, commandID, status, tokens, evidence, reconciles, principal)
+}
+
+func TestProviderControllerPreservesResponseWhenTerminalObservationFails(t *testing.T) {
+	ctx := context.Background()
+	runtime := &fakePlanningProviderRuntime{}
+	controller, database, principal, jobID, grantID, documents := newProviderControllerFixture(t, runtime)
+	_, execution, _, _, err := controller.StartPlanning(ctx, jobID, grantID,
+		"cmd_18181818181818181818181818181818", documents, principal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	failing, err := NewProviderController(rejectTerminalTurnStore{database}, runtime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commandID := "cmd_19191919191919191919191919191919"
+	_, turn, observation, _, err := failing.SendPlanning(ctx, jobID, execution.ID, "session_1",
+		commandID, "inspect the accepted repository snapshot", 100, principal)
+	if err == nil || observation.Status != domain.PlanningTurnUnknown {
+		t.Fatalf("terminal failure: observation=%#v err=%v", observation, err)
+	}
+	job, err := database.GetJob(ctx, jobID)
+	if err != nil || len(job.JobMessages) != 1 || job.JobMessages[0].Body != "turn output" {
+		t.Fatalf("response was lost: %#v err=%v", job.JobMessages, err)
+	}
+	now := time.Now().UTC()
+	runtime.capabilities.SendLookup = true
+	runtime.capabilities.UsageIdentity = true
+	runtime.capabilities.UsageCompleteness = true
+	runtime.capabilities.Evidence = append(runtime.capabilities.Evidence,
+		provider.CapabilityEvidence{Capability: provider.CapabilitySendLookup, Identity: runtime.identity, TestID: "controller-test", EvidenceSHA256: strings.Repeat("a", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
+		provider.CapabilityEvidence{Capability: provider.CapabilityUsageIdentity, Identity: runtime.identity, TestID: "controller-test", EvidenceSHA256: strings.Repeat("b", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
+		provider.CapabilityEvidence{Capability: provider.CapabilityUsageCompleteness, Identity: runtime.identity, TestID: "controller-test", EvidenceSHA256: strings.Repeat("c", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
+	)
+	runtime.lookupResult = provider.LookupResult{
+		Found: true, OperationID: turn.OperationID, SessionID: "session_1", TurnID: turn.ID,
+		Status: domain.PlanningTurnCompleted, ReceiptID: "receipt_1", UsageID: "usage_1",
+		EvidenceSHA256: strings.Repeat("e", 64),
+	}
+	runtime.lookupResult.Status = domain.PlanningTurnFailed
+	if _, _, observation, _, err := controller.SendPlanning(ctx, jobID, execution.ID, "session_1",
+		commandID, "inspect the accepted repository snapshot", 100, principal); err == nil || observation.Status != domain.PlanningTurnUnknown {
+		t.Fatalf("failure conflicting with saved response must remain UNKNOWN: observation=%#v err=%v", observation, err)
+	}
+	runtime.lookupResult.Status = domain.PlanningTurnCompleted
+	runtime.lookupResult.ResultSHA256 = sha256String("different response")
+	if _, _, observation, _, err := controller.SendPlanning(ctx, jobID, execution.ID, "session_1",
+		commandID, "inspect the accepted repository snapshot", 100, principal); err == nil || observation.Status != domain.PlanningTurnUnknown {
+		t.Fatalf("mismatched saved response must remain UNKNOWN: observation=%#v err=%v", observation, err)
+	}
+	runtime.capabilities.SendLookup = false
+	runtime.capabilities.SendIdempotency = true
+	runtime.capabilities.Evidence = append(runtime.capabilities.Evidence,
+		provider.CapabilityEvidence{Capability: provider.CapabilitySendIdempotency, Identity: runtime.identity, TestID: "controller-test", EvidenceSHA256: strings.Repeat("d", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
+	)
+	runtime.sendResult = provider.TurnResult{
+		OperationID: turn.OperationID, TurnID: turn.ID, SessionID: "session_1",
+		Status: domain.PlanningTurnFailed, TokensUsed: 10, EvidenceSHA256: strings.Repeat("f", 64),
+	}
+	if _, _, observation, _, err := controller.SendPlanning(ctx, jobID, execution.ID, "session_1",
+		commandID, "inspect the accepted repository snapshot", 100, principal); err == nil || observation.Status != domain.PlanningTurnUnknown {
+		t.Fatalf("retry conflicting with saved response must remain UNKNOWN: observation=%#v err=%v", observation, err)
+	}
+	runtime.capabilities.SendLookup = true
+	runtime.lookupResult.ResultSHA256 = sha256String("turn output")
+	_, _, observation, result, err := controller.SendPlanning(ctx, jobID, execution.ID, "session_1",
+		commandID, "inspect the accepted repository snapshot", 100, principal)
+	if err != nil || observation.Status != domain.PlanningTurnCompleted ||
+		result.Output != "turn output" || runtime.sendCalls != 2 {
+		t.Fatalf("reconciled response=%#v observation=%#v sends=%d err=%v", result, observation, runtime.sendCalls, err)
+	}
+}
+
+func TestProviderControllerDoesNotPublishInvalidTurnResult(t *testing.T) {
+	ctx := context.Background()
+	runtime := &fakePlanningProviderRuntime{}
+	controller, database, principal, jobID, grantID, documents := newProviderControllerFixture(t, runtime)
+	_, execution, _, _, err := controller.StartPlanning(ctx, jobID, grantID,
+		"cmd_18181818181818181818181818181818", documents, principal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commandID := "cmd_19191919191919191919191919191919"
+	runtime.sendResult = provider.TurnResult{
+		OperationID: domain.PlanningTurnOperationID(commandID), TurnID: domain.PlanningTurnIntentID(commandID),
+		SessionID: "session_1", Status: domain.PlanningTurnCompleted,
+		TokensUsed: 101, EvidenceSHA256: strings.Repeat("f", 64), Output: "must not be published",
+	}
+	if _, _, _, _, err := controller.SendPlanning(ctx, jobID, execution.ID, "session_1",
+		commandID, "inspect the accepted repository snapshot", 100, principal); err == nil {
+		t.Fatal("over-budget result was accepted")
+	}
+	job, err := database.GetJob(ctx, jobID)
+	if err != nil || len(job.JobMessages) != 0 || len(job.PlanningTurnObservations) != 1 ||
+		job.PlanningTurnObservations[0].Status != domain.PlanningTurnUnknown {
+		t.Fatalf("invalid result was published or completed: %#v err=%v", job, err)
+	}
+}
+
+func TestProviderControllerReconcilesVerifiedBlankPlannerResponse(t *testing.T) {
+	ctx := context.Background()
+	runtime := &fakePlanningProviderRuntime{sendErr: &provider.OperationError{Class: provider.FailureAmbiguous, Code: provider.OperationCodeTimeout}}
+	controller, database, principal, jobID, grantID, documents := newProviderControllerFixture(t, runtime)
+	_, execution, _, _, err := controller.StartPlanning(ctx, jobID, grantID,
+		"cmd_18181818181818181818181818181818", documents, principal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commandID := "cmd_19191919191919191919191919191919"
+	_, turn, unknown, _, err := controller.SendPlanning(ctx, jobID, execution.ID, "session_1",
+		commandID, "inspect the accepted repository snapshot", 100, principal)
+	if err == nil || unknown.Status != domain.PlanningTurnUnknown {
+		t.Fatalf("initial turn was not UNKNOWN: %#v %v", unknown, err)
+	}
+	now := time.Now().UTC()
+	runtime.capabilities.SendLookup = true
+	runtime.capabilities.UsageIdentity = true
+	runtime.capabilities.UsageCompleteness = true
+	runtime.capabilities.FinalOutputRetrieval = true
+	runtime.capabilities.Evidence = append(runtime.capabilities.Evidence,
+		provider.CapabilityEvidence{Capability: provider.CapabilitySendLookup, Identity: runtime.identity, TestID: "controller-test", EvidenceSHA256: strings.Repeat("a", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
+		provider.CapabilityEvidence{Capability: provider.CapabilityUsageIdentity, Identity: runtime.identity, TestID: "controller-test", EvidenceSHA256: strings.Repeat("b", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
+		provider.CapabilityEvidence{Capability: provider.CapabilityUsageCompleteness, Identity: runtime.identity, TestID: "controller-test", EvidenceSHA256: strings.Repeat("c", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
+		provider.CapabilityEvidence{Capability: provider.CapabilityFinalOutput, Identity: runtime.identity, TestID: "controller-test", EvidenceSHA256: strings.Repeat("d", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
+	)
+	runtime.lookupResult = provider.LookupResult{
+		Found: true, OperationID: turn.OperationID, SessionID: "session_1", TurnID: turn.ID,
+		Status: domain.PlanningTurnCompleted, ReceiptID: "receipt_1", UsageID: "usage_1",
+		EvidenceSHA256: strings.Repeat("e", 64),
+	}
+	runtime.resultResult = provider.Result{
+		OperationID: turn.OperationID, SessionID: "session_1", TurnID: turn.ID, Content: "",
+		ResultSHA256: sha256String(""), Final: true, EvidenceSHA256: strings.Repeat("f", 64),
+	}
+	_, _, observation, result, err := controller.SendPlanning(ctx, jobID, execution.ID, "session_1",
+		commandID, "inspect the accepted repository snapshot", 100, principal)
+	if err != nil || observation.Status != domain.PlanningTurnCompleted || result.Output != "" || runtime.sendCalls != 1 {
+		t.Fatalf("blank response: observation=%#v result=%#v err=%v", observation, result, err)
+	}
+	job, err := database.GetJob(ctx, jobID)
+	if err != nil || len(job.JobMessages) != 0 || len(job.ProviderResultObservations) != 1 ||
+		job.ProviderResultObservations[0].Content != "" {
+		t.Fatalf("blank result evidence=%#v messages=%#v err=%v", job.ProviderResultObservations, job.JobMessages, err)
+	}
+}
+
+func TestProviderControllerReconcilesUnknownTurnWithLookupAndCompleteUsage(t *testing.T) {
+	runtime := &fakePlanningProviderRuntime{}
+	controller, database, principal, jobID, grantID, documents := newProviderControllerFixture(t, runtime)
+	now := time.Now().UTC()
+	runtime.capabilities.SendLookup = true
+	runtime.capabilities.UsageIdentity = true
+	runtime.capabilities.UsageCompleteness = true
+	runtime.capabilities.FinalOutputRetrieval = true
+	runtime.capabilities.Evidence = append(runtime.capabilities.Evidence,
+		provider.CapabilityEvidence{Capability: provider.CapabilitySendLookup, Identity: runtime.identity, TestID: "controller-test", EvidenceSHA256: strings.Repeat("a", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
+		provider.CapabilityEvidence{Capability: provider.CapabilityUsageIdentity, Identity: runtime.identity, TestID: "controller-test", EvidenceSHA256: strings.Repeat("b", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
+		provider.CapabilityEvidence{Capability: provider.CapabilityUsageCompleteness, Identity: runtime.identity, TestID: "controller-test", EvidenceSHA256: strings.Repeat("c", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
+		provider.CapabilityEvidence{Capability: provider.CapabilityFinalOutput, Identity: runtime.identity, TestID: "controller-test", EvidenceSHA256: strings.Repeat("d", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
 	)
 	_, execution, _, _, err := controller.StartPlanning(
 		context.Background(), jobID, grantID, "cmd_20202020202020202020202020202020", documents, principal,
