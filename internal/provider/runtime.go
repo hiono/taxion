@@ -63,6 +63,10 @@ func (r *Runtime) Capabilities(ctx context.Context) (Capabilities, error) {
 }
 
 func (r *Runtime) Start(ctx context.Context, request StartRequest) (StartResult, error) {
+	return r.StartClaimed(ctx, request, nil)
+}
+
+func (r *Runtime) StartClaimed(ctx context.Context, request StartRequest, claim func() error) (StartResult, error) {
 	if err := request.Validate(); err != nil {
 		return StartResult{}, ErrProviderInvalidRequest
 	}
@@ -82,6 +86,11 @@ func (r *Runtime) Start(ctx context.Context, request StartRequest) (StartResult,
 		}
 	}
 	result, err := withCredential(ctx, r.broker, r.identity, func(lease CredentialLease) (StartResult, error) {
+		if claim != nil {
+			if err := claim(); err != nil {
+				return StartResult{}, err
+			}
+		}
 		result, err := r.adapter.Start(ctx, request, lease)
 		if err != nil {
 			return StartResult{}, err

@@ -37,6 +37,7 @@ type PlanningProviderRuntime interface {
 	Identity() provider.Identity
 	Capabilities(context.Context) (provider.Capabilities, error)
 	Start(context.Context, provider.StartRequest) (provider.StartResult, error)
+	StartClaimed(context.Context, provider.StartRequest, func() error) (provider.StartResult, error)
 	Send(context.Context, provider.TurnRequest) (provider.TurnResult, error)
 	Resume(context.Context, provider.ResumeRequest) (provider.ResumeResult, error)
 	Stop(context.Context, provider.StopRequest) (provider.StopResult, error)
@@ -159,7 +160,7 @@ func (c *ProviderController) StartPlanning(
 		}
 	}
 
-	if receipt.Revision != initialRevision+1 {
+	if !intent.ClaimBeforeDispatch && receipt.Revision != initialRevision+1 {
 		return c.reconcileStart(ctx, receipt, execution, intent, request, currentGrant, principal)
 	}
 	if err := currentGrant.ValidateFor(current, principal.PrincipalID(), c.now()); err != nil {
@@ -168,8 +169,33 @@ func (c *ProviderController) StartPlanning(
 	if err := c.requirePlanningBoundary(ctx); err != nil {
 		return receipt, execution, intent, provider.StartResult{}, err
 	}
-	result, err := c.runtime.Start(ctx, request)
+	claimed := false
+	var result provider.StartResult
+	if intent.ClaimBeforeDispatch {
+		result, err = c.runtime.StartClaimed(ctx, request, func() error {
+			job, err := c.store.GetJob(ctx, jobID)
+			if err != nil {
+				return err
+			}
+			if _, found := latestStartObservation(job, intent.ID); found {
+				return errors.New("Provider Start was already claimed")
+			}
+			commandID, err := newProviderDispatchCommandID()
+			if err != nil {
+				return err
+			}
+			_, _, err = c.store.AddProviderStartObservation(ctx, jobID, job.Revision, intent.ID,
+				commandID, domain.ProviderStartUnknown, "", "", "", false, principal)
+			claimed = err == nil
+			return err
+		})
+	} else {
+		result, err = c.runtime.Start(ctx, request)
+	}
 	if err != nil {
+		if intent.ClaimBeforeDispatch && !claimed {
+			return receipt, execution, intent, provider.StartResult{}, err
+		}
 		if providerOperationMayHaveStarted(err) {
 			if persistErr := c.recordStartObservation(ctx, jobID, intent.ID, domain.ProviderStartUnknown, "", "", "", false, principal); persistErr != nil {
 				return receipt, execution, intent, provider.StartResult{}, errors.Join(err, fmt.Errorf("persist UNKNOWN Provider Start observation: %w", persistErr))
@@ -526,7 +552,8 @@ func (c *ProviderController) reconcileStart(
 				ReceiptID: lookup.ReceiptID, EvidenceSHA256: lookup.EvidenceSHA256,
 			}, nil
 		}
-	} else if !canRetry {
+	}
+	if !canRetry {
 		if err := c.recordStartObservation(ctx, intent.JobID, intent.ID, domain.ProviderStartUnknown, "", "", "", false, principal); err != nil {
 			return receipt, execution, intent, provider.StartResult{}, fmt.Errorf("persist unresolved Provider Start: %w", err)
 		}

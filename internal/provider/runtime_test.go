@@ -291,10 +291,12 @@ func TestRuntimeRejectsUnverifiedPlanningBoundaryBeforeStart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := runtime.Start(context.Background(), validStartRequest()); !errors.Is(err, ErrUnsupportedCapability) {
+	claims := 0
+	claim := func() error { claims++; return nil }
+	if _, err := runtime.StartClaimed(context.Background(), validStartRequest(), claim); !errors.Is(err, ErrUnsupportedCapability) {
 		t.Fatalf("synthetic read-only evidence was accepted: %v", err)
 	}
-	if adapter.startCalls != 0 || broker.acquires != 0 {
+	if adapter.startCalls != 0 || broker.acquires != 0 || claims != 0 {
 		t.Fatalf("unverified planning started: starts=%d credentials=%d", adapter.startCalls, broker.acquires)
 	}
 	adapter.capabilities.Evidence[0].EvidenceLevel = EvidenceLive
@@ -302,8 +304,13 @@ func TestRuntimeRejectsUnverifiedPlanningBoundaryBeforeStart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := runtime.Start(context.Background(), validStartRequest()); err != nil || adapter.startCalls != 1 {
+	if _, err := runtime.StartClaimed(context.Background(), validStartRequest(), claim); err != nil || adapter.startCalls != 1 || claims != 1 {
 		t.Fatalf("verified planning did not start: starts=%d err=%v", adapter.startCalls, err)
+	}
+	if _, err := runtime.StartClaimed(context.Background(), validStartRequest(), func() error {
+		return errors.New("claim failed")
+	}); err == nil || adapter.startCalls != 1 {
+		t.Fatalf("start ran after a failed claim: starts=%d err=%v", adapter.startCalls, err)
 	}
 }
 
