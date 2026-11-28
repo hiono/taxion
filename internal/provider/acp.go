@@ -213,21 +213,7 @@ func (a *ACPAdapter) Capabilities(ctx context.Context) (Capabilities, error) {
 	if err := ctx.Err(); err != nil {
 		return Capabilities{}, err
 	}
-	if a.config.AllowToolRequests {
-		return Capabilities{Identity: a.config.Identity}, nil
-	}
-	return Capabilities{
-		Identity:                   a.config.Identity,
-		ReadOnlyContextEnforcement: true,
-		Evidence: []CapabilityEvidence{{
-			Capability:     CapabilityReadOnlyContextEnforcement,
-			Identity:       a.config.Identity,
-			TestID:         "acp-default-deny-permission-requests",
-			EvidenceSHA256: sha256Hex("acp-default-deny-permission-requests-v1"),
-			EvidenceLevel:  EvidenceSynthetic,
-			VerifiedAt:     time.Now().UTC(),
-		}},
-	}, nil
+	return Capabilities{Identity: a.config.Identity}, nil
 }
 
 func acpInitialTurnID(roleExecutionID string) string {
