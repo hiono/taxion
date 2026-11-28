@@ -130,6 +130,7 @@ type acpProcess struct {
 	failOnce          sync.Once
 	stopOnce          sync.Once
 	closing           atomic.Bool
+	readerStarted     atomic.Bool
 	updateMu          sync.Mutex
 	updateConsumers   int
 	updateBytes       int64
@@ -544,7 +545,9 @@ func (a *ACPAdapter) trackProcess(process *acpProcess) error {
 			<-session.turnGate
 			session.turnGate <- struct{}{}
 		}
-		process.discardQueuedUpdatesUntilReaderExit()
+		if process.readerStarted.Load() {
+			process.discardQueuedUpdatesUntilReaderExit()
+		}
 		process.discardQueuedUpdates()
 		a.mu.Lock()
 		delete(a.processes, process)
@@ -1158,6 +1161,7 @@ func (a *ACPAdapter) startProcess() (*acpProcess, error) {
 	}
 	command.Env = nil
 	process := newACPProcess(command, stdin)
+	process.readerStarted.Store(true)
 	go process.read(stdoutRead)
 	go func() {
 		_ = command.Wait()
