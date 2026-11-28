@@ -3,7 +3,9 @@ package cli
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -26,7 +28,9 @@ func TestInitInstallsSkillWithoutOverwriting(t *testing.T) {
 	content, err := os.ReadFile(path)
 	executable, execErr := os.Executable()
 	pathJSON, jsonErr := json.Marshal(executable)
-	if err != nil || execErr != nil || jsonErr != nil || !bytes.Contains(content, pathJSON) || !bytes.Contains(content, agentSkill) {
+	binary, binaryErr := os.ReadFile(executable)
+	hash := sha256.Sum256(binary)
+	if err != nil || execErr != nil || jsonErr != nil || binaryErr != nil || !bytes.Contains(content, pathJSON) || !bytes.Contains(content, []byte(fmt.Sprintf("%x", hash))) || !bytes.Contains(content, agentSkill) {
 		t.Fatalf("skill content: %q, err: %v", content, err)
 	}
 	if code := run(); code != 0 {
@@ -47,7 +51,12 @@ func TestInitInstallsSkillWithoutOverwriting(t *testing.T) {
 func TestReadyAndDoctor(t *testing.T) {
 	var out, errOut bytes.Buffer
 	code := Run(context.Background(), []string{"ready"}, &out, &errOut, VersionInfo{Version: "0.1.1"})
-	if code != 0 || !strings.Contains(out.String(), "taxion run") || !strings.Contains(out.String(), "0.1.1") {
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	quoted := "'" + strings.ReplaceAll(executable, "'", "'\\''") + "'"
+	if code != 0 || !strings.Contains(out.String(), quoted+" run --request") || !strings.Contains(out.String(), "0.1.1") {
 		t.Fatalf("ready = %d, output = %q, error = %q", code, out.String(), errOut.String())
 	}
 	t.Setenv("PATH", t.TempDir())

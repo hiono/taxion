@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"crypto/sha256"
 	_ "embed"
 	"encoding/json"
 	"errors"
@@ -12,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 )
 
 //go:embed agent_skill.md
@@ -33,6 +35,19 @@ func initAgentSkill(args []string, stdout, stderr io.Writer, version VersionInfo
 	if err != nil {
 		return report(stderr, err)
 	}
+	binary, err := os.Open(executable)
+	if err != nil {
+		return report(stderr, err)
+	}
+	hash := sha256.New()
+	_, hashErr := io.Copy(hash, binary)
+	closeErr := binary.Close()
+	if hashErr != nil {
+		return report(stderr, hashErr)
+	}
+	if closeErr != nil {
+		return report(stderr, closeErr)
+	}
 	binaryJSON, err := json.Marshal(executable)
 	if err != nil {
 		return report(stderr, err)
@@ -41,7 +56,7 @@ func initAgentSkill(args []string, stdout, stderr io.Writer, version VersionInfo
 	if err != nil {
 		return report(stderr, err)
 	}
-	content := append([]byte(fmt.Sprintf("---\nname: taxion-local\ndescription: Operate Taxion's local collaboration CLI for an approved coding task.\n---\n\nTaxion executable (JSON string): `%s`\nExpected version (JSON string): `%s`\n\n", binaryJSON, versionJSON)), agentSkill...)
+	content := append([]byte(fmt.Sprintf("---\nname: taxion-local\ndescription: Operate Taxion's local collaboration CLI for an approved coding task.\n---\n\nTaxion executable (JSON string): `%s`\nExpected version (JSON string): `%s`\nExecutable SHA-256: `%x`\n\n", binaryJSON, versionJSON, hash.Sum(nil))), agentSkill...)
 	path := filepath.Join(*dir, ".agents", "skills", "taxion-local", "SKILL.md")
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return report(stderr, err)
@@ -60,7 +75,7 @@ func initAgentSkill(args []string, stdout, stderr io.Writer, version VersionInfo
 		return report(stderr, err)
 	}
 	_, writeErr := f.Write(content)
-	closeErr := f.Close()
+	closeErr = f.Close()
 	if writeErr != nil {
 		_ = os.Remove(path)
 		return report(stderr, writeErr)
@@ -80,21 +95,22 @@ func ready(args []string, stdout, stderr io.Writer, version VersionInfo) int {
 		return 2
 	}
 	fmt.Fprintf(stdout, "Taxion %s local collaboration\n", valueOr(version.Version, "dev"))
-	if executable, err := os.Executable(); err == nil {
-		fmt.Fprintf(stdout, "Executable: %q\n", executable)
+	executable, err := os.Executable()
+	if err != nil {
+		return report(stderr, err)
 	}
-	fmt.Fprint(stdout, `Use the same Taxion binary for every command.
-1. taxion init --dir <project>  Install the taxion-local agent skill.
-2. taxion doctor                Check local prerequisites.
-3. taxion provider login        Log in to the dedicated Copilot profile.
-4. taxion run --request "..." --working-directory <project> --allow-coder-tools
-5. taxion job show <job-id>     Inspect the saved conversation.
+	bin := "'" + strings.ReplaceAll(executable, "'", "'\\''") + "'"
+	fmt.Fprintf(stdout, `1. %[1]s init --dir <project>  Install the taxion-local agent skill.
+2. %[1]s doctor                Check local prerequisites.
+3. %[1]s provider login        Log in to the dedicated Copilot profile.
+4. %[1]s run --request "..." --working-directory <project> --allow-coder-tools
+5. %[1]s job show <job-id>     Inspect the saved conversation.
 6. Inspect actual workspace changes and validation results separately.
 
 The Coder runs on the host without OS isolation. Requests and changes are sent to
 the provider. A completed conversation does not guarantee successful work or review.
 Do not automatically resend an interrupted run whose outcome is unknown.
-`)
+`, bin)
 	return 0
 }
 

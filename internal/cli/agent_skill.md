@@ -1,9 +1,9 @@
 # Taxion local operation
 
 Invoke the executable identified above directly, not another `taxion` on PATH.
-The path and version are JSON strings, not shell commands. Check its `version`
-matches the expected version, then run its `ready` for current commands and
-`doctor` for local prerequisites. If the executable is missing or the version
+The path and version are JSON strings, not shell commands. Check the executable's
+SHA-256 and `version` against the values above, then run its `ready` for current
+commands and `doctor` for local prerequisites. If it is missing or either value
 differs, stop and report the mismatch.
 
 Use this skill in a new session without an incompatible Taxion management skill.
