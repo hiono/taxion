@@ -26,7 +26,7 @@ Status: Draft
 | Credential Lease | internal/provider | secretの短時間参照、Close、best-effort zeroize |
 | Provider Runtime | internal/provider | Adapter呼出し、Capability gate、secret検査、応答検証 |
 | Provider Controller | internal/controller | Job authority、intent、Runtime呼出し、Observation保存を制御 |
-| Domain | internal/domain | Provider identity / intent / Observation / Usageの不変条件 |
+| Domain | internal/domain | Provider identity / intent / Observationの不変条件 |
 | Store | internal/store | JobAggregateとreceiptをexpected revisionで原子的に保存 |
 
 Provider SDKのClient、Session、Event型はAdapter package内に閉じ込める。
@@ -98,7 +98,6 @@ Capability Verifierは次を照合する。
 | Resume | Cross-process reattachment | E5 |
 | Lookup | 対象がStartかSendかに対応するlookup | E4 |
 | Result | Final output retrieval | E4 |
-| Usage | Usage identityとUsage completeness | E4 |
 | ReplayEvents | Event replay / cursor continuity | E5 |
 
 Capabilityの検証は操作単位で行う。たとえばEvent replayがE2の段階でも、Start idempotencyがE4であればStartは許可できる。Event replayは拒否する。
@@ -124,7 +123,6 @@ Adapterは次の操作を提供する。
 | Resume | ResumeRequest | ResumeResult | 同一Sessionへ再接続 |
 | Lookup | LookupRequest | LookupResult | 同一OperationID / TurnIDを照会 |
 | Result | ResultRequest | Result | terminal outputを取得 |
-| Usage | UsageRequest | Usage | 確定利用量を取得 |
 | ReplayEvents | ReplayEventsRequest | EventPage | 保存cursor以降のeventを再取得 |
 
 ### 6.1 Request共通条件
@@ -140,23 +138,11 @@ Adapterは次の操作を提供する。
 ### 6.2 Result共通条件
 
 - Requestで指定したOperationID / TurnID / SessionIDとの一致を検証する。
-- Provider receipt、event ID、usage IDはProvider identityの範囲で一意とする。
+- Provider receipt、event IDはProvider identityの範囲で一意とする。
 - ResultはFinal=trueを必須とし、contentは有効なUTF-8で1 MiB以下とする。
 - terminal resultはcontent digestとevidence digestを持つ。
 - raw Provider errorは返さず、許可されたFailureClass / OperationCodeへ変換する。
 - credential検出または応答identity不一致は成功として採用せずUNKNOWNへ分類する。
-
-### 6.3 Usage
-
-Usage resultは次を持つ。
-
-- OperationID / SessionID / optional TurnID
-- UsageID
-- token数
-- Complete（確定値であることを示す）
-- EvidenceSHA256
-
-Complete=falseの値は途中ObservationとしてJobへ保存できるが、最終Usageとして確定しない。後続の照合で同一UsageIDの確定値へ更新する場合は、既存Observationを書き換えずComplete=trueの新しいObservationを追加する。Complete=trueの後に同じUsageIDのObservationを追加しない。EvidenceSHA256は途中値・確定値の両方で必須とする。
 
 ### 6.4 Stop
 
@@ -167,7 +153,7 @@ Stop resultは次を持つ。
 - Quiescent（Providerが後続書込みを継続しないことを確認済み）
 - EvidenceSHA256
 
-Stopped=trueだけではWorktree解放やJob完了を許可しない。Quiescent=trueとterminal resultを照合する。Usageは任意とする。
+Stopped=trueだけではWorktree解放やJob完了を許可しない。Quiescent=trueとterminal resultを照合する。
 
 ### 6.5 Event replay
 
@@ -251,23 +237,23 @@ Reviewer Startは、ADR-408 / ADR-507に従うimmutable Worktree snapshotとread
 3. immutable Turn intentとCommand receiptを同一transactionで保存する。
 4. commit確認後に最新Jobとauthorityを再検証する。
 5. 同一OperationID / TurnIDを使い、Lookupで未実行を確認した場合またはSend idempotencyが検証済みの場合だけ送信する。
-6. terminal responseはPlanningTurnObservationへ保存し、terminal resultを取得・保存する。Usageは取得できる場合に別のObservationとして保存する。
+6. terminal responseはPlanningTurnObservationへ保存し、terminal resultを取得・保存する。
 7. UNKNOWN中は同じTurnIDで照合し、新しいTurnIDで再送しない。Lookupの証拠と必要な最終出力でterminal statusを確定し、Usageの未報告は妨げとしない。
 
 ACPの`max_tokens` / `max_turn_requests`はProviderによる終了としてFAILEDにし、途中出力を最終結果にしない。初回promptで終了した場合はStart成功を記録しない。
 
 ### 8.3 Stop / Resume（Controller実装済み）
 
-- Stop intentを先に保存し、Runtime.Stopの後にstop proof、quiescence、terminal resultを照合する。Usageは任意とする。
+- Stop intentを先に保存し、Runtime.Stopの後にstop proof、quiescence、terminal resultを照合する。
 - Resume intentとCommand receiptをRuntime.Resumeより先に保存する。
 - E5 SessionReattach capability evidence、Principal / grant / Provider identity、既存accepted Session、configuration identityを検証する。
 - Resumeは同一OperationID / SessionIDで再照合し、Attached=trueとevidenceを得た場合だけATTACHED observationを追加する。曖昧な結果はUNKNOWNとして保存し、UNKNOWN解消時は同じOperationIDのterminal evidenceだけを許可する。
 - Resume ATTACHED observationが確定するまで次Turnを許可しない。
 - Resume不能の場合、同じRoleExecutionに新Sessionを付け替えない。
 
-### 8.4 Lookup / Result / Usage / ReplayEvents（Start Lookup / Event replay / Result・Usage Controller実装済み）
+### 8.4 Lookup / Result / ReplayEvents（Start Lookup / Event replay / Result Controller実装済み）
 
-これらは既存intentの照合操作であり、新しいProvider execution identityを生成しない。Controllerはaccepted Start Sessionとoptional Turn intentを検証し、操作に対応するE4 Capabilityを確認してRuntimeへ照会する。取得結果は元のOperationID / TurnIDへ束縛し、append-only Observationとして保存する。Usage Complete=falseは途中Observationとして保存し、Complete=trueだけを確定利用量として扱う。Lookup NOT_FOUNDはProviderが同一identityの不存在を証明した場合だけ記録する。Result / UsageのController orchestrationは実装済み。
+これらは既存intentの照合操作であり、新しいProvider execution identityを生成しない。Controllerはaccepted Start Sessionとoptional Turn intentを検証し、操作に対応するCapabilityを確認してRuntimeへ照会する。取得結果は元のOperationID / TurnIDへ束縛し、append-only Observationとして保存する。Lookup NOT_FOUNDはProviderが同一identityの不存在を証明した場合だけ記録する。ResultのController orchestrationは実装済み。
 
 ## 9. Domain / Store設計
 
@@ -278,12 +264,11 @@ Providerの外部事実をJobAggregateへappend-onlyで保持する。現時点�
 - ProviderStartObservation（実装済み）: StartのACCEPTED / FAILED / UNKNOWN、SessionID、receipt、evidence
 - ProviderEventObservation（実装済み）: EventID、Session-scoped Command ID、cursor、event kind、OperationID / TurnID
 - ProviderResultObservation（Domain / Store実装済み）: OperationID / optional TurnID / SessionIDへ束縛したFinal=trueのUTF-8 result content（最大1 MiB）、content digest、evidence digest
-- ProviderUsageObservation（Domain / Store実装済み）: OperationID / optional TurnID / SessionIDへ束縛したUsageID、token数、Complete、evidence digest。Complete=falseからComplete=trueへの更新は新しいObservationを追加する
 - ProviderStopIntent（Domain / Store / Controller実装済み）: OperationID、SessionID、Provider identity、Reason。Stop前に保存し、後続Turn / Resumeを禁止
 - ProviderStopObservation（Domain / Store / Controller実装済み）: Stopped、Quiescent、evidence、UNKNOWN reconciliation
 - PlanningResumeIntent / PlanningResumeObservation（Domain / Store / Controller実装済み）: E5 SessionReattach evidence、同一OperationID / SessionID、ATTACHED / FAILED / UNKNOWN、UNKNOWN reconciliation
 
-既存PlanningTurnObservation / PlanningResumeObservationはPlanning lifecycleの状態を表す。Start observationはProviderStartIntentのOperationIDへ束縛し、accepted SessionIDなしに新しいTurn / Resume intentを作成できない。Provider eventはaccepted SessionとOperationID / TurnIDへ束縛し、cursor chainを検証してJobAggregateへappend-onlyで保存する。Stop intentはRuntime.Stopより先に保存し、Stop observationは同一OperationIDの証拠でUNKNOWNを解消する。SendはTurn intentを先行保存し、同じOperationID / TurnIDでLookupまたは実証済みidempotencyを使って照合する。Provider固有のResult / Usageはaccepted Start / Turnへ束縛したappend-only factsとして保存し、Complete=trueのUsageだけを確定利用量として扱う。
+既存PlanningTurnObservation / PlanningResumeObservationはPlanning lifecycleの状態を表す。Start observationはProviderStartIntentのOperationIDへ束縛し、accepted SessionIDなしに新しいTurn / Resume intentを作成できない。Provider eventはaccepted SessionとOperationID / TurnIDへ束縛し、cursor chainを検証してJobAggregateへappend-onlyで保存する。Stop intentはRuntime.Stopより先に保存し、Stop observationは同一OperationIDの証拠でUNKNOWNを解消する。SendはTurn intentを先行保存し、同じOperationID / TurnIDでLookupまたは実証済みidempotencyを使って照合する。Resultはaccepted Start / Turnへ束縛したappend-only factとして保存する。
 
 ### 9.2 Append-only invariant
 
@@ -295,13 +280,12 @@ Providerの外部事実をJobAggregateへappend-onlyで保持する。現時点�
 - Provider identityとRoleExecution / grant scopeが一致する。
 - Stop intent以降の同一Sessionに対するTurn / Resume intentを拒否する。
 - Stop UNKNOWNは同一OperationIDの新しいObservationでのみ解消し、Quiescent proofなしにreleaseしない。
-- Result / Usage / Stop evidenceは対応するOperationID / TurnIDへ束縛する。
+- Result / Stop evidenceは対応するOperationID / TurnIDへ束縛する。
 - Resultはaccepted Startまたは既存Turn intentに一致し、同じOperationID / TurnIDでFinal=trueを一度だけ記録する。
-- Usageはaccepted Startまたは既存Turn intentに一致し、同一Session内のUsageIDを一つのOperationID / optional TurnIDへ束縛する。Complete=true後の追加を拒否する。
 
 ### 9.3 Store
 
-既存JobAggregate保存方式とCommand receipt transactionを再利用する。Provider factだけの独立した可変storeを追加しない。Start / Event / Stop / Resume intent・observationは同一transactionでappendする。Result / Usage observationも同じexpected revision、idempotency、rollback、read-back recoveryの共通transactionで保存する。
+既存JobAggregate保存方式とCommand receipt transactionを再利用する。Provider factだけの独立した可変storeを追加しない。Start / Event / Stop / Resume intent・observationは同一transactionでappendする。Result observationも同じexpected revision、idempotency、rollback、read-back recoveryの共通transactionで保存する。
 
 ## 10. Error classification
 
@@ -321,12 +305,12 @@ Providerが操作を受理した可能性を排除できないerrorはAmbiguous�
 - CredentialLease、secret isolation、panic-safe close
 - Runtimeの全Adapter method、per-capability gate、response validation、error sanitization
 - ProviderStartObservation、Start / Turn / ResumeのSession binding
-- StoreのStart / Event / Stop / Result / Usage intent・observation transaction
+- StoreのStart / Event / Stop / Result intent・observation transaction
 - DRAFT Planning Start / Sendのintent-first Controllerと同一identity Lookup recovery
 - Stop Controllerのintent-first永続化、UNKNOWN保持、blind replay防止
 - Resume ControllerのE5 capability gate、intent-first永続化、同一OperationID / SessionIDのUNKNOWN reconciliation
 - accepted Sessionに束縛したEvent replay Controllerとcursor/idempotency検証
-- Result / Usage ControllerのE4 capability gate、identity再検証、append-only保存
+- Result ControllerのE4 capability gate、identity再検証、append-only保存
 - 要求仕様、詳細設計、内部設計、テスト仕様
 
 未実装:
@@ -353,6 +337,6 @@ Providerが操作を受理した可能性を排除できないerrorはAmbiguous�
 - 初期Live ProviderとSDK / protocol version
 - Live credentialの保存・取得方式
 - Capability Evidence artifactの信頼済みcatalogの配布・更新方法
-- ProviderごとのStop proof / Usage completenessの実証方法
+- ProviderごとのStop proofの実証方法
 
 これらが未決の間はE4 / E5 capabilityを有効化しない。

@@ -73,13 +73,11 @@ type testAdapter struct {
 	resumeCalls    int
 	lookupCalls    int
 	resultCalls    int
-	usageCalls     int
 	eventCalls     int
 	startErr       error
 	startPanic     bool
 	stopQuiescent  bool
 	resultFinal    bool
-	usageComplete  bool
 	startSessionID string
 	startDeadline  time.Time
 	sendOutput     string
@@ -173,13 +171,6 @@ func (a *testAdapter) Result(_ context.Context, request ResultRequest, _ Credent
 		Content: content, ResultSHA256: sha256Hex(content), Final: a.resultFinal, EvidenceSHA256: strings.Repeat("1", 64),
 	}, nil
 }
-func (a *testAdapter) Usage(_ context.Context, request UsageRequest, _ CredentialLease) (Usage, error) {
-	a.usageCalls++
-	return Usage{
-		OperationID: request.OperationID, SessionID: request.SessionID, TurnID: request.TurnID,
-		UsageID: "usage_1", Tokens: 10, Complete: a.usageComplete, EvidenceSHA256: strings.Repeat("2", 64),
-	}, nil
-}
 func (a *testAdapter) ReplayEvents(_ context.Context, request ReplayEventsRequest, _ CredentialLease) (EventPage, error) {
 	a.eventCalls++
 	event := ProviderEvent{
@@ -240,17 +231,13 @@ func newTestAdapter(capabilities ...Capability) *testAdapter {
 			declaration.StopProof = true
 		case CapabilityFinalOutput:
 			declaration.FinalOutputRetrieval = true
-		case CapabilityUsageIdentity:
-			declaration.UsageIdentity = true
-		case CapabilityUsageCompleteness:
-			declaration.UsageCompleteness = true
 		}
 		declaration.Evidence = append(declaration.Evidence, liveEvidence(identity, capability))
 	}
 	declaration.Evidence = append(declaration.Evidence, liveEvidence(identity, CapabilityReadOnlyContextEnforcement))
 	return &testAdapter{
 		identity: identity, capabilities: declaration,
-		stopQuiescent: true, resultFinal: true, usageComplete: true,
+		stopQuiescent: true, resultFinal: true,
 	}
 }
 
@@ -670,23 +657,6 @@ func TestRuntimeRejectsNonFinalResult(t *testing.T) {
 	var operationError *OperationError
 	if !errors.As(err, &operationError) || operationError.Class != FailureAmbiguous {
 		t.Fatalf("non-final result was not treated as UNKNOWN: %v", err)
-	}
-}
-
-func TestRuntimePreservesIncompleteUsageWithoutFinalizingIt(t *testing.T) {
-	adapter := newTestAdapter(CapabilityUsageIdentity, CapabilityUsageCompleteness)
-	adapter.usageComplete = false
-	broker := &testBroker{secret: []byte("runtime-test-secret")}
-	runtime, err := newTestRuntime(adapter, broker)
-	if err != nil {
-		t.Fatalf("NewRuntime: %v", err)
-	}
-	usage, err := runtime.Usage(context.Background(), UsageRequest{OperationID: "provider_op_1", SessionID: "session_1"})
-	if err != nil {
-		t.Fatalf("Usage: %v", err)
-	}
-	if usage.Complete {
-		t.Fatal("partial Usage was treated as complete")
 	}
 }
 

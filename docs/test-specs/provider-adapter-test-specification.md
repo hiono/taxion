@@ -21,7 +21,7 @@ Provider Adapterの契約、Capability gate、Credential isolation、Controller 
 | Unit | Domain / Adapter / CredentialLease / Runtime | 局所validation、状態遷移、secret lifecycle |
 | E2 | fake Adapter + Controller + Store + Runtime | request / response contract、transaction、異常系 |
 | E3 | 実SDK / protocolとの互換性 | SDK型、API、event / receipt mapping |
-| E4 | 実Provider | 実接続、turn、usage、stop semantics |
+| E4 | 実Provider | 実接続、turn、stop semantics |
 | E5 | process restart / crash recovery | durable stateとProvider状態の再照合 |
 | E6 | 実Job完遂 | Planner / Coder / Reviewer / Humanを含むJob完遂 |
 
@@ -48,12 +48,11 @@ Task-bound Coder Start fixtureはACTIVE Job、最新JobApproval、Task、JobAppr
 | DOM-002 | Provider identity | Account / SDK version / config digest不一致 | 拒否 |
 | DOM-003 | Fact identity | 重複Fact ID・Command ID | 同一payloadのみidempotent、異なるpayloadは拒否 |
 | DOM-004 | Operation binding | 別Job / RoleExecution / OperationIDのObservation | 拒否 |
-| DOM-005 | Turn binding | 別TurnIDのResult / Usage | 拒否 |
+| DOM-005 | Turn binding | 別TurnIDのResult | 拒否 |
 | DOM-006 | Session binding | 別SessionIDのResume / Event | 拒否 |
 | DOM-007 | Append-only | 既存Observationの変更・削除 | 拒否 |
 | DOM-008 | Revision | intentより前のObservation revision | 拒否 |
 | DOM-009 | UNKNOWN | 別OperationIDでUNKNOWNを解消 | 拒否 |
-| DOM-010 | Usage completeness | Complete=falseを確定利用量として扱う | 拒否 |
 | DOM-011 | Stop quiescence | Stopped=true / Quiescent=false | release不可 |
 | DOM-012 | Result finality | Final=falseをterminal resultとして採用 | 拒否 |
 | DOM-013 | Event identity | 重複EventID / cursor | 同一内容のみ再送収束、異なる内容は拒否 |
@@ -68,10 +67,7 @@ Task-bound Coder Start fixtureはACTIVE Job、最新JobApproval、Task、JobAppr
 | DOM-022 | Result content | UTF-8不正、1 MiB超過、ContentSHA256不一致 | 拒否 |
 | DOM-023 | Result binding | accepted Start / Turn intentとOperationID・TurnID・SessionID不一致 | 拒否 |
 | DOM-024 | Result append-only | 同じOperationID / TurnIDにterminal resultを二重追加 | 拒否 |
-| DOM-025 | Usage completeness | Complete=falseの後に同一UsageIDのComplete=trueを追加 | append-onlyで受理 |
-| DOM-026 | Usage finality | Complete=true後の同一UsageID追加、別Operation / TurnへのUsageID再束縛 | 拒否 |
 | DOM-027 | Result identity | Start operationとTurnIDの組合せ不一致、accepted Session以外 | 拒否 |
-| DOM-028 | Usage identity | accepted Session以外、存在しないOperation / Turn | 拒否 |
 | DOM-029 | Task Start observation | Task / ExecutionPermission / RoleExecution / ProviderStartIntentのidentity不一致、または異なるJobApproval | 拒否 |
 | DOM-030 | Task Start observation authority | Task-bound observationへPlanner Principalを流用、またはPlanner observationにPrincipalなし | 拒否 |
 | DOM-031 | Task Start observation history | Job amendment後の既存Task operation evidence復元 | historical permission / approval provenanceを維持して復元 |
@@ -89,10 +85,8 @@ Task-bound Coder Start fixtureはACTIVE Job、最新JobApproval、Task、JobAppr
 | ADP-007 | Turn result | Usage未報告 | 本文を返す |
 | ADP-008 | Turn result | UNKNOWNにoutputを含む | 不正応答として拒否 |
 | ADP-009 | Lookup | NOT_FOUNDの証拠とidentity一致 | 不在Observationを返す |
-| ADP-010 | Lookup | NOT_FOUNDなのにreceipt / result / usageがある | 拒否 |
+| ADP-010 | Lookup | NOT_FOUNDなのにreceipt / resultがある | 拒否 |
 | ADP-011 | Result | Content digest mismatch | UNKNOWNとして扱う |
-| ADP-012 | Usage | UsageID欠落 | UNKNOWNとして扱う |
-| ADP-013 | Usage | Complete=false | final usageにしない |
 | ADP-014 | Stop | Stopped=true / Quiescent=false | Stop proof未成立 |
 | ADP-015 | Resume | 別SessionID | 拒否 |
 | ADP-016 | Event replay | page内cursor chain正常 | 受理 |
@@ -135,7 +129,7 @@ CAP-007 / CAP-008の拒否ではCredentialBroker.AcquireとAdapter methodの呼�
 | SEC-009 | Turn output | Outputへsecretを混入 | result不採用、UNKNOWN |
 | SEC-010 | Result content | Contentへsecretを混入 | result不採用、UNKNOWN |
 | SEC-011 | Lookup result | identity / statusへsecretを混入 | result不採用、UNKNOWN |
-| SEC-012 | Usage / event | metadataへsecretを混入 | result不採用、UNKNOWN |
+| SEC-012 | Event | metadataへsecretを混入 | result不採用、UNKNOWN |
 | SEC-013 | Broker error | Acquire errorにsecretを含む | 固定CredentialUnavailableのみ返す |
 | SEC-014 | Lease close error | Close失敗 | 成功を返さずUNKNOWN |
 | SEC-015 | Log inspection | 全操作のerror / telemetry | credential、token、raw bodyが存在しない |
@@ -152,7 +146,6 @@ CAP-007 / CAP-008の拒否ではCredentialBroker.AcquireとAdapter methodの呼�
 | RUN-006 | Resume | E5 evidenceなし | Broker / Adapterを呼ばず拒否 |
 | RUN-007 | Lookup | 同一OperationID / TurnID | 結果identityを検証 |
 | RUN-008 | Result | content digest mismatch | UNKNOWN |
-| RUN-009 | Usage | Complete=false | final Usageとして返さない |
 | RUN-010 | Event replay | cursor chain discontinuity | UNKNOWN / invalid result |
 | RUN-011 | Deadline | 期限切れrequest | Broker / Adapterを呼ばず拒否 |
 | RUN-012 | Context cancellation | call前cancel | Broker / Adapterを呼ばず拒否 |
@@ -178,9 +171,9 @@ E2 test-only policyはテストコードからのみ利用可能とし、本番c
 | STO-011 | Corruption | identity / revision / digest破損 | fail-closed |
 | STO-012 | Secret scan | aggregate / receipt / serialized JSON | credential候補0件 |
 | STO-013 | Stop facts | intent / observationのaggregate更新またはreceipt INSERT失敗 | 両方rollbackし、同一Command IDで再試行可能 |
-| STO-014 | Result / Usage facts | aggregate更新またはreceipt INSERT失敗 | 両方rollbackし、同一Command IDで再試行可能 |
-| STO-015 | Result / Usage idempotency | 同じCommand ID / payloadの再送、異なるpayloadでの再利用 | 同じfact / receiptへ収束、異なるpayloadは拒否 |
-| STO-016 | Result / Usage restore | restart後のResult / Usage facts | identity、append順序、digest、Complete finalityを再検証 |
+| STO-014 | Result facts | aggregate更新またはreceipt INSERT失敗 | 両方rollbackし、同一Command IDで再試行可能 |
+| STO-015 | Result idempotency | 同じCommand ID / payloadの再送、異なるpayloadでの再利用 | 同じfact / receiptへ収束、異なるpayloadは拒否 |
+| STO-016 | Result restore | restart後のResult facts | identity、append順序、digest、finalityを再検証 |
 
 ## 10. Controller E2 integration tests
 
@@ -210,10 +203,8 @@ E2 test-only policyはテストコードからのみ利用可能とし、本番c
 | CTR-022 | Event replay | accepted Session、cursor prefix、event / turn identityが一致 | append-only Observationとして保存し、同一page再送は冪等 |
 | CTR-023 | Result retrieval | accepted Start / Turn、E4 Final Output capability、identity一致 | Result observationをappend-only保存 |
 | CTR-024 | Result validation | Final=false、identity mismatch、digest mismatch | 保存せず拒否 |
-| CTR-025 | Usage retrieval | E4 Usage identity / completeness、Complete=false | 途中Observationとして保存し、final usageにしない |
-| CTR-026 | Usage completion | 同一UsageIDのComplete=false後にComplete=true | 既存factを変更せず新Observationを追加 |
-| CTR-027 | Capability gate | Result / Usage capability不足 | credential / Adapter呼出し前に拒否 |
-| CTR-028 | Provider retrieval failure | Result / Usage取得時にRuntime error | 成功Observationを追加しない |
+| CTR-027 | Capability gate | Result capability不足 | credential / Adapter呼出し前に拒否 |
+| CTR-028 | Provider retrieval failure | Result取得時にRuntime error | 成功Observationを追加しない |
 | CTR-029 | Send recovery | UNKNOWN Turnに対して同じOperationID / TurnIDでLookup | 新しいTurnIDを発行せず、verified NOT_FOUND後だけ再送 |
 | CTR-030 | Send capability gate | Send idempotency / lookupのE4 evidence不足 | Turn intent作成・Runtime.Send前に拒否 |
 | CTR-031 | Resume intent ordering | E5 SessionReattach evidence / accepted Session一致 | Runtime.Resume前にResume intentとreceiptを永続化 |

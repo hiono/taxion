@@ -199,9 +199,6 @@ type fakePlanningProviderRuntime struct {
 	resultResult provider.Result
 	resultErr    error
 	resultCalls  int
-	usageResult  provider.Usage
-	usageErr     error
-	usageCalls   int
 	resumeResult provider.ResumeResult
 	resumeErr    error
 	resumeCalls  int
@@ -351,29 +348,6 @@ func (f *fakePlanningProviderRuntime) Result(_ context.Context, request provider
 			Content: content, ResultSHA256: sha256String(content), Final: true,
 			EvidenceSHA256: strings.Repeat("d", 64),
 		}
-	}
-	return result, nil
-}
-
-func (f *fakePlanningProviderRuntime) Usage(_ context.Context, request provider.UsageRequest) (provider.Usage, error) {
-	f.usageCalls++
-	if f.usageErr != nil {
-		return provider.Usage{}, f.usageErr
-	}
-	result := f.usageResult
-	if result.UsageID == "" {
-		result = provider.Usage{
-			UsageID: "usage_1", Tokens: 12, Complete: true, EvidenceSHA256: strings.Repeat("e", 64),
-		}
-	}
-	if result.OperationID == "" {
-		result.OperationID = request.OperationID
-	}
-	if result.SessionID == "" {
-		result.SessionID = request.SessionID
-	}
-	if result.TurnID == "" {
-		result.TurnID = request.TurnID
 	}
 	return result, nil
 }
@@ -766,17 +740,13 @@ func TestProviderPlanningTurnDispatchClaimIsExclusive(t *testing.T) {
 	}
 }
 
-func TestProviderControllerRejectsInvalidResultAndUsageResponses(t *testing.T) {
+func TestProviderControllerRejectsInvalidResultResponses(t *testing.T) {
 	runtime := &fakePlanningProviderRuntime{}
 	controller, database, principal, jobID, grantID, documents := newProviderControllerFixture(t, runtime)
 	now := time.Now().UTC()
 	runtime.capabilities.FinalOutputRetrieval = true
-	runtime.capabilities.UsageIdentity = true
-	runtime.capabilities.UsageCompleteness = true
 	runtime.capabilities.Evidence = append(runtime.capabilities.Evidence,
 		provider.CapabilityEvidence{Capability: provider.CapabilityFinalOutput, Identity: runtime.identity, TestID: "controller-test", EvidenceSHA256: strings.Repeat("a", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
-		provider.CapabilityEvidence{Capability: provider.CapabilityUsageIdentity, Identity: runtime.identity, TestID: "controller-test", EvidenceSHA256: strings.Repeat("b", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
-		provider.CapabilityEvidence{Capability: provider.CapabilityUsageCompleteness, Identity: runtime.identity, TestID: "controller-test", EvidenceSHA256: strings.Repeat("c", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
 	)
 	_, execution, _, _, err := controller.StartPlanning(
 		context.Background(), jobID, grantID, "cmd_16161616161616161616161616161616", documents, principal,
@@ -816,33 +786,16 @@ func TestProviderControllerRejectsInvalidResultAndUsageResponses(t *testing.T) {
 	if _, _, err := controller.RetrieveProviderResult(context.Background(), jobID, execution.ID, "session_1", turn.ID, principal); err == nil {
 		t.Fatal("Provider Result with a mismatched content digest was accepted")
 	}
-	runtime.usageResult = provider.Usage{
-		OperationID: "wrong_operation", SessionID: "session_1", TurnID: turn.ID,
-		UsageID: "usage_invalid", Tokens: 3, Complete: true, EvidenceSHA256: strings.Repeat("5", 64),
-	}
-	if _, _, err := controller.RetrieveProviderUsage(context.Background(), jobID, execution.ID, "session_1", turn.ID, principal); !errors.Is(err, provider.ErrProviderInvalidResult) {
-		t.Fatalf("mismatched Usage identity error = %v, want ErrProviderInvalidResult", err)
-	}
-	runtime.usageResult = provider.Usage{
-		UsageID: "usage invalid", Tokens: 3, Complete: true, EvidenceSHA256: strings.Repeat("5", 64),
-	}
-	if _, _, err := controller.RetrieveProviderUsage(context.Background(), jobID, execution.ID, "session_1", turn.ID, principal); err == nil {
-		t.Fatal("Provider Usage with an invalid UsageID was accepted")
-	}
 	runtime.resultErr = errors.New("Provider Result retrieval failed")
 	if _, _, err := controller.RetrieveProviderResult(context.Background(), jobID, execution.ID, "session_1", turn.ID, principal); err == nil {
 		t.Fatal("Provider Result retrieval error was ignored")
-	}
-	runtime.usageErr = errors.New("Provider Usage retrieval failed")
-	if _, _, err := controller.RetrieveProviderUsage(context.Background(), jobID, execution.ID, "session_1", turn.ID, principal); err == nil {
-		t.Fatal("Provider Usage retrieval error was ignored")
 	}
 	after, err := database.GetJob(context.Background(), jobID)
 	if err != nil {
 		t.Fatalf("GetJob after invalid Provider responses: %v", err)
 	}
-	if len(after.ProviderResultObservations) != 0 || len(after.ProviderUsageObservations) != 0 {
-		t.Fatalf("invalid Provider responses created success facts: %#v %#v", after.ProviderResultObservations, after.ProviderUsageObservations)
+	if len(after.ProviderResultObservations) != 0 {
+		t.Fatalf("invalid Provider responses created success facts: %#v", after.ProviderResultObservations)
 	}
 }
 
@@ -1108,16 +1061,12 @@ func TestProviderControllerDoesNotCompleteOrResendWhenSavingResponseFails(t *tes
 	}
 	now := time.Now().UTC()
 	runtime.capabilities.SendLookup = true
-	runtime.capabilities.UsageIdentity = true
-	runtime.capabilities.UsageCompleteness = true
 	runtime.capabilities.Evidence = append(runtime.capabilities.Evidence,
 		provider.CapabilityEvidence{Capability: provider.CapabilitySendLookup, Identity: runtime.identity, TestID: "controller-test", EvidenceSHA256: strings.Repeat("a", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
-		provider.CapabilityEvidence{Capability: provider.CapabilityUsageIdentity, Identity: runtime.identity, TestID: "controller-test", EvidenceSHA256: strings.Repeat("b", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
-		provider.CapabilityEvidence{Capability: provider.CapabilityUsageCompleteness, Identity: runtime.identity, TestID: "controller-test", EvidenceSHA256: strings.Repeat("c", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
 	)
 	runtime.lookupResult = provider.LookupResult{
 		Found: true, OperationID: turn.OperationID, SessionID: "session_1", TurnID: turn.ID,
-		Status: domain.PlanningTurnCompleted, ReceiptID: "receipt_1", UsageID: "usage_1",
+		Status: domain.PlanningTurnCompleted, ReceiptID: "receipt_1",
 		EvidenceSHA256: strings.Repeat("e", 64),
 	}
 	_, _, observation, _, err = controller.SendPlanning(ctx, jobID, execution.ID, "session_1",
@@ -1184,16 +1133,12 @@ func TestProviderControllerPreservesResponseWhenTerminalObservationFails(t *test
 	}
 	now := time.Now().UTC()
 	runtime.capabilities.SendLookup = true
-	runtime.capabilities.UsageIdentity = true
-	runtime.capabilities.UsageCompleteness = true
 	runtime.capabilities.Evidence = append(runtime.capabilities.Evidence,
 		provider.CapabilityEvidence{Capability: provider.CapabilitySendLookup, Identity: runtime.identity, TestID: "controller-test", EvidenceSHA256: strings.Repeat("a", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
-		provider.CapabilityEvidence{Capability: provider.CapabilityUsageIdentity, Identity: runtime.identity, TestID: "controller-test", EvidenceSHA256: strings.Repeat("b", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
-		provider.CapabilityEvidence{Capability: provider.CapabilityUsageCompleteness, Identity: runtime.identity, TestID: "controller-test", EvidenceSHA256: strings.Repeat("c", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
 	)
 	runtime.lookupResult = provider.LookupResult{
 		Found: true, OperationID: turn.OperationID, SessionID: "session_1", TurnID: turn.ID,
-		Status: domain.PlanningTurnCompleted, ReceiptID: "receipt_1", UsageID: "usage_1",
+		Status: domain.PlanningTurnCompleted, ReceiptID: "receipt_1",
 		EvidenceSHA256: strings.Repeat("e", 64),
 	}
 	runtime.lookupResult.Status = domain.PlanningTurnFailed
@@ -1273,18 +1218,14 @@ func TestProviderControllerReconcilesVerifiedBlankPlannerResponse(t *testing.T) 
 	}
 	now := time.Now().UTC()
 	runtime.capabilities.SendLookup = true
-	runtime.capabilities.UsageIdentity = true
-	runtime.capabilities.UsageCompleteness = true
 	runtime.capabilities.FinalOutputRetrieval = true
 	runtime.capabilities.Evidence = append(runtime.capabilities.Evidence,
 		provider.CapabilityEvidence{Capability: provider.CapabilitySendLookup, Identity: runtime.identity, TestID: "controller-test", EvidenceSHA256: strings.Repeat("a", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
-		provider.CapabilityEvidence{Capability: provider.CapabilityUsageIdentity, Identity: runtime.identity, TestID: "controller-test", EvidenceSHA256: strings.Repeat("b", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
-		provider.CapabilityEvidence{Capability: provider.CapabilityUsageCompleteness, Identity: runtime.identity, TestID: "controller-test", EvidenceSHA256: strings.Repeat("c", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
 		provider.CapabilityEvidence{Capability: provider.CapabilityFinalOutput, Identity: runtime.identity, TestID: "controller-test", EvidenceSHA256: strings.Repeat("d", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
 	)
 	runtime.lookupResult = provider.LookupResult{
 		Found: true, OperationID: turn.OperationID, SessionID: "session_1", TurnID: turn.ID,
-		Status: domain.PlanningTurnCompleted, ReceiptID: "receipt_1", UsageID: "usage_1",
+		Status: domain.PlanningTurnCompleted, ReceiptID: "receipt_1",
 		EvidenceSHA256: strings.Repeat("e", 64),
 	}
 	runtime.resultResult = provider.Result{
@@ -1352,15 +1293,14 @@ func TestProviderControllerReconcilesUnknownTurnWithoutUsage(t *testing.T) {
 	if err != nil || receipt.Revision == 0 || reconciledTurn.ID != turn.ID ||
 		completed.Status != domain.PlanningTurnCompleted || !completed.ReconcilesUnknown ||
 		result.Status != domain.PlanningTurnCompleted ||
-		runtime.sendCalls != 1 || runtime.lookupCalls != 2 || runtime.usageCalls != 0 {
-		t.Fatalf("same-Turn reconciliation failed: %#v %#v %#v calls(send=%d lookup=%d usage=%d) err=%v",
-			receipt, reconciledTurn, completed, runtime.sendCalls, runtime.lookupCalls, runtime.usageCalls, err)
+		runtime.sendCalls != 1 || runtime.lookupCalls != 2 {
+		t.Fatalf("same-Turn reconciliation failed: %#v %#v %#v calls(send=%d lookup=%d) err=%v",
+			receipt, reconciledTurn, completed, runtime.sendCalls, runtime.lookupCalls, err)
 	}
 	job, err := database.GetJob(context.Background(), jobID)
 	if err != nil || len(job.PlanningTurnIntents) != 1 || len(job.PlanningTurnObservations) != 2 ||
 		job.PlanningTurnObservations[0].Status != domain.PlanningTurnUnknown ||
-		!job.PlanningTurnObservations[1].ReconcilesUnknown ||
-		len(job.ProviderUsageObservations) != 0 {
+		!job.PlanningTurnObservations[1].ReconcilesUnknown {
 		t.Fatalf("reconciled Turn facts are inconsistent: %#v %v", job, err)
 	}
 }
@@ -1386,9 +1326,8 @@ func TestProviderControllerContinuesWithoutUsageReports(t *testing.T) {
 		}
 	}
 	job, err := database.GetJob(ctx, jobID)
-	if err != nil || len(job.JobMessages) != 4 || runtime.sendCalls != 4 || runtime.usageCalls != 0 ||
-		len(job.ProviderUsageObservations) != 0 {
-		t.Fatalf("conversation without usage: messages=%d sends=%d usage=%d err=%v", len(job.JobMessages), runtime.sendCalls, runtime.usageCalls, err)
+	if err != nil || len(job.JobMessages) != 4 || runtime.sendCalls != 4 {
+		t.Fatalf("conversation without usage: messages=%d sends=%d err=%v", len(job.JobMessages), runtime.sendCalls, err)
 	}
 }
 
@@ -1463,17 +1402,13 @@ func TestProviderControllerRetriesMissingTurnOnlyWithIdempotency(t *testing.T) {
 	}
 }
 
-func TestProviderControllerPersistsResultAndUsageForAcceptedTurn(t *testing.T) {
+func TestProviderControllerPersistsResultForAcceptedTurn(t *testing.T) {
 	runtime := &fakePlanningProviderRuntime{}
 	controller, database, principal, jobID, grantID, documents := newProviderControllerFixture(t, runtime)
 	now := time.Now().UTC()
 	runtime.capabilities.FinalOutputRetrieval = true
-	runtime.capabilities.UsageIdentity = true
-	runtime.capabilities.UsageCompleteness = true
 	runtime.capabilities.Evidence = append(runtime.capabilities.Evidence,
 		provider.CapabilityEvidence{Capability: provider.CapabilityFinalOutput, Identity: runtime.identity, TestID: "controller-test", EvidenceSHA256: strings.Repeat("a", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
-		provider.CapabilityEvidence{Capability: provider.CapabilityUsageIdentity, Identity: runtime.identity, TestID: "controller-test", EvidenceSHA256: strings.Repeat("b", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
-		provider.CapabilityEvidence{Capability: provider.CapabilityUsageCompleteness, Identity: runtime.identity, TestID: "controller-test", EvidenceSHA256: strings.Repeat("c", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
 	)
 	_, execution, startIntent, _, err := controller.StartPlanning(
 		context.Background(), jobID, grantID, "cmd_12121212121212121212121212121212", documents, principal,
@@ -1502,48 +1437,23 @@ func TestProviderControllerPersistsResultAndUsageForAcceptedTurn(t *testing.T) {
 		result.CreatedRevision != resultReceipt.Revision || runtime.resultCalls != 1 {
 		t.Fatalf("RetrieveProviderResult: %#v %#v calls=%d err=%v", resultReceipt, result, runtime.resultCalls, err)
 	}
-	runtime.usageResult = provider.Usage{
-		UsageID: "usage_turn_1", Tokens: 11, Complete: false, EvidenceSHA256: strings.Repeat("5", 64),
-	}
-	partialReceipt, partial, err := controller.RetrieveProviderUsage(
-		context.Background(), jobID, execution.ID, "session_1", turn.ID, principal,
-	)
-	if err != nil || partial.Complete || partial.Tokens != 11 || partial.CreatedRevision != partialReceipt.Revision {
-		t.Fatalf("RetrieveProviderUsage partial: %#v %#v %v", partialReceipt, partial, err)
-	}
-	runtime.usageResult = provider.Usage{
-		UsageID: "usage_turn_1", Tokens: 19, Complete: true, EvidenceSHA256: strings.Repeat("6", 64),
-	}
-	completeReceipt, complete, err := controller.RetrieveProviderUsage(
-		context.Background(), jobID, execution.ID, "session_1", turn.ID, principal,
-	)
-	if err != nil || !complete.Complete || complete.Tokens != 19 || complete.CreatedRevision != completeReceipt.Revision {
-		t.Fatalf("RetrieveProviderUsage complete: %#v %#v %v", completeReceipt, complete, err)
-	}
 	resultRetryReceipt, resultRetry, err := controller.RetrieveProviderResult(
 		context.Background(), jobID, execution.ID, "session_1", turn.ID, principal,
 	)
 	if err != nil || resultRetryReceipt != resultReceipt || resultRetry != result {
 		t.Fatalf("idempotent Result retrieval: %#v %#v %v", resultRetryReceipt, resultRetry, err)
 	}
-	usageRetryReceipt, usageRetry, err := controller.RetrieveProviderUsage(
-		context.Background(), jobID, execution.ID, "session_1", turn.ID, principal,
-	)
-	if err != nil || usageRetryReceipt != completeReceipt || usageRetry != complete {
-		t.Fatalf("idempotent Usage retrieval: %#v %#v %v", usageRetryReceipt, usageRetry, err)
-	}
 	restored, err := database.GetJob(context.Background(), jobID)
 	if err != nil {
-		t.Fatalf("GetJob after Result / Usage: %v", err)
+		t.Fatalf("GetJob after Result: %v", err)
 	}
-	if len(restored.ProviderResultObservations) != 1 || len(restored.ProviderUsageObservations) != 2 ||
-		restored.ProviderUsageObservations[1].UsageID != "usage_turn_1" || !restored.ProviderUsageObservations[1].Complete ||
+	if len(restored.ProviderResultObservations) != 1 ||
 		startIntent.ID != restored.ProviderStartIntents[0].ID {
-		t.Fatalf("Provider Result / Usage facts were not preserved: %#v %#v", restored.ProviderResultObservations, restored.ProviderUsageObservations)
+		t.Fatalf("Provider Result facts were not preserved: %#v", restored.ProviderResultObservations)
 	}
 }
 
-func TestProviderControllerRejectsResultAndUsageWithoutVerifiedCapabilities(t *testing.T) {
+func TestProviderControllerRejectsResultWithoutVerifiedCapabilities(t *testing.T) {
 	runtime := &fakePlanningProviderRuntime{}
 	controller, database, principal, jobID, grantID, documents := newProviderControllerFixture(t, runtime)
 	_, execution, _, _, err := controller.StartPlanning(
@@ -1564,11 +1474,8 @@ func TestProviderControllerRejectsResultAndUsageWithoutVerifiedCapabilities(t *t
 	if _, _, err := controller.RetrieveProviderResult(context.Background(), jobID, execution.ID, "session_1", turn.ID, principal); !errors.Is(err, provider.ErrUnsupportedCapability) {
 		t.Fatalf("RetrieveProviderResult error = %v, want ErrUnsupportedCapability", err)
 	}
-	if _, _, err := controller.RetrieveProviderUsage(context.Background(), jobID, execution.ID, "session_1", turn.ID, principal); !errors.Is(err, provider.ErrUnsupportedCapability) {
-		t.Fatalf("RetrieveProviderUsage error = %v, want ErrUnsupportedCapability", err)
-	}
-	if runtime.resultCalls != 0 || runtime.usageCalls != 0 {
-		t.Fatalf("unsupported capability invoked Provider methods: result=%d usage=%d", runtime.resultCalls, runtime.usageCalls)
+	if runtime.resultCalls != 0 {
+		t.Fatalf("unsupported capability invoked Provider methods: result=%d", runtime.resultCalls)
 	}
 }
 func TestProviderControllerPersistsStartIntentBeforeCallingRuntime(t *testing.T) {

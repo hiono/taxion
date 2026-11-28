@@ -8,7 +8,7 @@ Status: Draft
 
 ## 1. 目的
 
-本書は、Taxion Controllerと外部Providerの間に設けるProvider Adapterの要求仕様を定義する。Provider実行の意図、外部操作、観測結果、利用量、停止証拠をJobAggregateへ相関させ、認可境界とcredential isolationを維持する。
+本書は、Taxion Controllerと外部Providerの間に設けるProvider Adapterの要求仕様を定義する。Provider実行の意図、外部操作、観測結果、停止証拠をJobAggregateへ相関させ、認可境界とcredential isolationを維持する。
 
 本書はProvider SDKの具体的な型や特定ベンダーの採用を決定しない。初期実装ではfake AdapterによるE2 synthetic integrationを成立させ、Live Provider E4はProvider選定・認証環境の準備後に別途検証する。
 
@@ -18,9 +18,9 @@ Status: Draft
 
 - Provider / account / SDK・protocol version / configuration digestに束縛したAdapter identity
 - capability declarationと検証証拠
-- Start / Send / Stop / Resume / Lookup / Result / Usage / event replay
+- Start / Send / Stop / Resume / Lookup / Result / event replay
 - Controllerによるauthority再検証とintent先行永続化
-- Provider receipt / event / terminal result / usage / stop evidenceのJobAggregate保存
+- Provider receipt / event / terminal result / stop evidenceのJobAggregate保存
 - timeout、disconnect、receipt欠落、process restart時のUNKNOWN保持と照合
 - CredentialBroker / CredentialLeaseによるcredential仲介とsecret redaction
 - fake Adapter、Domain / Store / Controller / Adapterの自動テスト
@@ -55,7 +55,7 @@ Status: Draft
 
 ### 4.1 JobAggregateとCommand
 
-1. JobAggregateをJob・RoleExecution・Provider operation・Observation・Usageの唯一のドメイン正本とする。
+1. JobAggregateをJob・RoleExecution・Provider operation・Observationの唯一のドメイン正本とする。
 2. JobAggregateの変更はexpected revisionと安定したCommand IDを持つ明示的Commandで行う。
 3. intent、関連facts、Command receiptは同一Job transactionで確定する。
 4. 同一Command ID・同一要求の再送は同じreceiptへ収束させ、異なる要求での再利用を拒否する。
@@ -73,7 +73,7 @@ Status: Draft
 - 操作対象のProvider / account / SDK・protocol version / configuration identity
 - Context documentはID、content digest、実contentの一致を検証する。Snapshot modeはReferenceと一致する単一documentを要求する。Documents modeはID昇順で各documentの「ID + LF + SHA256 + LF」を連結したUTF-8 bytesのSHA-256をReadOnlyBoundary.SHA256と照合する。
 - 当該操作に必要なCapabilityとその証拠水準
-- 前回operationのUNKNOWN、terminal result、usage、stop状態
+- 前回operationのUNKNOWN、terminal result、stop状態
 
 認可に必要な事実が不明・不整合の場合はfail-closedとする。DRAFT PlanningAuthorizationをJobApprovalへ昇格させない。JobApprovalが未実装の段階では、承認済み実行を可能とする仮の権限経路を作らない。
 
@@ -89,25 +89,22 @@ CapabilityはProvider ID、account identity、SDK / protocol version、configura
 | Event replay | event cursorの連続性を保った再取得 |
 | Stop proof | Providerが処理を停止し、後続書込みを継続しないことの証拠 |
 | Final output retrieval | event欠落時を含む最終結果の取得 |
-| Usage identity | 利用量をoperation / turnへ一意に束縛する能力 |
-| Usage completeness | 利用量が確定値であり、欠落・重複・部分値でないことを判定する能力 |
 
 Capabilityは個別に扱う。未検証のCapabilityを利用可能と推定しない。あるCapabilityの証拠不足によって、独立した別Capabilityの利用まで一律に無効化しない。
 
 証拠水準はADR-801に従う。E2 synthetic、E3 SDK compatibility、E4 Live Provider、E5 Durable recoveryを混同しない。Provider自身の自己申告だけを検証済み証拠として扱わない。Runtimeは信頼されたCapability検証結果を受け取り、必要な最低水準を満たす操作だけを許可する。
 
 最低水準:
-- Start / Send / Stop / Lookup / Result / Usage: E4
+- Start / Send / Stop / Lookup / Result: E4
 - Cross-process reattachment / Event replay: E5
 - fake Adapterによる契約・異常系試験: E2
 
 ### 4.4 外部操作の状態
 
 1. Start / Send / Stop / Resumeは、呼出し前にTaxion生成OperationIDとimmutable intentを保存する。
-2. Provider receiptの受理は、turn完了・停止・Usage確定を意味しない。
-3. terminal result、usage、stop proofはそれぞれ別のObservationとして保存する。
+2. Provider receiptの受理は、turn完了・停止を意味しない。
+3. terminal result、stop proofはそれぞれ別のObservationとして保存する。
    - ResultはFinal=trueのUTF-8 contentとし、contentは1 MiB以下、ContentSHA256とEvidenceSHA256を検証する。ResultをJobAggregateへ保存する前にcredential漏えいを検査する。
-   - UsageはUsageID単位でappend-onlyに保存する。Complete=falseは途中Observationとして記録でき、同一UsageIDのComplete=trueを後続Observationとして追加する。Complete=trueの後に同じUsageIDのObservationを追加しない。
 4. timeout、connection loss、process crash、receipt欠落、応答検証失敗はUNKNOWNとして扱う。
 5. UNKNOWNは同じOperationID / TurnIDに対するlookup、event replay、final result retrieval等の証拠でのみ解消する。
 6. 同じidentityに対するidempotencyが実証されていない場合はblind replayしない。
@@ -128,7 +125,7 @@ Capabilityは個別に扱う。未検証のCapabilityを利用可能と推定し
 1. Provider credentialはCredentialBrokerが解決し、Adapterの必要な操作中だけCredentialLeaseとして渡す。
 2. credentialをJobAggregate、Command receipt、Provider observation、CLI引数、ログ、エラー、Model / Tool / Sandboxへ保存・露出しない。
 3. RuntimeはAdapterのraw errorを外部へ返さず、許可された固定error codeへ正規化する。
-4. Provider response、event、result、usage、session identity等にcredentialが含まれる場合は結果を採用せず、operationをUNKNOWNとして扱う。
+4. Provider response、event、result、session identity等にcredentialが含まれる場合は結果を採用せず、operationをUNKNOWNとして扱う。
 5. Leaseは処理終了、エラー、panic、context cancellationのすべての経路でCloseする。
 6. LeaseのCloseは新規参照を拒否し、保持するsecret bufferをbest-effort zeroizeする。
 7. CredentialLeaseの利用者はsecretを保持・複製・外部へ送信しない。
@@ -147,8 +144,6 @@ Capabilityは個別に扱う。未検証のCapabilityを利用可能と推定し
 | PA-REQ-008 | Lookupは要求したOperationID / SessionID / TurnIDとの一致を検証する。 |
 | PA-REQ-009 | ResultはOperationID / SessionID / TurnID、Final=true、UTF-8 content（1 MiB以下）、content digest、evidence digestを検証する。 |
 | PA-REQ-015 | Result factsはJobAggregateへappend-onlyで保存し、同じOperationID / TurnIDのterminal resultを重複確定しない。 |
-| PA-REQ-010 | UsageはUsageID、operation / turn identity、token数、Complete、evidence digestを検証し、同一UsageIDの途中値から確定値への遷移をappend-onlyで保存する。 |
-| PA-REQ-016 | Usage factsは同一UsageIDのComplete=true後に追加・変更せず、Complete=falseを確定利用量として扱わない。 |
 | PA-REQ-011 | Event replayはsession identity、cursor continuity、event identity、重複を検証する。 |
 | PA-REQ-012 | Providerのraw credentialとraw errorを永続化・ログ出力しない。 |
 | PA-REQ-013 | UNKNOWNを推測変換せず、同じidentityで照合する。 |
@@ -161,7 +156,7 @@ Capabilityは個別に扱う。未検証のCapabilityを利用可能と推定し
 - **整合性**: Job facts、receipt、revision、idempotencyを同一transactionで維持する。
 - **重複実行防止**: UNKNOWN時の新identity発行とblind replayを禁止する。
 - **復旧性**: restart後は保存factsとProvider状態を照合し、推測で状態を確定しない。
-- **監査性**: 操作intent、Observation、Usage、拒否理由をJobID / RoleExecutionID / OperationIDへ相関する。
+- **監査性**: 操作intent、Observation、拒否理由をJobID / RoleExecutionID / OperationIDへ相関する。
 - **最小権限**: AdapterはJob authorityを発行・拡張せず、許可されたProvider / account / configurationだけを使用する。
 - **テスト可能性**: fake AdapterでE2の正常系・異常系を再現できる。E2をE4 / E5の証拠として扱わない。
 
@@ -170,7 +165,7 @@ Capabilityは個別に扱う。未検証のCapabilityを利用可能と推定し
 1. Capabilityが別Provider / account / SDK version / configurationへ流用できない。
 2. 未検証Capabilityを要求する操作はcredential取得・Provider呼出し前に拒否される。
 3. intentのcommit失敗・UNKNOWN時にProvider呼出しが発生しない。
-4. Provider受理応答だけでterminal result、stop、usageを確定しない。
+4. Provider受理応答だけでterminal result、stopを確定しない。
 5. timeout / disconnect / receipt欠落 / crashをUNKNOWNとして保持し、blind replayしない。
 6. Stop proof、terminal resultの未照合中は完了・解放を許可しない。Usageの未報告は停止理由にしない。
 7. E5未検証のResumeで同一RoleExecutionへ新Sessionを付け替えない。

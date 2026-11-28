@@ -17,7 +17,7 @@ Provider Adapter design: [Provider Adapter 詳細設計書](provider-adapter-det
 | User Interface / CLI | 利用者入力、Job表示、承認確認、成果・Evidence表示 | Job authorityや独自の状態正本 |
 | Trusted Ingress | 認証済み利用者・Agent endpointのidentityとrequest provenanceを確定 | 自然言語本文からのidentity推定 |
 | Controller | Job command、authorization、scope、Effect、Provider operation、recovery、Job completionを制御 | Roleの意味的判断や成果品質の代行 |
-| JobAggregate | Job、Task、RoleExecution、JobMessage、Approval、Provider facts、Worktree、Output、Evidence、Usageの正本 | 外部Providerの実行状態を推測したmutable status |
+| JobAggregate | Job、Task、RoleExecution、JobMessage、Approval、Provider facts、Worktree、Output、Evidenceの正本 | 外部Providerの実行状態を推測したmutable status |
 | Role Runtime | Planner / Coder / Reviewerの個別実行とContextを提供 | JobApprovalやresource boundaryの発行 |
 | Computer Sandbox Manager | Task単位の独立Computer、filesystem / process / credential / network / host境界を強制 | Job authorityやJob scopeの発行 |
 | Context Manager | TurnごとのContext選択、Skill / Fileのon-demand load、履歴圧縮を実施 | Job facts、承認、provenanceの正本 |
@@ -40,7 +40,7 @@ Planner / Coder / Reviewerの実行主体はRoleExecutionIDに結び付ける。
 
 ### 3.3 Provider boundary
 
-Providerは外部実行主体である。Providerが返すevent、tool list、session state、usage、terminal statusはObservationであり、Taxionの承認・Job完了の正本ではない。Provider credentialはController / Provider Adapterが管理し、Model / Sandboxへ露出しません。Provider API通信はAdapterが仲介し、現在のgrantとProvider / account / configurationに束縛します。RoleのToolへ任意のnetwork accessやcredential accessを継承しません。ControllerはOperationIDとJob revisionで相関し、外部結果をJobAggregateへ明示的に記録します。
+Providerは外部実行主体である。Providerが返すevent、tool list、session state、terminal statusはTaxionの承認・Job完了の正本ではない。Provider credentialはController / Provider Adapterが管理し、Model / Sandboxへ露出しません。Provider API通信はAdapterが仲介し、現在のgrantとProvider / account / configurationに束縛します。RoleのToolへ任意のnetwork accessやcredential accessを継承しません。ControllerはOperationIDとJob revisionで相関し、外部結果をJobAggregateへ明示的に記録します。
 
 Provider AdapterのCapabilityはProvider / account / SDK・protocol version / configuration identityへ束縛し、証拠水準を操作単位で検証します。CredentialBroker / CredentialLeaseはAdapter境界内でsecretを仲介し、Runtimeはraw error・responseへのsecret混入を検査してsafe errorへ変換します。詳細はProvider Adapter要求仕様・詳細設計・内部設計を参照します。
 
@@ -79,7 +79,7 @@ Context Managerは各turnで必要なContextだけを選択し、Skill / Fileを
 4. Coding TaskにWorktreeを割り当て、repository identity、Worktree path、baseline commit、ownerを永続化する。
 5. Provider呼出し前にOperationIDとimmutable operation intentをJobAggregateへ保存する。
 6. Controllerが同じExecutionPermissionを外部副作用の直前に再検証する。
-7. Provider Adapterが外部呼出しを行い、受理・event・result・usage・stop observationをOperationIDへ返す。
+7. Provider Adapterが外部呼出しを行い、受理・event・result・stop observationをOperationIDへ返す。
 8. ControllerがObservationを記録し、Conformance / Admissionを別々に判定する。
 9. JobOutputとJobEvidenceをimmutable content identityとproducer / verifierへ結び付ける。
 
@@ -113,7 +113,7 @@ Context Managerは各turnで必要なContextだけを選択し、Skill / Fileを
 
 ### 5.2 After external side effect
 
-- Provider receipt、event、terminal result、stop evidenceをappend-only observationとして保存する。報告されたUsageも記録できる。
+- Provider receipt、event、terminal result、stop evidenceをappend-only observationとして保存する。
 - Provider quiescenceが確定するまで、完了・資源解放を許可しない。Usageの未報告は妨げとしない。
 - DB commitとProvider operation resultを同一の成功状態へまとめない。
 - timeout、connection loss、receipt欠落はUNKNOWNとして保持する。
@@ -125,7 +125,7 @@ Context Managerは各turnで必要なContextだけを選択し、Skill / Fileを
 - 未解決OperationIDをProviderへ照会し、観測結果をappend-onlyで追加する。
 - AdapterがProvider / SDK versionとconfiguration identityに対応して宣言したcapabilityを確認する。Session reattachmentは保存済みの正確なSession / Provider / account / configuration identityに一致する場合だけ許可する。
 - Adapterがcross-process reattachmentをサポートしない場合、同じRoleExecutionへ新しいSessionを作成しない。旧operationの停止・resultを照合するまでWorktreeを保持またはquarantineする。
-- Worktree owner、Provider stop proof、result、artifact identityを照合する。Usageが報告されれば記録する。
+- Worktree owner、Provider stop proof、result、artifact identityを照合する。
 - 停止・結果が不明なWorktreeはquarantineし、所有権を解放しない。
 - 旧RoleExecutionを解決した後の継続は、新しいRoleExecutionとしてJobApproval、Task scope、deadlineを再検証して開始する。
 - 復旧不能な破損・矛盾は隔離し、成功へ推測変換しない。
