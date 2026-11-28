@@ -477,7 +477,7 @@ func (a *ACPAdapter) Start(ctx context.Context, request StartRequest, _ Credenti
 		// publish a successful Start receipt or permit a blind Start retry.
 		session.stopping.Store(true)
 		session.process.terminate()
-		return StartResult{}, &OperationError{Class: FailureDefinitive, Code: OperationCodeRateLimited}
+		return StartResult{}, &OperationError{Class: FailureDefinitive, Code: OperationCodeBudgetExceeded}
 	}
 	a.mu.Lock()
 	if a.closed || session.stopping.Load() {
@@ -544,8 +544,7 @@ func (a *ACPAdapter) trackProcess(process *acpProcess) error {
 			<-session.turnGate
 			session.turnGate <- struct{}{}
 		}
-		a.mu.Lock()
-		delete(a.processes, process)
+		<-process.readerDone
 		process.discardQueuedUpdates()
 		a.mu.Lock()
 		delete(a.processes, process)
