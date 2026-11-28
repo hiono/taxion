@@ -14,6 +14,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"runtime"
@@ -147,6 +148,23 @@ func TestPlanningFactTransactionAcquiresWriterLockBeforeReading(t *testing.T) {
 }
 
 func TestOpenCurrentSchemaDoesNotRequireSQLiteWriterLock(t *testing.T) {
+	if path := os.Getenv("TAXION_TEST_LOCKED_DATABASE"); path != "" {
+		db, err := sql.Open("sqlite", path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer db.Close()
+		if _, err := db.Exec("PRAGMA busy_timeout = 0"); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.Exec("BEGIN IMMEDIATE"); err == nil {
+			t.Fatal("second process acquired the active writer lock")
+		} else if !strings.Contains(strings.ToLower(err.Error()), "locked") &&
+			!strings.Contains(strings.ToLower(err.Error()), "busy") {
+			t.Fatalf("unexpected second process error: %v", err)
+		}
+		return
+	}
 	first, path := newTestStore(t)
 	ctx := context.Background()
 	writer, err := first.db.Conn(ctx)
@@ -166,6 +184,11 @@ func TestOpenCurrentSchemaDoesNotRequireSQLiteWriterLock(t *testing.T) {
 	}
 	if err := reopened.Close(); err != nil {
 		t.Fatalf("close reopened Store: %v", err)
+	}
+	child := exec.Command(os.Args[0], "-test.run=^TestOpenCurrentSchemaDoesNotRequireSQLiteWriterLock$")
+	child.Env = append(os.Environ(), "TAXION_TEST_LOCKED_DATABASE="+path)
+	if output, err := child.CombinedOutput(); err != nil {
+		t.Fatalf("writer lock after second Open: %v\n%s", err, output)
 	}
 }
 

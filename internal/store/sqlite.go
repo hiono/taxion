@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/hiono/taxion/internal/auth"
@@ -37,6 +38,9 @@ const addPlanningAuthorizationCommandType = "AddPlanningAuthorization"
 const startTasklessPlannerCommandType = "StartTasklessPlanner"
 const addProviderResultObservationCommandType = "AddProviderResultObservation"
 const addProviderUsageObservationCommandType = "AddProviderUsageObservation"
+
+// ponytail: serialize file preparation globally; use per-path locking only if concurrent opens become a bottleneck.
+var sqliteFilePreparation sync.Mutex
 
 type Store struct {
 	db *sql.DB
@@ -69,10 +73,8 @@ func Open(ctx context.Context, path string) (*Store, error) {
 		}
 		path = absolute
 		if runtime.GOOS != "windows" {
-			for _, name := range []string{path, path + "-wal", path + "-shm", path + "-journal"} {
-				if err := restrictSQLiteFile(name, name == path); err != nil {
-					return nil, fmt.Errorf("restrict SQLite file permissions: %w", err)
-				}
+			if err := restrictSQLiteFiles(path); err != nil {
+				return nil, fmt.Errorf("restrict SQLite file permissions: %w", err)
 			}
 		}
 	}
@@ -92,16 +94,25 @@ func Open(ctx context.Context, path string) (*Store, error) {
 	return store, nil
 }
 
-func restrictSQLiteFile(path string, create bool) error {
-	var file *os.File
-	var err error
-	if create {
-		file, err = os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o600)
-		if err == nil {
-			defer file.Close()
-			return file.Chmod(0o600)
+func restrictSQLiteFiles(path string) error {
+	sqliteFilePreparation.Lock()
+	defer sqliteFilePreparation.Unlock()
+	for _, name := range []string{path, path + "-wal", path + "-shm", path + "-journal"} {
+		if err := restrictSQLiteFile(name, name == path); err != nil {
+			return err
 		}
-		if !errors.Is(err, os.ErrExist) {
+	}
+	return nil
+}
+
+func restrictSQLiteFile(path string, create bool) error {
+	if create {
+		file, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o600)
+		if err == nil {
+			if err := file.Close(); err != nil {
+				return err
+			}
+		} else if !errors.Is(err, os.ErrExist) {
 			return err
 		}
 	}
@@ -115,22 +126,11 @@ func restrictSQLiteFile(path string, create bool) error {
 	if !info.Mode().IsRegular() {
 		return fmt.Errorf("%s is not a regular file", path)
 	}
-	file, err = os.Open(path)
+	err = os.Chmod(path, 0o600)
 	if errors.Is(err, os.ErrNotExist) && !create {
 		return nil
 	}
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-	opened, err := file.Stat()
-	if err != nil {
-		return err
-	}
-	if !os.SameFile(info, opened) {
-		return fmt.Errorf("%s changed while opening", path)
-	}
-	return file.Chmod(0o600)
+	return err
 }
 
 func (s *Store) initialize(ctx context.Context) error {
