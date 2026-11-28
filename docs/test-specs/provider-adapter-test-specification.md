@@ -195,32 +195,32 @@ E2 test-only policyはテストコードからのみ利用可能とし、本番c
 | CTR-014 | Usage未確定 | Usageの未報告だけを理由にTurnの完了を妨げない |
 | CTR-015 | credential leak | resultを保存せずUNKNOWN |
 | CTR-016 | Observation保存失敗 | Provider結果を成功扱いせずUNKNOWN / recovery対象 |
-| CTR-017 | Start intent ordering | Start intent commit前にAdapterを呼び出す | テスト失敗 |
-| CTR-018 | Ambiguous Start | UNKNOWN後に同じOperationIDでLookup | 新しいStartを発行せずObservationを追記 |
-| CTR-019 | Expired grant recovery | 期限後に既存Startを照合 | Lookupは許可し、NOT_FOUND後の新規Startは拒否 |
-| CTR-020 | Unsafe retry | UNKNOWN後にLookup / idempotency capabilityがない | blind replayを拒否しUNKNOWNを保持 |
-| CTR-021 | Documents context | ID重複、content digest不一致、aggregate digest不一致 | Start intent作成前に拒否 |
-| CTR-022 | Event replay | accepted Session、cursor prefix、event / turn identityが一致 | append-only Observationとして保存し、同一page再送は冪等 |
-| CTR-023 | Result retrieval | accepted Start / Turn、E4 Final Output capability、identity一致 | Result observationをappend-only保存 |
-| CTR-024 | Result validation | Final=false、identity mismatch、digest mismatch | 保存せず拒否 |
-| CTR-027 | Capability gate | Result capability不足 | credential / Adapter呼出し前に拒否 |
-| CTR-028 | Provider retrieval failure | Result取得時にRuntime error | 成功Observationを追加しない |
-| CTR-029 | Send recovery | UNKNOWN Turnに対して同じOperationID / TurnIDでLookup | 新しいTurnIDを発行せず、verified NOT_FOUND後だけ再送 |
-| CTR-030 | Send capability gate | Send idempotency / lookupのE4 evidence不足 | Turn intent作成・Runtime.Send前に拒否 |
-| CTR-031 | Resume intent ordering | E5 SessionReattach evidence / accepted Session一致 | Runtime.Resume前にResume intentとreceiptを永続化 |
-| CTR-032 | Resume ambiguity | Runtime.Resumeのambiguous failure | 同じOperationIDのUNKNOWN observationを保存 |
-| CTR-033 | Resume reconciliation | UNKNOWN Resumeへの同じOperationID / SessionIDのATTACHED evidence | ReconcilesUnknown=trueでappend-only解消 |
-| CTR-034 | Resume capability gate | E5 SessionReattach evidence不足 | Resume intent作成・Runtime.Resume前に拒否 |
-| CTR-035 | Resume session binding | accepted Session不一致、別Sessionへの付け替え | 拒否し、既存Sessionを維持 |
-| CTR-036 | Task Coder Start | exact current approval / Task / permission / RoleExecution / intent / Provider identity | intent永続化後、同一OperationIDでStartしACCEPTEDを保存 |
-| CTR-037 | Task Start permission stale | approval / revision / scope / expiryがdispatch直前に不一致 | Provider呼出し0回、Job facts不変 |
-| CTR-038 | Task Start Provider mismatch | Provider / account / configuration digest mismatch | Lookup / credential / Adapter呼出し前に拒否 |
-| CTR-039 | Task Start retry | 既存intent、observationなし、Start LookupでNOT_FOUND | permission再検証後、同じOperationIDでのみStart |
-| CTR-040 | Task Start ambiguous | StartまたはLookupがambiguous / unclassified error | UNKNOWNをappendし、新しいOperationIDで再送しない |
-| CTR-041 | Task Start reconciliation | UNKNOWNに対する同一OperationIDのaccepted / failed Lookup evidence | ReconcilesUnknown=trueでappend-only解消 |
-| CTR-042 | Task Start unsafe capability | Start Lookup / idempotency evidenceなし | Startを呼ばずUNKNOWN / unresolvedを保持 |
-| CTR-043 | Reviewer Start boundary | immutable Worktree snapshot / read-only enforcement evidenceなし | Provider dispatch 0回 |
-| CTR-044 | Task prompt integrity | caller-supplied prompt / context injection、Task immutable fieldsの改変 | 任意promptを受け付けず、deterministic prompt digestのみ使用 |
+| CTR-017 | Start intent ordering: Start intent commit前にAdapterを呼び出す | テスト失敗 |
+| CTR-018 | Ambiguous Start: UNKNOWN後に同じOperationIDでLookup | 新しいStartを発行せずObservationを追記 |
+| CTR-019 | Expired grant recovery: 期限後に既存Startを照合 | Lookupは許可し、NOT_FOUND後の新規Startは拒否 |
+| CTR-020 | Unsafe retry: UNKNOWN後にLookup / idempotency capabilityがない | blind replayを拒否しUNKNOWNを保持 |
+| CTR-021 | Documents context: ID重複、content digest不一致、aggregate digest不一致 | Start intent作成前に拒否 |
+| CTR-022 | Event replay: accepted Session、cursor prefix、event / turn identityが一致 | append-only Observationとして保存し、同一page再送は冪等 |
+| CTR-023 | Result retrieval: accepted Start / Turn、E4 Final Output capability、identity一致 | Result observationをappend-only保存 |
+| CTR-024 | Result validation: Final=false、identity mismatch、digest mismatch | 保存せず拒否 |
+| CTR-027 | Capability gate: Result capability不足 | credential / Adapter呼出し前に拒否 |
+| CTR-028 | Provider retrieval failure: Result取得時にRuntime error | 成功Observationを追加しない |
+| CTR-029 | Send recovery: UNKNOWN Turnに対して同じOperationID / TurnIDでLookup | 新しいTurnIDを発行せず、verified NOT_FOUND後だけ再送 |
+| CTR-030 | Send capability gate: Send idempotency / lookupのE4 evidence不足 | Turn intent作成・Runtime.Send前に拒否 |
+| CTR-031 | Resume intent ordering: E5 SessionReattach evidence / accepted Session一致 | Runtime.Resume前にResume intentとreceiptを永続化 |
+| CTR-032 | Resume ambiguity: Runtime.Resumeのambiguous failure | 同じOperationIDのUNKNOWN observationを保存 |
+| CTR-033 | Resume reconciliation: UNKNOWN Resumeへの同じOperationID / SessionIDのATTACHED evidence | ReconcilesUnknown=trueでappend-only解消 |
+| CTR-034 | Resume capability gate: E5 SessionReattach evidence不足 | Resume intent作成・Runtime.Resume前に拒否 |
+| CTR-035 | Resume session binding: accepted Session不一致、別Sessionへの付け替え | 拒否し、既存Sessionを維持 |
+| CTR-036 | Task Coder Start: exact current approval / Task / permission / RoleExecution / intent / Provider identity | intent永続化後、同一OperationIDでStartしACCEPTEDを保存 |
+| CTR-037 | Task Start permission stale: approval / revision / scope / expiryがdispatch直前に不一致 | Provider呼出し0回、Job facts不変 |
+| CTR-038 | Task Start Provider mismatch: Provider / account / configuration digest mismatch | Lookup / credential / Adapter呼出し前に拒否 |
+| CTR-039 | Task Start retry: 既存intent、observationなし、Start LookupでNOT_FOUND | permission再検証後、同じOperationIDでのみStart |
+| CTR-040 | Task Start ambiguous: StartまたはLookupがambiguous / unclassified error | UNKNOWNをappendし、新しいOperationIDで再送しない |
+| CTR-041 | Task Start reconciliation: UNKNOWNに対する同一OperationIDのaccepted / failed Lookup evidence | ReconcilesUnknown=trueでappend-only解消 |
+| CTR-042 | Task Start unsafe capability: Start Lookup / idempotency evidenceなし | Startを呼ばずUNKNOWN / unresolvedを保持 |
+| CTR-043 | Reviewer Start boundary: immutable Worktree snapshot / read-only enforcement evidenceなし | Provider dispatch 0回 |
+| CTR-044 | Task prompt integrity: caller-supplied prompt / context injection、Task immutable fieldsの改変 | 任意promptを受け付けず、deterministic prompt digestのみ使用 |
 
 ## 11. Regression tests
 

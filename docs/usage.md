@@ -106,7 +106,7 @@ taxion job list --store ./taxion.sqlite
 
 SQLite databaseとWALファイルは秘密情報を含む可能性があるため、Gitへ追加しないでください。
 
-保存形式はschema version 3です。version 2以前のデータベースは変更せず拒否し、移行は行いません。以前のデータを残す場合は別の`--store`を指定してください。
+保存形式はschema version 3です。Taxionのversion 1・2のデータベースは変更せず拒否し、移行は行いません。以前のデータを残す場合は別の`--store`を指定してください。
 
 ## 現在の制限
 

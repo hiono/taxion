@@ -62,7 +62,7 @@ OpenCodeでは送信前にACP Sessionが`opencode/big-pickle`を選択中と報�
 
 JobはSQLiteへtransactionで保存し、Command receiptとpayload hashを照合します。既定の保存先はOSのユーザー設定ディレクトリ配下の taxion/jobs.sqlite です。`--store` で保存先を明示できます。
 
-保存形式はschema version 3です。version 2以前は移行せず拒否するため、以前のデータを残す場合は別の`--store`を指定してください。利用量の確認と制限はProviderに任せ、Taxionには記録しません。
+保存形式はschema version 3です。Taxionのversion 1・2は移行せず拒否するため、以前のデータを残す場合は別の`--store`を指定してください。利用量の確認と制限はProviderに任せ、Taxionには記録しません。
 
 UnixではSQLiteを開く前にデータベースと既存のjournalファイルの権限を所有者のみの読み書きに制限します。保存先には、ほかのユーザーがファイルを置き換えられないディレクトリを指定してください。
 
