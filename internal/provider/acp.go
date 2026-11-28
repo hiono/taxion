@@ -548,15 +548,12 @@ func (a *ACPAdapter) trackProcess(process *acpProcess) error {
 		if process.readerStarted.Load() {
 			process.discardQueuedUpdatesUntilReaderExit()
 		}
-		process.discardQueuedUpdates()
+		process.releaseTransportBuffers()
 		a.mu.Lock()
 		delete(a.processes, process)
 		for _, session := range sessions {
 			if a.byID[session.sessionID] == session {
 				a.retireSessionLocked(session)
-			}
-			if a.detached[session.sessionID] == session {
-				session.process = nil
 			}
 		}
 		a.mu.Unlock()
@@ -1432,6 +1429,21 @@ func (p *acpProcess) releaseUpdate(update json.RawMessage) {
 	}
 	p.updateMu.Unlock()
 	p.signalUpdateWake()
+}
+
+func (p *acpProcess) releaseTransportBuffers() {
+	if p == nil {
+		return
+	}
+	p.discardQueuedUpdates()
+	p.pending.Range(func(key, _ any) bool {
+		p.pending.Delete(key)
+		return true
+	})
+	p.updateMu.Lock()
+	p.updateBytes = 0
+	p.updates = nil
+	p.updateMu.Unlock()
 }
 
 func (p *acpProcess) discardQueuedUpdatesUntilReaderExit() {
