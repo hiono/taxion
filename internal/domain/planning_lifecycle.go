@@ -64,7 +64,7 @@ func PlanningBoundaryDecisionID(commandID string) string {
 func validPlanningBoundaryReason(reasonCode string) bool {
 	switch reasonCode {
 	case "authorization_invalid_or_expired", "principal_mismatch", "provider_session_mismatch",
-		"previous_operation_unknown", "previous_resume_unknown", "turn_budget_exhausted", "token_budget_exhausted",
+		"previous_operation_unknown", "previous_resume_unknown",
 		"provider_configuration_mismatch", "reattachment_not_supported", "resume_before_latest_turn",
 		"provider_session_not_attached", "read_only_context_mismatch", "effect_not_permitted":
 		return true
@@ -87,7 +87,6 @@ type PlanningTurnIntent struct {
 	ConfigurationSHA256     string    `json:"configuration_sha256"`
 	TurnNumber              uint32    `json:"turn_number"`
 	PromptSHA256            string    `json:"prompt_sha256"`
-	ReservedTokens          uint64    `json:"reserved_tokens"`
 	CreatedAt               time.Time `json:"created_at"`
 	CreatedRevision         uint64    `json:"created_revision"`
 }
@@ -101,7 +100,6 @@ type PlanningTurnObservation struct {
 	RoleExecutionID   string    `json:"role_execution_id"`
 	ProviderSessionID string    `json:"provider_session_id"`
 	Status            string    `json:"status"`
-	TokensUsed        uint64    `json:"tokens_used"`
 	EvidenceSHA256    string    `json:"evidence_sha256,omitempty"`
 	ReconcilesUnknown bool      `json:"reconciles_unknown,omitempty"`
 	CreatedAt         time.Time `json:"created_at"`
@@ -276,11 +274,11 @@ func latestPlanningResumeStatus(job Job, roleExecutionID string, beforeRevision 
 	return latestObservation.Status, true
 }
 
-func NewPlanningTurnIntent(job Job, roleExecutionID, principalID, providerSessionID, commandID, promptSHA256 string, reservedTokens uint64, now time.Time) (PlanningTurnIntent, error) {
+func NewPlanningTurnIntent(job Job, roleExecutionID, principalID, providerSessionID, commandID, promptSHA256 string, now time.Time) (PlanningTurnIntent, error) {
 	now = now.UTC().Round(0)
 	if !validCommandID(commandID) || !validPlanningIdentity(providerSessionID) ||
-		!validSHA256(promptSHA256) || reservedTokens == 0 || now.IsZero() {
-		return PlanningTurnIntent{}, errors.New("planning turn command, session, prompt digest, token reservation, and timestamp are required")
+		!validSHA256(promptSHA256) || now.IsZero() {
+		return PlanningTurnIntent{}, errors.New("planning turn command, session, prompt digest, and timestamp are required")
 	}
 	grant, execution, err := planningGrantAndExecution(job, roleExecutionID, principalID, now, PlanningBoundaryTurn)
 	if err != nil {
@@ -301,7 +299,6 @@ func NewPlanningTurnIntent(job Job, roleExecutionID, principalID, providerSessio
 		return PlanningTurnIntent{}, err
 	}
 	var count uint32
-	var tokensUsed uint64
 	for _, previous := range job.PlanningTurnIntents {
 		if previous.RoleExecutionID != execution.ID {
 			continue
@@ -312,34 +309,21 @@ func NewPlanningTurnIntent(job Job, roleExecutionID, principalID, providerSessio
 		count++
 		observations := 0
 		lastStatus := ""
-		lastTokensUsed := uint64(0)
 		for _, observation := range job.PlanningTurnObservations {
 			if observation.TurnID == previous.ID {
 				observations++
 				lastStatus = observation.Status
-				lastTokensUsed = observation.TokensUsed
 			}
 		}
 		if observations == 0 || lastStatus == PlanningTurnUnknown {
 			return PlanningTurnIntent{}, &PlanningBoundaryError{Boundary: PlanningBoundaryTurn, ReasonCode: "previous_operation_unknown", Cause: errors.New("previous Provider turn is unresolved; reconcile the same OperationID before another turn")}
 		}
-		if ^uint64(0)-tokensUsed < lastTokensUsed {
-			return PlanningTurnIntent{}, errors.New("planning token usage overflow")
-		}
-		tokensUsed += lastTokensUsed
 	}
 	if status, found := latestPlanningResumeStatus(job, execution.ID, job.Revision+1); found && status != PlanningResumeAttached {
 		if status == "" || status == PlanningResumeUnknown {
 			return PlanningTurnIntent{}, &PlanningBoundaryError{Boundary: PlanningBoundaryTurn, ReasonCode: "previous_resume_unknown", Cause: errors.New("previous Provider resume is unresolved; reconcile the same OperationID before another turn")}
 		}
 		return PlanningTurnIntent{}, &PlanningBoundaryError{Boundary: PlanningBoundaryTurn, ReasonCode: "provider_session_not_attached", Cause: errors.New("Provider Session is not attached after the latest resume")}
-	}
-	if count >= grant.Budget.MaxTurns || tokensUsed > grant.Budget.MaxTokens || reservedTokens > grant.Budget.MaxTokens-tokensUsed {
-		reasonCode := "turn_budget_exhausted"
-		if reservedTokens > grant.Budget.MaxTokens-tokensUsed {
-			reasonCode = "token_budget_exhausted"
-		}
-		return PlanningTurnIntent{}, &PlanningBoundaryError{Boundary: PlanningBoundaryTurn, ReasonCode: reasonCode, Cause: errors.New("PlanningAuthorization turn or token budget is exhausted")}
 	}
 	if start.ProviderID != grant.ProviderID || start.AccountID != grant.AccountID ||
 		start.ConfigurationSHA256 != grant.ConfigurationSHA256 {
@@ -354,8 +338,8 @@ func NewPlanningTurnIntent(job Job, roleExecutionID, principalID, providerSessio
 		PlanningAuthorizationID: grant.ID, RequestSHA256: grant.RequestSHA256, ProviderSessionID: providerSessionID,
 		ProviderID: grant.ProviderID, AccountID: grant.AccountID,
 		ConfigurationSHA256: grant.ConfigurationSHA256, TurnNumber: count + 1,
-		PromptSHA256: promptSHA256, ReservedTokens: reservedTokens,
-		CreatedAt: now, CreatedRevision: job.Revision + 1,
+		PromptSHA256: promptSHA256,
+		CreatedAt:    now, CreatedRevision: job.Revision + 1,
 	}
 	if err := turn.Validate(job); err != nil {
 		return PlanningTurnIntent{}, err
@@ -371,7 +355,7 @@ func (t PlanningTurnIntent) Validate(job Job) error {
 		!validPlanningIdentity(t.PlanningAuthorizationID) || !validSHA256(t.RequestSHA256) || !validPlanningIdentity(t.ProviderSessionID) ||
 		!validPlanningIdentity(t.ProviderID) || !validPlanningIdentity(t.AccountID) ||
 		!validSHA256(t.ConfigurationSHA256) || !validSHA256(t.PromptSHA256) ||
-		t.TurnNumber == 0 || t.ReservedTokens == 0 || t.CreatedAt.IsZero() || t.CreatedRevision < 3 {
+		t.TurnNumber == 0 || t.CreatedAt.IsZero() || t.CreatedRevision < 3 {
 		return errors.New("PlanningTurnIntent identity or metadata is invalid")
 	}
 	if t.JobID != job.ID {
@@ -394,11 +378,8 @@ func (t PlanningTurnIntent) Validate(job Job) error {
 			if t.CreatedRevision <= start.CreatedRevision || t.CreatedAt.Before(start.CreatedAt) {
 				return errors.New("PlanningTurnIntent precedes Provider Start intent")
 			}
-			if job.ProviderLifecycleEnforcedFromRevision > 0 &&
-				t.CreatedRevision >= job.ProviderLifecycleEnforcedFromRevision {
-				if err := validateProviderStartSession(job, start, t.ProviderSessionID, t.CreatedRevision, t.CreatedAt); err != nil {
-					return err
-				}
+			if err := validateProviderStartSession(job, start, t.ProviderSessionID, t.CreatedRevision, t.CreatedAt); err != nil {
+				return err
 			}
 			foundStart = true
 			break
@@ -422,8 +403,7 @@ func (t PlanningTurnIntent) Validate(job Job) error {
 		}
 		if t.RequestSHA256 != grant.RequestSHA256 || t.ProviderID != grant.ProviderID || t.AccountID != grant.AccountID ||
 			t.ConfigurationSHA256 != grant.ConfigurationSHA256 ||
-			t.CreatedAt.Before(execution.CreatedAt) || !t.CreatedAt.Before(grant.Deadline) ||
-			t.TurnNumber > grant.Budget.MaxTurns || t.ReservedTokens > grant.Budget.MaxTokens {
+			t.CreatedAt.Before(execution.CreatedAt) || !t.CreatedAt.Before(grant.Deadline) {
 			return errors.New("PlanningTurnIntent exceeds PlanningAuthorization")
 		}
 		return nil
@@ -431,7 +411,7 @@ func (t PlanningTurnIntent) Validate(job Job) error {
 	return errors.New("PlanningTurnIntent PlanningAuthorization was not found")
 }
 
-func NewPlanningTurnObservation(job Job, turnID, principalID, commandID, status string, tokensUsed uint64, evidenceSHA256 string, reconcilesUnknown bool, now time.Time) (PlanningTurnObservation, error) {
+func NewPlanningTurnObservation(job Job, turnID, principalID, commandID, status, evidenceSHA256 string, reconcilesUnknown bool, now time.Time) (PlanningTurnObservation, error) {
 	now = now.UTC().Round(0)
 	if !validCommandID(commandID) || now.IsZero() {
 		return PlanningTurnObservation{}, errors.New("planning turn observation command and timestamp are required")
@@ -455,11 +435,11 @@ func NewPlanningTurnObservation(job Job, turnID, principalID, commandID, status 
 		return PlanningTurnObservation{}, errors.New("unsupported Provider turn observation status")
 	}
 	if status == PlanningTurnUnknown {
-		if tokensUsed != 0 || evidenceSHA256 != "" || reconcilesUnknown {
-			return PlanningTurnObservation{}, errors.New("UNKNOWN observation cannot claim token usage or terminal evidence")
+		if evidenceSHA256 != "" || reconcilesUnknown {
+			return PlanningTurnObservation{}, errors.New("UNKNOWN observation cannot claim terminal evidence")
 		}
-	} else if !validSHA256(evidenceSHA256) || (status == PlanningTurnCompleted && tokensUsed > turn.ReservedTokens) {
-		return PlanningTurnObservation{}, errors.New("terminal turn observation requires evidence and must fit its token reservation")
+	} else if !validSHA256(evidenceSHA256) {
+		return PlanningTurnObservation{}, errors.New("terminal turn observation requires evidence")
 	}
 	var previous *PlanningTurnObservation
 	for i := range job.PlanningTurnObservations {
@@ -482,7 +462,7 @@ func NewPlanningTurnObservation(job Job, turnID, principalID, commandID, status 
 	observation := PlanningTurnObservation{
 		ID: PlanningTurnObservationID(commandID), CommandID: commandID, JobID: job.ID,
 		TurnID: turn.ID, OperationID: turn.OperationID, RoleExecutionID: turn.RoleExecutionID,
-		ProviderSessionID: turn.ProviderSessionID, Status: status, TokensUsed: tokensUsed,
+		ProviderSessionID: turn.ProviderSessionID, Status: status,
 		EvidenceSHA256: evidenceSHA256, ReconcilesUnknown: reconcilesUnknown,
 		CreatedAt: now, CreatedRevision: job.Revision + 1,
 	}
@@ -501,7 +481,7 @@ func (o PlanningTurnObservation) Validate(job Job, turn PlanningTurnIntent) erro
 		return errors.New("PlanningTurnObservation identity or metadata mismatch")
 	}
 	if o.Status == PlanningTurnUnknown {
-		if o.TokensUsed != 0 || o.EvidenceSHA256 != "" || o.ReconcilesUnknown {
+		if o.EvidenceSHA256 != "" || o.ReconcilesUnknown {
 			return errors.New("UNKNOWN turn observation contains terminal claims")
 		}
 		return nil
@@ -509,8 +489,8 @@ func (o PlanningTurnObservation) Validate(job Job, turn PlanningTurnIntent) erro
 	if o.Status != PlanningTurnCompleted && o.Status != PlanningTurnFailed {
 		return errors.New("PlanningTurnObservation status is invalid")
 	}
-	if (o.Status == PlanningTurnCompleted && o.TokensUsed > turn.ReservedTokens) || !validSHA256(o.EvidenceSHA256) {
-		return errors.New("terminal PlanningTurnObservation evidence or usage is invalid")
+	if !validSHA256(o.EvidenceSHA256) {
+		return errors.New("terminal PlanningTurnObservation evidence is invalid")
 	}
 	return nil
 }
@@ -703,22 +683,19 @@ func (r PlanningResumeIntent) Validate(job Job) error {
 	if providerStopIntentExists(job, r.RoleExecutionID, r.ProviderSessionID, r.CreatedRevision) {
 		return errors.New("Planning Resume cannot be created after a Provider Stop intent")
 	}
-	if job.ProviderLifecycleEnforcedFromRevision > 0 &&
-		r.CreatedRevision >= job.ProviderLifecycleEnforcedFromRevision {
-		var startIntent ProviderStartIntent
-		foundStart := false
-		for _, candidate := range job.ProviderStartIntents {
-			if candidate.RoleExecutionID == r.RoleExecutionID {
-				startIntent, foundStart = candidate, true
-				break
-			}
+	var startIntent ProviderStartIntent
+	foundStart := false
+	for _, candidate := range job.ProviderStartIntents {
+		if candidate.RoleExecutionID == r.RoleExecutionID {
+			startIntent, foundStart = candidate, true
+			break
 		}
-		if !foundStart {
-			return errors.New("PlanningResumeIntent has no Provider Start intent")
-		}
-		if err := validateProviderStartSession(job, startIntent, r.ProviderSessionID, r.CreatedRevision, r.CreatedAt); err != nil {
-			return err
-		}
+	}
+	if !foundStart {
+		return errors.New("PlanningResumeIntent has no Provider Start intent")
+	}
+	if err := validateProviderStartSession(job, startIntent, r.ProviderSessionID, r.CreatedRevision, r.CreatedAt); err != nil {
+		return err
 	}
 	for _, grant := range job.PlanningAuthorizations {
 		if grant.ID != r.PlanningAuthorizationID {

@@ -30,7 +30,7 @@ func newProviderResultUsageFixture(t *testing.T, database *Store, ctx context.Co
 		ReadOnlyBoundary: domain.PlanningReadOnlyBoundary{
 			Mode: domain.PlanningReadOnlyBoundarySnapshot, Reference: "snapshot_1", SHA256: strings.Repeat("c", 64),
 		},
-		Budget: domain.PlanningBudget{MaxTurns: 3, MaxTokens: 1000}, Deadline: now.Add(time.Hour),
+		Deadline: now.Add(time.Hour),
 	}
 	grant, err := domain.NewPlanningAuthorization(job, principal.PrincipalID(), "cmd_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", request, now)
 	if err != nil {
@@ -58,7 +58,7 @@ func newProviderResultUsageFixture(t *testing.T, database *Store, ctx context.Co
 		t.Fatalf("GetJob before Turn intent: %v", err)
 	}
 	_, turn, err := database.AddPlanningTurnIntent(ctx, jobID, job.Revision, execution.ID, "session_1",
-		"cmd_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", strings.Repeat("f", 64), 100, principal)
+		"cmd_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", strings.Repeat("f", 64), principal)
 	if err != nil {
 		t.Fatalf("AddPlanningTurnIntent: %v", err)
 	}

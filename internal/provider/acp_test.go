@@ -243,9 +243,8 @@ func TestACPAdapterUsesOneProcessPerRoleAndDeniesToolRequests(t *testing.T) {
 		RequestSHA256:   strings.Repeat("a", 64),
 		PromptSHA256:    sha256Hex(startPrompt),
 		Prompt:          startPrompt,
-		MaxTurns:        2,
-		MaxTokens:       1000,
-		Deadline:        time.Now().Add(8 * time.Second),
+
+		Deadline: time.Now().Add(8 * time.Second),
 	}
 	result, err := adapter.Start(ctx, start, nil)
 	if err != nil {
@@ -262,14 +261,14 @@ func TestACPAdapterUsesOneProcessPerRoleAndDeniesToolRequests(t *testing.T) {
 		SessionID:    result.SessionID,
 		PromptSHA256: sha256Hex(prompt),
 		Prompt:       prompt,
-		MaxTokens:    1000,
-		Deadline:     time.Now().Add(8 * time.Second),
+
+		Deadline: time.Now().Add(8 * time.Second),
 	}, nil)
 	if err != nil {
 		t.Fatalf("Send: %v", err)
 	}
-	if turn.Output != "fixed ACP response" || turn.SessionID != result.SessionID || turn.TokensUsed != 15 {
-		t.Fatalf("unexpected Turn result or usage: %#v", turn)
+	if turn.Output != "fixed ACP response" || turn.SessionID != result.SessionID {
+		t.Fatalf("unexpected Turn result: %#v", turn)
 	}
 
 	capabilities, err := adapter.Capabilities(ctx)
@@ -300,13 +299,13 @@ func TestACPAdapterKeepsCompletedOutputWhenUsageIsMissing(t *testing.T) {
 	prompt := "continue"
 	turn, err := adapter.Send(context.Background(), TurnRequest{
 		OperationID: "operation_turn_usage", TurnID: "turn_usage", SessionID: started.SessionID,
-		PromptSHA256: sha256Hex(prompt), Prompt: prompt, MaxTokens: 1000, Deadline: time.Now().Add(8 * time.Second),
+		PromptSHA256: sha256Hex(prompt), Prompt: prompt, Deadline: time.Now().Add(8 * time.Second),
 	}, nil)
 	if err != nil {
 		t.Fatalf("Send: %v", err)
 	}
-	if turn.Status != "COMPLETED" || turn.TokensUsed != 0 || turn.Output != "fixed ACP response" {
-		t.Fatalf("Turn = %#v, want completed output with unknown usage represented as zero known tokens", turn)
+	if turn.Status != "COMPLETED" || turn.Output != "fixed ACP response" {
+		t.Fatalf("Turn = %#v, want completed output without usage", turn)
 	}
 	capabilities, err := adapter.Capabilities(context.Background())
 	if err != nil {
@@ -336,54 +335,11 @@ func testACPChildSession(t *testing.T, update string) {
 	prompt := "continue"
 	_, err = adapter.Send(context.Background(), TurnRequest{
 		OperationID: "operation_turn_child", TurnID: "turn_child", SessionID: started.SessionID,
-		PromptSHA256: sha256Hex(prompt), Prompt: prompt, MaxTokens: 1000, Deadline: time.Now().Add(8 * time.Second),
+		PromptSHA256: sha256Hex(prompt), Prompt: prompt, Deadline: time.Now().Add(8 * time.Second),
 	}, nil)
 	var operationErr *OperationError
 	if !errors.As(err, &operationErr) || operationErr.Class != FailureAmbiguous || operationErr.Code != OperationCodeUnknown {
 		t.Fatalf("Send error = %v, want ambiguous unknown for child-session output", err)
-	}
-}
-
-func TestACPAdapterReportsOverBudgetUsageAsFailed(t *testing.T) {
-	t.Setenv("TAXION_ACP_HELPER", "1")
-	adapter := newACPTestAdapter(t)
-	defer adapter.Close()
-	started, err := adapter.Start(context.Background(), newACPTestStartRequest("start", "role_execution_budget"), nil)
-	if err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-	prompt := "continue"
-	turn, err := adapter.Send(context.Background(), TurnRequest{
-		OperationID: "operation_turn_budget", TurnID: "turn_budget", SessionID: started.SessionID,
-		PromptSHA256: sha256Hex(prompt), Prompt: prompt, MaxTokens: 5, Deadline: time.Now().Add(8 * time.Second),
-	}, nil)
-	if err != nil {
-		t.Fatalf("Send: %v", err)
-	}
-	if turn.Status != "FAILED" || turn.TokensUsed != 15 || turn.Output != "" {
-		t.Fatalf("over-budget turn = %#v, want failed with actual usage and no output", turn)
-	}
-}
-
-func TestACPAdapterDoesNotPublishStartReceiptWhenInitialTurnFails(t *testing.T) {
-	t.Setenv("TAXION_ACP_HELPER", "1")
-	adapter := newACPTestAdapter(t)
-	defer adapter.Close()
-	request := newACPTestStartRequest("operation_start_initial_budget", "role_execution_initial_budget")
-	request.MaxTokens = 5
-	result, err := adapter.Start(context.Background(), request, nil)
-	var operationErr *OperationError
-	if !errors.As(err, &operationErr) || operationErr.Class != FailureDefinitive || operationErr.Code != OperationCodeBudgetExceeded {
-		t.Fatalf("Start error = %v, want definitive budget_exceeded", err)
-	}
-	if result.SessionID != "" || result.ReceiptID != "" {
-		t.Fatalf("failed initial turn published a Start receipt: %#v", result)
-	}
-	adapter.mu.Lock()
-	_, cached := adapter.byOp[request.OperationID]
-	adapter.mu.Unlock()
-	if cached {
-		t.Fatal("failed initial turn was cached as a successful Start operation")
 	}
 }
 
@@ -511,9 +467,8 @@ func TestACPFakePeerThroughProviderRuntime(t *testing.T) {
 		RequestSHA256:   sha256Hex("immutable request"),
 		PromptSHA256:    sha256Hex(startPrompt),
 		Prompt:          startPrompt,
-		MaxTurns:        2,
-		MaxTokens:       1000,
-		Deadline:        time.Now().Add(8 * time.Second),
+
+		Deadline: time.Now().Add(8 * time.Second),
 	}
 	startResult, err := runtime.Start(ctx, startRequest)
 	if err != nil {
@@ -526,8 +481,8 @@ func TestACPFakePeerThroughProviderRuntime(t *testing.T) {
 		SessionID:    startResult.SessionID,
 		PromptSHA256: sha256Hex(prompt),
 		Prompt:       prompt,
-		MaxTokens:    1000,
-		Deadline:     time.Now().Add(8 * time.Second),
+
+		Deadline: time.Now().Add(8 * time.Second),
 	})
 	if err != nil {
 		t.Fatalf("Runtime.Send with fake ACP peer: %v", err)
@@ -703,7 +658,7 @@ func newACPTestStartRequest(prompt, roleExecutionID string) StartRequest {
 	return StartRequest{
 		OperationID: "operation_start_1", JobID: "job_1", RoleExecutionID: roleExecutionID,
 		RequestSHA256: strings.Repeat("a", 64), PromptSHA256: sha256Hex(prompt),
-		Prompt: prompt, MaxTurns: 2, MaxTokens: 1000, Deadline: time.Now().Add(8 * time.Second),
+		Prompt: prompt, Deadline: time.Now().Add(8 * time.Second),
 	}
 }
 
@@ -761,7 +716,7 @@ func TestACPAdapterInitialTurnIDIsBounded(t *testing.T) {
 	}
 }
 
-func TestACPAdapterDoesNotCacheNonEndTurnResults(t *testing.T) {
+func TestACPAdapterReportsProviderLimitAsFailed(t *testing.T) {
 	t.Setenv("TAXION_ACP_HELPER", "1;stop=limit:max_tokens")
 	adapter := newACPTestAdapter(t)
 	defer adapter.Close()
@@ -770,20 +725,30 @@ func TestACPAdapterDoesNotCacheNonEndTurnResults(t *testing.T) {
 		t.Fatalf("Start: %v", err)
 	}
 	prompt := "limit"
-	_, err = adapter.Send(context.Background(), TurnRequest{
+	result, err := adapter.Send(context.Background(), TurnRequest{
 		OperationID: "operation_turn_limit", TurnID: "turn_limit", SessionID: start.SessionID,
-		PromptSHA256: sha256Hex(prompt), Prompt: prompt, MaxTokens: 1000, Deadline: time.Now().Add(5 * time.Second),
+		PromptSHA256: sha256Hex(prompt), Prompt: prompt, Deadline: time.Now().Add(5 * time.Second),
 	}, nil)
-	var operationErr *OperationError
-	if !errors.As(err, &operationErr) || operationErr.Class != FailureAmbiguous {
-		t.Fatalf("Send error = %v, want ambiguous non-end-turn result", err)
+	if err != nil || result.Status != "FAILED" || result.Output != "" {
+		t.Fatalf("Send = %#v, %v; want failed without final output", result, err)
 	}
 	session := adapter.byID[start.SessionID]
 	session.mu.RLock()
 	_, cached := session.turns["operation_turn_limit"]
 	session.mu.RUnlock()
-	if cached {
-		t.Fatal("non-end-turn result was cached as completed")
+	if !cached {
+		t.Fatal("terminal failure was not cached")
+	}
+}
+
+func TestACPAdapterRejectsInitialProviderLimit(t *testing.T) {
+	t.Setenv("TAXION_ACP_HELPER", "1;stop=start:max_turn_requests")
+	adapter := newACPTestAdapter(t)
+	defer adapter.Close()
+	_, err := adapter.Start(context.Background(), newACPTestStartRequest("start", "role_execution_1"), nil)
+	var operationErr *OperationError
+	if !errors.As(err, &operationErr) || operationErr.Class != FailureAmbiguous {
+		t.Fatalf("Start error = %v, want ambiguous failure", err)
 	}
 }
 
@@ -809,7 +774,7 @@ func TestACPAdapterPreservesSessionWhenSendIsCancelledBeforeDispatch(t *testing.
 		OperationID: "operation_pre_cancel_start", JobID: "job_1",
 		RoleExecutionID: "role_execution_pre_cancel",
 		RequestSHA256:   strings.Repeat("a", 64), PromptSHA256: sha256Hex(prompt),
-		Prompt: prompt, MaxTurns: 2, MaxTokens: 1000, Deadline: time.Now().Add(4 * time.Second),
+		Prompt: prompt, Deadline: time.Now().Add(4 * time.Second),
 	}, nil)
 	if err != nil {
 		t.Fatalf("Start: %v", err)
@@ -818,7 +783,7 @@ func TestACPAdapterPreservesSessionWhenSendIsCancelledBeforeDispatch(t *testing.
 	request := TurnRequest{
 		OperationID: "operation_pre_cancel_turn", TurnID: "turn_pre_cancel",
 		SessionID: start.SessionID, PromptSHA256: sha256Hex(turnPrompt),
-		Prompt: turnPrompt, MaxTokens: 1000, Deadline: time.Now().Add(4 * time.Second),
+		Prompt: turnPrompt, Deadline: time.Now().Add(4 * time.Second),
 	}
 	cancelledCtx, cancelSend := context.WithCancel(ctx)
 	cancelSend()
@@ -847,7 +812,7 @@ func TestACPAdapterInvalidatesSessionAfterCancelledPrompt(t *testing.T) {
 	defer cancel()
 	_, err = adapter.Send(ctx, TurnRequest{
 		OperationID: "operation_turn_cancel", TurnID: "turn_cancel", SessionID: start.SessionID,
-		PromptSHA256: sha256Hex(prompt), Prompt: prompt, MaxTokens: 1000, Deadline: time.Now().Add(time.Second),
+		PromptSHA256: sha256Hex(prompt), Prompt: prompt, Deadline: time.Now().Add(time.Second),
 	}, nil)
 	var operationErr *OperationError
 	if !errors.As(err, &operationErr) || operationErr.Class != FailureAmbiguous {
@@ -868,7 +833,7 @@ func TestACPAdapterInvalidatesSessionAfterCancelledPrompt(t *testing.T) {
 	}
 	_, err = adapter.Send(context.Background(), TurnRequest{
 		OperationID: "operation_turn_after_cancel", TurnID: "turn_after_cancel", SessionID: start.SessionID,
-		PromptSHA256: sha256Hex("again"), Prompt: "again", MaxTokens: 1000, Deadline: time.Now().Add(time.Second),
+		PromptSHA256: sha256Hex("again"), Prompt: "again", Deadline: time.Now().Add(time.Second),
 	}, nil)
 	if !errors.As(err, &operationErr) || operationErr.Code != OperationCodeNotFound {
 		t.Fatalf("Send after cancellation error = %v, want session not found", err)
@@ -1379,8 +1344,8 @@ func TestACPAdapterInitialSendRejectsDetachedSessionInstance(t *testing.T) {
 	staleTurn := TurnRequest{
 		OperationID: "operation_stale_turn", TurnID: "turn_stale",
 		SessionID: firstSession.sessionID, Prompt: "must not be sent",
-		PromptSHA256: sha256Hex("must not be sent"), MaxTokens: 100,
-		Deadline: time.Now().Add(time.Second),
+		PromptSHA256: sha256Hex("must not be sent"),
+		Deadline:     time.Now().Add(time.Second),
 	}
 	if _, err := adapter.send(context.Background(), firstSession, staleTurn, nil); err == nil {
 		t.Fatal("stale session instance was allowed to send through its replacement")

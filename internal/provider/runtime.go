@@ -144,12 +144,11 @@ func (r *Runtime) Send(ctx context.Context, request TurnRequest) (TurnResult, er
 	}
 	if result.OperationID != request.OperationID || result.TurnID != request.TurnID ||
 		result.SessionID != request.SessionID ||
-		(result.Status != "COMPLETED" && result.Status != "FAILED" && result.Status != "UNKNOWN") ||
-		(result.TokensUsed > request.MaxTokens && result.Status != "FAILED") {
+		(result.Status != "COMPLETED" && result.Status != "FAILED" && result.Status != "UNKNOWN") {
 		return TurnResult{}, errors.Join(ErrProviderInvalidResult, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown})
 	}
 	if result.Status == "UNKNOWN" {
-		if result.TokensUsed != 0 || result.Output != "" {
+		if result.Output != "" {
 			return TurnResult{}, errors.Join(ErrProviderInvalidResult, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown})
 		}
 		return result, nil

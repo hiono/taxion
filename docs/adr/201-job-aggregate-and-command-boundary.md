@@ -36,7 +36,7 @@ Job、Task、RoleExecution、通信、Provider実行、Worktree、成果・証�
 
 - JobApprovalとPlanningAuthorizationは異なるimmutable factsとして保持します。発行条件と権限はADR-504 / ADR-505に従います。
 - Question / Answerは情報交換であり、Taskや実行責任を移転しません。Handoffは受信RoleとTask scopeを明示するJobAggregate Commandとします。
-- Handoffは送信側Providerの停止、terminal result / usage、成果identity、Worktree ownership releaseを確認してから受信側実行を許可します。
+- Handoffは送信側Providerの停止、terminal result、成果identity、Worktree ownership releaseを確認してから受信側実行を許可します。
 
 ### Provider operations
 

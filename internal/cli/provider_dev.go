@@ -171,16 +171,10 @@ func runACPProvider(ctx context.Context, args []string, stdout, stderr io.Writer
 	}
 
 	conversationContext := promptText
-	maxTurns := uint32(1)
 	if *review {
 		promptText += "\n\nAct as the planner. Give the coder a concise plan for this request. Return only the plan."
-		maxTurns = 2
-		if *consult {
-			maxTurns = 3
-		}
 	} else if *consult {
 		promptText += "\n\nBefore answering, write one question for another agent to help with this request. Return only the question."
-		maxTurns = 2
 	}
 	requestHash := sha256Hex(promptText)
 	configurationHash := sha256Hex(strings.Join([]string{commandPath, strings.Join(cliArgs, " "), workingDir, profile}, "\n"))
@@ -220,7 +214,7 @@ func runACPProvider(ctx context.Context, args []string, stdout, stderr io.Writer
 	request := provider.StartRequest{
 		OperationID: operationID, JobID: jobID, RoleExecutionID: roleExecutionID,
 		RequestSHA256: requestHash, PromptSHA256: requestHash, Prompt: promptText,
-		MaxTurns: maxTurns, MaxTokens: ^uint64(0), Deadline: time.Now().Add(*timeout),
+		Deadline: time.Now().Add(*timeout),
 	}
 	if err := request.Validate(); err != nil {
 		_ = adapter.Close()
@@ -419,7 +413,7 @@ func sendLocalAgent(ctx context.Context, adapter *provider.ACPAdapter, request p
 	turn, err := adapter.Send(ctx, provider.TurnRequest{
 		OperationID: operationID, TurnID: turnID, SessionID: session,
 		Prompt: prompt, PromptSHA256: sha256Hex(prompt),
-		MaxTokens: request.MaxTokens, Deadline: request.Deadline,
+		Deadline: request.Deadline,
 	}, nil)
 	if err != nil {
 		return "", err

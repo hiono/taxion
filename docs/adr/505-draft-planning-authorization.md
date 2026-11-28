@@ -14,7 +14,7 @@ JobApproval前の計画段階では、依頼内容を整理するための情報
 
 **DRAFT JobのPlanner実行には、明示的な利用者起動に基づく限定的なread-only PlanningAuthorizationを使用します。**
 
-PlanningAuthorizationは対象Jobと依頼、認証済みPrincipal、Provider構成、参照範囲、budgetおよび期限に束縛します。この権限はJobApproval、実装Task、repository write、commit、publicationまたは外部mutationを許可しません。
+PlanningAuthorizationは対象Jobと依頼、認証済みPrincipal、Provider構成、参照範囲および期限に束縛します。利用量の制限はADR-400に従いProviderに委ねます。この権限はJobApproval、実装Task、repository write、commit、publicationまたは外部mutationを許可しません。
 
 ## Consequences
 

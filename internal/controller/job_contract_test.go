@@ -14,13 +14,13 @@ import (
 
 func validControllerJobContract(deadline time.Time) domain.JobContract {
 	return domain.JobContract{
-		Purpose:                 "Deliver the approved feature",
-		Constraints:             []string{"Preserve authentication boundaries"},
-		TargetRepositories:      []string{"https://github.com/example/project"},
-		Workspaces:              []string{"workspace/main"},
-		AcceptanceCriteria:      []string{"All required Linux checks pass"},
-		RequiredEvidence:        []string{"Linux CI result"},
-		Budget:                  domain.JobContractBudget{MaxTurns: 5, MaxTokens: 5000},
+		Purpose:            "Deliver the approved feature",
+		Constraints:        []string{"Preserve authentication boundaries"},
+		TargetRepositories: []string{"https://github.com/example/project"},
+		Workspaces:         []string{"workspace/main"},
+		AcceptanceCriteria: []string{"All required Linux checks pass"},
+		RequiredEvidence:   []string{"Linux CI result"},
+
 		ConcurrencyCeiling:      1,
 		Deadline:                deadline,
 		ProhibitedEffects:       []string{"publish"},
@@ -50,7 +50,7 @@ func startContractPlannerWithResultContent(t *testing.T, resultContent string) (
 	}
 	_, turn, err := database.AddPlanningTurnIntent(context.Background(), jobID, job.Revision,
 		domain.RoleExecutionID("cmd_cccccccccccccccccccccccccccccccc"), "session_1",
-		"cmd_11111111111111111111111111111111", strings.Repeat("a", 64), 100, principal)
+		"cmd_11111111111111111111111111111111", strings.Repeat("a", 64), principal)
 	if err != nil {
 		t.Fatalf("AddPlanningTurnIntent: %v", err)
 	}
@@ -59,7 +59,7 @@ func startContractPlannerWithResultContent(t *testing.T, resultContent string) (
 		t.Fatalf("GetJob before Planner Turn observation: %v", err)
 	}
 	if _, _, err := database.AddPlanningTurnObservation(context.Background(), jobID, job.Revision,
-		turn.ID, "cmd_22222222222222222222222222222222", domain.PlanningTurnCompleted, 10,
+		turn.ID, "cmd_22222222222222222222222222222222", domain.PlanningTurnCompleted,
 		strings.Repeat("b", 64), false, principal); err != nil {
 		t.Fatalf("AddPlanningTurnObservation: %v", err)
 	}
@@ -318,7 +318,7 @@ func TestDecodeJobContractJSONStrict(t *testing.T) {
 	if err != nil {
 		t.Fatalf("decode valid Planner Result: %v", err)
 	}
-	if decoded.Purpose != expected.Purpose || decoded.Budget != expected.Budget ||
+	if decoded.Purpose != expected.Purpose ||
 		!decoded.Deadline.Equal(expected.Deadline) ||
 		len(decoded.TargetRepositories) != len(expected.TargetRepositories) ||
 		decoded.TargetRepositories[0] != expected.TargetRepositories[0] {
@@ -332,13 +332,12 @@ func TestDecodeJobContractJSONStrict(t *testing.T) {
 		{name: "unknown root key", content: strings.Replace(valid, "{", "{\"unknown\":true,", 1)},
 		{name: "non-canonical key casing", content: strings.Replace(valid, "\"purpose\"", "\"Purpose\"", 1)},
 		{name: "duplicate root key", content: strings.Replace(valid, "{", "{\"purpose\":\"duplicate\",", 1)},
-		{name: "duplicate nested budget key", content: strings.Replace(valid, "\"budget\":{", "\"budget\":{\"max_turns\":5,", 1)},
-		{name: "unknown nested key", content: strings.Replace(valid, "\"budget\":{", "\"budget\":{\"extra\":1,", 1)},
+		{name: "obsolete budget", content: strings.Replace(valid, "{", "{\"budget\":{\"max_tokens\":5},", 1)},
 		{name: "trailing JSON value", content: valid + " {}"},
 		{name: "fenced Markdown", content: "```json\n" + valid + "\n```"},
 		{name: "non-object root", content: "[]"},
 		{name: "malformed JSON", content: "{\"purpose\":"},
-		{name: "type mismatch", content: strings.Replace(valid, "\"max_turns\":5", "\"max_turns\":\"five\"", 1)},
+		{name: "type mismatch", content: strings.Replace(valid, "\"concurrency_ceiling\":1", "\"concurrency_ceiling\":\"one\"", 1)},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -393,7 +392,7 @@ func TestJobContractControllerAmendsActiveRevisionAndRequiresReapproval(t *testi
 
 	amendedContract := contract
 	amendedContract.Purpose = "Deliver the explicitly amended feature"
-	amendedContract.Budget.MaxTokens++
+	amendedContract.ConcurrencyCeiling++
 	amendedContract.Deadline = time.Now().UTC().Add(3 * time.Hour)
 	amendmentCommand := "cmd_73737373737373737373737373737373"
 	reason := "Human-approved change to the target scope"

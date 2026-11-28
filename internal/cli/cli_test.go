@@ -205,8 +205,6 @@ func TestAuthorizePlanningRequiresOIDCBeforeOpeningStore(t *testing.T) {
 		"--read-only-mode", "snapshot",
 		"--read-only-reference", "snapshot_1",
 		"--read-only-sha256", strings.Repeat("c", 64),
-		"--max-turns", "8",
-		"--max-tokens", "100000",
 		"--deadline", time.Now().UTC().Add(time.Hour).Format(time.RFC3339),
 		"--store", path,
 		"job_missing",
@@ -236,7 +234,7 @@ func TestAuthorizePlanningWithPrincipalRejectsEmptyPrincipalBeforeOpeningStore(t
 			Reference: "snapshot_1",
 			SHA256:    strings.Repeat("c", 64),
 		},
-		Budget:   domain.PlanningBudget{MaxTurns: 8, MaxTokens: 100000},
+
 		Deadline: time.Now().UTC().Add(time.Hour),
 	}
 	var stdout, stderr bytes.Buffer
@@ -494,8 +492,6 @@ func TestAuthorizePlanningIssuesBoundedGrantAndSupportsIdempotentRetry(t *testin
 		"--read-only-mode", "snapshot",
 		"--read-only-reference", "snapshot_123",
 		"--read-only-sha256", strings.Repeat("c", 64),
-		"--max-turns", "8",
-		"--max-tokens", "100000",
 		"--deadline", deadline,
 		jobID,
 	}
@@ -579,7 +575,7 @@ func TestAuthorizePlanningIssuesBoundedGrantAndSupportsIdempotentRetry(t *testin
 		t.Fatalf("persisted Job = %#v", job)
 	}
 	grant := job.PlanningAuthorizations[0]
-	if grant.CommandID != commandID || grant.Budget.MaxTurns != 8 || grant.Budget.MaxTokens != 100000 ||
+	if grant.CommandID != commandID ||
 		grant.ReadOnlyBoundary.Mode != domain.PlanningReadOnlyBoundarySnapshot ||
 		grant.ReadOnlyBoundary.Reference != "snapshot_123" || grant.ReadOnlyBoundary.SHA256 != strings.Repeat("c", 64) {
 		t.Fatalf("persisted PlanningAuthorization = %#v", grant)
@@ -622,11 +618,9 @@ func TestAuthorizePlanningRejectsInvalidArgumentsBeforeAuthentication(t *testing
 		"--configuration-sha256", strings.Repeat("a", 64),
 		"--repository", "https://github.com/example/project",
 		"--commit", strings.Repeat("b", 40),
-		"--read-only-mode", "snapshot",
+		"--read-only-mode", "invalid",
 		"--read-only-reference", "snapshot_123",
 		"--read-only-sha256", strings.Repeat("c", 64),
-		"--max-turns", "0",
-		"--max-tokens", "100000",
 		"--deadline", time.Now().Add(time.Hour).UTC().Format(time.RFC3339),
 		"job_missing",
 	}, &stdout, &stderr, VersionInfo{})
@@ -706,7 +700,7 @@ func TestJobApproveCLIRequiresOIDCAndApprovesExactRevision(t *testing.T) {
 				Mode: domain.PlanningReadOnlyBoundarySnapshot, Reference: "snapshot_1",
 				SHA256: strings.Repeat("c", 64),
 			},
-			Budget:   domain.PlanningBudget{MaxTurns: 5, MaxTokens: 5000},
+
 			Deadline: now.Add(time.Hour),
 		}, now)
 	if err != nil {
@@ -741,7 +735,7 @@ func TestJobApproveCLIRequiresOIDCAndApprovesExactRevision(t *testing.T) {
 	}
 	_, turn, err := database.AddPlanningTurnIntent(
 		ctx, jobID, job.Revision, execution.ID, "session_1",
-		"cmd_d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4", strings.Repeat("a", 64), 100, principal,
+		"cmd_d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4", strings.Repeat("a", 64), principal,
 	)
 	if err != nil {
 		t.Fatalf("AddPlanningTurnIntent: %v", err)
@@ -753,7 +747,7 @@ func TestJobApproveCLIRequiresOIDCAndApprovesExactRevision(t *testing.T) {
 	if _, _, err := database.AddPlanningTurnObservation(
 		ctx, jobID, job.Revision, turn.ID,
 		"cmd_e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5",
-		domain.PlanningTurnCompleted, 10, strings.Repeat("b", 64), false, principal,
+		domain.PlanningTurnCompleted, strings.Repeat("b", 64), false, principal,
 	); err != nil {
 		t.Fatalf("AddPlanningTurnObservation: %v", err)
 	}
@@ -772,13 +766,13 @@ func TestJobApproveCLIRequiresOIDCAndApprovesExactRevision(t *testing.T) {
 		t.Fatalf("AddProviderResultObservation: %v", err)
 	}
 	contract := domain.JobContract{
-		Purpose:                 "Deliver the approved bounded feature",
-		Constraints:             []string{"Preserve the authorization boundary"},
-		TargetRepositories:      []string{"https://github.com/example/project"},
-		Workspaces:              []string{"workspace/main"},
-		AcceptanceCriteria:      []string{"Linux tests pass"},
-		RequiredEvidence:        []string{"Linux CI"},
-		Budget:                  domain.JobContractBudget{MaxTurns: 5, MaxTokens: 5000},
+		Purpose:            "Deliver the approved bounded feature",
+		Constraints:        []string{"Preserve the authorization boundary"},
+		TargetRepositories: []string{"https://github.com/example/project"},
+		Workspaces:         []string{"workspace/main"},
+		AcceptanceCriteria: []string{"Linux tests pass"},
+		RequiredEvidence:   []string{"Linux CI"},
+
 		ConcurrencyCeiling:      1,
 		Deadline:                now.Add(45 * time.Minute),
 		ProhibitedEffects:       []string{"publish"},
@@ -852,7 +846,7 @@ func TestJobApproveCLIRequiresOIDCAndApprovesExactRevision(t *testing.T) {
 
 	amendedContract := contract
 	amendedContract.Purpose = "Deliver the explicitly amended bounded feature"
-	amendedContract.Budget.MaxTokens++
+	amendedContract.ConcurrencyCeiling++
 	amendedContract.Deadline = time.Now().UTC().Add(2 * time.Hour)
 	contractJSON, err := json.Marshal(amendedContract)
 	if err != nil {

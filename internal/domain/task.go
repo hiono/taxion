@@ -9,55 +9,52 @@ import (
 )
 
 type TaskRequest struct {
-	JobID                   string            `json:"job_id"`
-	CommandID               string            `json:"command_id"`
-	ParentTaskID            string            `json:"parent_task_id,omitempty"`
-	DependsOnTaskIDs        []string          `json:"depends_on_task_ids,omitempty"`
-	Title                   string            `json:"title"`
-	Purpose                 string            `json:"purpose"`
-	TargetRepositories      []string          `json:"target_repositories"`
-	TargetResources         []string          `json:"target_resources"`
-	Workspaces              []string          `json:"workspaces"`
-	AcceptanceCriteria      []string          `json:"acceptance_criteria"`
-	RequiredEvidence        []string          `json:"required_evidence,omitempty"`
-	ProhibitedEffects       []string          `json:"prohibited_effects,omitempty"`
-	ApprovalRequiredEffects []string          `json:"approval_required_effects,omitempty"`
-	Budget                  JobContractBudget `json:"budget,omitempty"`
-	ConcurrencyCeiling      uint32            `json:"concurrency_ceiling,omitempty"`
-	Deadline                time.Time         `json:"deadline,omitempty"`
+	JobID                   string    `json:"job_id"`
+	CommandID               string    `json:"command_id"`
+	ParentTaskID            string    `json:"parent_task_id,omitempty"`
+	DependsOnTaskIDs        []string  `json:"depends_on_task_ids,omitempty"`
+	Title                   string    `json:"title"`
+	Purpose                 string    `json:"purpose"`
+	TargetRepositories      []string  `json:"target_repositories"`
+	TargetResources         []string  `json:"target_resources"`
+	Workspaces              []string  `json:"workspaces"`
+	AcceptanceCriteria      []string  `json:"acceptance_criteria"`
+	RequiredEvidence        []string  `json:"required_evidence,omitempty"`
+	ProhibitedEffects       []string  `json:"prohibited_effects,omitempty"`
+	ApprovalRequiredEffects []string  `json:"approval_required_effects,omitempty"`
+	ConcurrencyCeiling      uint32    `json:"concurrency_ceiling,omitempty"`
+	Deadline                time.Time `json:"deadline,omitempty"`
 }
 
 type Task struct {
-	ID                      string            `json:"id"`
-	CommandID               string            `json:"command_id"`
-	JobID                   string            `json:"job_id"`
-	ParentTaskID            string            `json:"parent_task_id,omitempty"`
-	DependsOnTaskIDs        []string          `json:"depends_on_task_ids,omitempty"`
-	Title                   string            `json:"title"`
-	Purpose                 string            `json:"purpose"`
-	JobApprovalID           string            `json:"job_approval_id"`
-	ContractRevision        uint64            `json:"contract_revision"`
-	CanonicalizationVersion uint32            `json:"canonicalization_version"`
-	CanonicalHash           string            `json:"canonical_hash"`
-	TargetRepositories      []string          `json:"target_repositories"`
-	TargetResources         []string          `json:"target_resources"`
-	Workspaces              []string          `json:"workspaces"`
-	AcceptanceCriteria      []string          `json:"acceptance_criteria"`
-	RequiredEvidence        []string          `json:"required_evidence,omitempty"`
-	ProhibitedEffects       []string          `json:"prohibited_effects,omitempty"`
-	ApprovalRequiredEffects []string          `json:"approval_required_effects,omitempty"`
-	Budget                  JobContractBudget `json:"budget"`
-	ConcurrencyCeiling      uint32            `json:"concurrency_ceiling"`
-	Deadline                time.Time         `json:"deadline"`
-	CreatedAt               time.Time         `json:"created_at"`
-	CreatedRevision         uint64            `json:"created_revision"`
+	ID                      string    `json:"id"`
+	CommandID               string    `json:"command_id"`
+	JobID                   string    `json:"job_id"`
+	ParentTaskID            string    `json:"parent_task_id,omitempty"`
+	DependsOnTaskIDs        []string  `json:"depends_on_task_ids,omitempty"`
+	Title                   string    `json:"title"`
+	Purpose                 string    `json:"purpose"`
+	JobApprovalID           string    `json:"job_approval_id"`
+	ContractRevision        uint64    `json:"contract_revision"`
+	CanonicalizationVersion uint32    `json:"canonicalization_version"`
+	CanonicalHash           string    `json:"canonical_hash"`
+	TargetRepositories      []string  `json:"target_repositories"`
+	TargetResources         []string  `json:"target_resources"`
+	Workspaces              []string  `json:"workspaces"`
+	AcceptanceCriteria      []string  `json:"acceptance_criteria"`
+	RequiredEvidence        []string  `json:"required_evidence,omitempty"`
+	ProhibitedEffects       []string  `json:"prohibited_effects,omitempty"`
+	ApprovalRequiredEffects []string  `json:"approval_required_effects,omitempty"`
+	ConcurrencyCeiling      uint32    `json:"concurrency_ceiling"`
+	Deadline                time.Time `json:"deadline"`
+	CreatedAt               time.Time `json:"created_at"`
+	CreatedRevision         uint64    `json:"created_revision"`
 }
 
 type taskScope struct {
 	repositories []string
 	resources    []string
 	workspaces   []string
-	budget       JobContractBudget
 	concurrency  uint32
 	deadline     time.Time
 	prohibited   []string
@@ -136,19 +133,6 @@ func NewTask(job Job, request TaskRequest, now time.Time) (Task, error) {
 	}
 	prohibited := mergeTaskSet(parentScope.prohibited, additionalProhibited)
 	approvalRequired := mergeTaskSet(parentScope.approval, additionalApproval)
-	budget := JobContractBudget{
-		MaxTurns: request.Budget.MaxTurns, MaxTokens: request.Budget.MaxTokens,
-	}
-	if budget.MaxTurns == 0 {
-		budget.MaxTurns = parentScope.budget.MaxTurns
-	}
-	if budget.MaxTokens == 0 {
-		budget.MaxTokens = parentScope.budget.MaxTokens
-	}
-	if budget.MaxTurns == 0 || budget.MaxTokens == 0 ||
-		budget.MaxTurns > parentScope.budget.MaxTurns || budget.MaxTokens > parentScope.budget.MaxTokens {
-		return Task{}, errors.New("Task budget is invalid or expands its parent scope")
-	}
 	concurrency := request.ConcurrencyCeiling
 	if concurrency == 0 {
 		concurrency = parentScope.concurrency
@@ -172,7 +156,7 @@ func NewTask(job Job, request TaskRequest, now time.Time) (Task, error) {
 		TargetRepositories: repositories, TargetResources: resources, Workspaces: workspaces,
 		AcceptanceCriteria: acceptance, RequiredEvidence: evidence,
 		ProhibitedEffects: prohibited, ApprovalRequiredEffects: approvalRequired,
-		Budget: budget, ConcurrencyCeiling: concurrency, Deadline: deadline,
+		ConcurrencyCeiling: concurrency, Deadline: deadline,
 		CreatedAt: now, CreatedRevision: job.Revision + 1,
 	}
 	if err := validateTaskContent(job, task); err != nil {
@@ -234,12 +218,9 @@ func validateTaskContent(job Job, task Task) error {
 		!taskSubset(task.Workspaces, parentScope.workspaces) {
 		return errors.New("Task resource scope expands its parent")
 	}
-	if task.Budget.MaxTurns == 0 || task.Budget.MaxTokens == 0 ||
-		task.Budget.MaxTurns > parentScope.budget.MaxTurns ||
-		task.Budget.MaxTokens > parentScope.budget.MaxTokens ||
-		task.ConcurrencyCeiling == 0 || task.ConcurrencyCeiling > parentScope.concurrency ||
+	if task.ConcurrencyCeiling == 0 || task.ConcurrencyCeiling > parentScope.concurrency ||
 		task.Deadline.After(parentScope.deadline) {
-		return errors.New("Task budget, concurrency, or deadline expands its parent")
+		return errors.New("Task concurrency or deadline expands its parent")
 	}
 	for name, values := range map[string][]string{
 		"AcceptanceCriteria":      task.AcceptanceCriteria,
@@ -287,7 +268,7 @@ func taskParentScope(job Job, revision JobContractRevision, parentTaskID string)
 		contract := revision.Contract
 		return taskScope{
 			repositories: contract.TargetRepositories, resources: contract.TargetResources,
-			workspaces: contract.Workspaces, budget: contract.Budget,
+			workspaces:  contract.Workspaces,
 			concurrency: contract.ConcurrencyCeiling, deadline: contract.Deadline,
 			prohibited: contract.ProhibitedEffects, approval: contract.ApprovalRequiredEffects,
 		}, nil
@@ -298,7 +279,7 @@ func taskParentScope(job Job, revision JobContractRevision, parentTaskID string)
 	}
 	return taskScope{
 		repositories: parent.TargetRepositories, resources: parent.TargetResources,
-		workspaces: parent.Workspaces, budget: parent.Budget,
+		workspaces:  parent.Workspaces,
 		concurrency: parent.ConcurrencyCeiling, deadline: parent.Deadline,
 		prohibited: parent.ProhibitedEffects, approval: parent.ApprovalRequiredEffects,
 	}, nil

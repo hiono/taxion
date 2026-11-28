@@ -33,7 +33,7 @@ Taxionは、人間の曖昧な思考を対話で整理し、実行可能な計�
 | CONTROLLER | ingress、identity、Job scope、認可、Command、永続化、Provider事実、復旧を強制 | 意味的判断を代行せず、会話から権限を推定しない |
 | ORCHESTRATOR | Job全体の進行・担当調整・連絡 | Actorであること自体は承認・実行権限を持たない |
 | PLANNER | 目的・制約・受入条件の整理、計画・Task候補の提案、必要な質問 | DRAFTではPlanningAuthorizationのread-only範囲のみ |
-| CODER | 承認済みJob scope内で成果を作成・修正 | JobApproval、Task scope、budget、deadline、Effect境界に従う |
+| CODER | 承認済みJob scope内で成果を作成・修正 | JobApproval、Task scope、deadline、Effect境界に従う |
 | REVIEWER | 固定された成果と証拠の独立評価 | Coderと異なるRoleExecution / Contextを用い、read-only境界を強制する |
 
 Roleは作業責務であり、Role名だけで認証済み実行主体やoperation ACLを表現しない。Planner、Coder、Reviewerの実行回数・順序・session寿命をJobの寿命と同一視しません。
@@ -66,7 +66,7 @@ Roleは作業責務であり、Role名だけで認証済み実行主体やoperat
 ### 4.2 Bounded planning
 
 - 明示的な利用者起動に基づき、Taskless PLANNER RoleExecutionへimmutable PlanningAuthorizationを発行できる。
-- PlanningAuthorizationはJob、原文依頼hash、認証済み利用者、Provider / account / configuration、repository、read-only境界、permitted effects、budget、deadlineに束縛する。
+- PlanningAuthorizationはJob、原文依頼hash、認証済み利用者、Provider / account / configuration、repository、read-only境界、permitted effects、deadlineに束縛する。
 - 許可範囲はread-only context acquisitionとbounded planningに限定する。
 - JobをACTIVEにせず、実装Task、Coder / Reviewer、write、validation、commit、publish、Role / Model / Tool / Sandboxからのcredential access、任意宛先へのnetwork access、external mutationを許可しない。
 - Provider Start / Turn / Resumeに必要な認証情報と通信はController / Provider AdapterがModel / Sandboxから分離して仲介し、grantに束縛されたProvider / account / configurationに限定する。
@@ -77,32 +77,32 @@ Provider Adapterの実装要求は[Provider Adapter 実行境界 要求仕様書
 
 ### 4.3 Contract proposal and approval
 
-- Plannerは目的、制約、対象、受入条件、必要Evidence、resource boundary、budget、deadline、禁止事項、承認が必要な副作用、秘密を含まないconfiguration referenceを含むJobContract revisionを提案する。
+- Plannerは目的、制約、対象、受入条件、必要Evidence、resource boundary、deadline、禁止事項、承認が必要な副作用、秘密を含まないconfiguration referenceを含むJobContract revisionを提案する。
 - Planner proposal Controllerは同一Jobに永続化された最終Provider ResultからJobContractを厳密なJSON形式で生成し、別入力の契約データとの不一致を許可しない。
 - 利用者はその正確なimmutable revision / canonical hashを確認して承認する。
 - JobApprovalはJobID、revision、proposal hash、canonicalization version、approver identity / source / reason / timeを持つappend-only factとする。
 - 承認対象が変わる場合は新revisionと明示的な再承認を要求する。
 - ACTIVE Jobの契約変更は、最新の承認済みRevision / CanonicalHashを指定した認証済みHUMANの明示的な `taxion job amend` 命令に限定する。変更時は新Revisionを追加してJobをDRAFTへ戻し、旧Approvalを再利用せず、新Revisionへの再承認を要求する。
-- TaskはJobの対象・resource・budget・deadlineを狭められるが、拡張できない。
+- TaskはJobの対象・resource・deadlineを狭められるが、拡張できない。
 - 会話、Planner proposal、Task、RoleExecution、Providerの自己申告はJobApprovalの代替にならない。
 
 詳細なrevision、canonicalization、approval transactionの契約は [Job Contract Requirements](job-contract-requirements.md) と [Job Contract Detailed Design](../design/job-contract-detailed-design.md) を参照する。
 
 ### 4.3.1 JobQuestionAuthorization
 
-承認済みJob内でRoleからTaskless PLANNERへ質問し、回答のために追加のbounded read-only Provider executionが必要な場合は、元のQuestionと実行範囲に束縛したJobQuestionAuthorizationを発行できます。自然言語の質問・回答、JobMessageの保存・参照・転送、既に利用可能なContextだけを参照し新たなProvider Send / Turnを伴わない応答にはgrantを要求しません。新たなProvider Send / Turnを伴う応答には、該当するJobQuestionAuthorizationまたはExecution Permissionを要求します。質問本文や宛先だけからgrantを発行しません。grantはJobApproval、Planner RoleExecution、元Question、Provider / account / configuration、read-only context、budget、deadlineへ束縛し、JobApprovalやExecutionPermissionを拡張しません。
+承認済みJob内でRoleからTaskless PLANNERへ質問し、回答のために追加のbounded read-only Provider executionが必要な場合は、元のQuestionと実行範囲に束縛したJobQuestionAuthorizationを発行できます。自然言語の質問・回答、JobMessageの保存・参照・転送、既に利用可能なContextだけを参照し新たなProvider Send / Turnを伴わない応答にはgrantを要求しません。新たなProvider Send / Turnを伴う応答には、該当するJobQuestionAuthorizationまたはExecution Permissionを要求します。質問本文や宛先だけからgrantを発行しません。grantはJobApproval、Planner RoleExecution、元Question、Provider / account / configuration、read-only context、deadlineへ束縛し、JobApprovalやExecutionPermissionを拡張しません。
 
 ### 4.4 Execution and collaboration
 
-Taskの作成・scope narrowing・parent / dependency・budget / deadlineの要件は[Task Requirements](task-requirements.md)、Domain / Storeの設計は[Task Detailed Design](../design/task-detailed-design.md)、境界テストは[Task Test Specification](../test-specs/task-test-specification.md)を参照します。
+Taskの作成・scope narrowing・parent / dependency・deadlineの要件は[Task Requirements](task-requirements.md)、Domain / Storeの設計は[Task Detailed Design](../design/task-detailed-design.md)、境界テストは[Task Test Specification](../test-specs/task-test-specification.md)を参照します。
 
 - JobはTaskを必須としない。TaskはJobに所属する任意の作業分解である。
 - RoleExecutionはJobに所属し、TaskIDは任意とする。Taskless Plannerを許容する。
 - Taskの親子包含、Task dependency、Role間協調を別の関係として扱う。
 - SchedulerはTaskの明示的dependencyだけを使う。JobMessageやRoleExecutionの親子関係をTask dependencyとして解釈しない。
 - Roleは承認済みJob scope内の通常操作を選択できる。通常操作名の静的allowlistやRole-to-operation ACLを権限根拠にしない。
-- ControllerはJobApproval、Task scope、resource identity、禁止副作用、実行基盤のcontainment、budget、deadline、現在のProvider / Runtime状態を検証する。
-- Execution Permissionは現在のJobApprovalと最新JobContractへ束縛した単一Operationの許可判定とする。effect、resource、Provider identity、request digest、budget reservation、expiryを固定し、外部副作用の直前に同じPermissionを再検証する。
+- ControllerはJobApproval、Task scope、resource identity、禁止副作用、実行基盤のcontainment、deadline、現在のProvider / Runtime状態を検証する。
+- Execution Permissionは現在のJobApprovalと最新JobContractへ束縛した単一Operationの許可判定とする。effect、resource、Provider identity、request digest、expiryを固定し、外部副作用の直前に同じPermissionを再検証する。
 - ProhibitedEffectsおよびApprovalRequiredEffectsに該当する操作は通常のExecution Permissionで許可しない。未知のeffectは名称だけで拒否せず、信頼された評価で可逆性またはcontainmentを確認できない場合に拒否する。
 - 可逆で影響の小さい不足情報は仮定と不確実性を明示して進めてよい。不可欠な情報だけを質問する。
 
@@ -124,7 +124,7 @@ Taskの作成・scope narrowing・parent / dependency・budget / deadlineの要�
 Job完了は明示的なJobAggregate Commandでのみ成立する。少なくとも次を確認する。
 
 - 必須受入条件を満たす成果とprovenance-valid Evidenceがある。
-- UsageとProvider operation結果が確定している。
+- Provider operation結果が確定している。Usageの未報告は完了を妨げない。
 - 未解決Provider operation、実行状態UNKNOWN、未完了RoleExecutionがない。
 - Provider quiescenceとWorktree releaseが確認されている。
 - 未解決の認可・安全・データ整合性問題がない。
@@ -137,7 +137,7 @@ Job完了は明示的なJobAggregate Commandでのみ成立する。少なくと
 - Provider停止・Worktree状態が不明な場合は所有権を保持し、Worktreeをquarantineする。
 - Provider AdapterはProvider / SDK versionとconfiguration identityに対応するcapabilityを宣言し、Start / Sendのidempotencyまたはlookup、cross-process Session reattachment、event replay / cursor continuity、Stop proof、final output retrieval、Usage identity / completenessを個別に検証します。未対応・未検証の能力を推定で補いません。
 - 同じRoleExecutionの再開では、保存済みの正確なProvider Session identity、Provider / account identity、configuration digestが一致し、Adapterがcross-process reattachmentを明示的にサポートする場合だけ再接続します。新しいSessionを同じRoleExecutionへ付け替えてResumeしたことにしません。
-- reattachmentできない場合は元のoperationをUNKNOWN / unresolvedのまま保持し、Stop proof、final result、Usageを照合します。新しいRoleExecutionによる継続は、旧Providerのquiescence、result / usage reconciliation、Worktree release後に限り、現在のJobApproval・Task scope・budget・deadlineを再検証して別実行として開始します。
+- reattachmentできない場合は元のoperationをUNKNOWN / unresolvedのまま保持し、Stop proofとfinal resultを照合します。新しいRoleExecutionによる継続は、旧Providerのquiescence、result reconciliation、Worktree release後に限り、現在のJobApproval・Task scope・deadlineを再検証して別実行として開始します。
 - Start / Sendの結果が不明な場合は、同じOperationID / turn identityによるlookup、またはそのidentityに対して実証されたidempotencyがある場合だけ再試行します。
 - 旧データや旧承認を現行Jobの権限へ暗黙変換しない。
 

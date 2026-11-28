@@ -24,25 +24,19 @@ const (
 	JobContractRevisionOriginHumanAmendment = "HUMAN_AMENDMENT"
 )
 
-type JobContractBudget struct {
-	MaxTurns  uint32 `json:"max_turns"`
-	MaxTokens uint64 `json:"max_tokens"`
-}
-
 type JobContract struct {
-	Purpose                 string            `json:"purpose"`
-	Constraints             []string          `json:"constraints,omitempty"`
-	TargetRepositories      []string          `json:"target_repositories"`
-	TargetResources         []string          `json:"target_resources"`
-	Workspaces              []string          `json:"workspaces"`
-	AcceptanceCriteria      []string          `json:"acceptance_criteria"`
-	RequiredEvidence        []string          `json:"required_evidence"`
-	Budget                  JobContractBudget `json:"budget"`
-	ConcurrencyCeiling      uint32            `json:"concurrency_ceiling"`
-	Deadline                time.Time         `json:"deadline"`
-	ProhibitedEffects       []string          `json:"prohibited_effects,omitempty"`
-	ApprovalRequiredEffects []string          `json:"approval_required_effects,omitempty"`
-	ConfigurationSHA256     string            `json:"configuration_sha256"`
+	Purpose                 string    `json:"purpose"`
+	Constraints             []string  `json:"constraints,omitempty"`
+	TargetRepositories      []string  `json:"target_repositories"`
+	TargetResources         []string  `json:"target_resources"`
+	Workspaces              []string  `json:"workspaces"`
+	AcceptanceCriteria      []string  `json:"acceptance_criteria"`
+	RequiredEvidence        []string  `json:"required_evidence"`
+	ConcurrencyCeiling      uint32    `json:"concurrency_ceiling"`
+	Deadline                time.Time `json:"deadline"`
+	ProhibitedEffects       []string  `json:"prohibited_effects,omitempty"`
+	ApprovalRequiredEffects []string  `json:"approval_required_effects,omitempty"`
+	ConfigurationSHA256     string    `json:"configuration_sha256"`
 }
 
 type JobContractRevision struct {
@@ -135,8 +129,8 @@ func CanonicalizeJobContract(contract JobContract, version uint32) (JobContract,
 	if contract.ApprovalRequiredEffects, err = canonicalContractSet("approval-required effects", contract.ApprovalRequiredEffects, false); err != nil {
 		return JobContract{}, "", err
 	}
-	if contract.Budget.MaxTurns == 0 || contract.Budget.MaxTokens == 0 || contract.ConcurrencyCeiling == 0 {
-		return JobContract{}, "", errors.New("JobContract budget and concurrency ceiling must be positive")
+	if contract.ConcurrencyCeiling == 0 {
+		return JobContract{}, "", errors.New("JobContract concurrency ceiling must be positive")
 	}
 	if contract.Deadline.IsZero() {
 		return JobContract{}, "", errors.New("JobContract deadline is required")

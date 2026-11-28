@@ -6,7 +6,7 @@
 
 ## Context
 
-JobContractRevisionは、Jobの承認済みscope・resource boundary・budget・deadline・禁止副作用を固定する。DRAFT Jobに対するPlanner proposal authorityをACTIVE Jobへ再利用すると、既存Approvalを根拠に承認済みscopeを変更できるため、権限境界が曖昧になる。
+JobContractRevisionは、Jobの承認済みscope・resource boundary・deadline・禁止副作用を固定する。DRAFT Jobに対するPlanner proposal authorityをACTIVE Jobへ再利用すると、既存Approvalを根拠に承認済みscopeを変更できるため、権限境界が曖昧になる。
 
 ## Decision
 

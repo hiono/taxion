@@ -167,7 +167,7 @@ Stop resultは次を持つ。
 - Quiescent（Providerが後続書込みを継続しないことを確認済み）
 - EvidenceSHA256
 
-Stopped=trueだけではWorktree解放やJob完了を許可しない。Quiescent=trueとterminal result、Usageを照合する。
+Stopped=trueだけではWorktree解放やJob完了を許可しない。Quiescent=trueとterminal resultを照合する。Usageは任意とする。
 
 ### 6.5 Event replay
 
@@ -214,7 +214,7 @@ secret bufferのzeroizeはGo runtime / OSの複製まで保証するものでは
 ### 8.1 Start（DRAFT Planning実装済み）
 
 1. Controllerが現在のJobAggregateを取得する。
-2. Principal、PlanningAuthorization、Job state、Provider identity、budget、deadlineを検証する。
+2. Principal、PlanningAuthorization、Job state、Provider identity、deadlineを検証する。
 3. immutable Start intentとCommand receiptを同一transactionで保存する。
 4. commit結果がUNKNOWNの場合はCommand IDとOperationIDをread-backする。確定できない場合はProviderを呼び出さない。
 5. 外部呼出し直前に最新revisionとauthorityを再検証する。
@@ -224,7 +224,7 @@ secret bufferのzeroizeはGo runtime / OSの複製まで保証するものでは
 9. 同一OperationIDの再実行ではStart idempotencyまたはLookupを必須とし、UNKNOWN後にblind replayしない。
 10. grant期限後は既存OperationIDのLookupによる照合だけを許可し、NOT_FOUND後の新規Startを拒否する。
 
-Start observationが永続化されるとき、JobはProviderLifecycleEnforcedFromRevisionを記録する。既存Jobの読み取り互換性を維持し、このrevision以降のTurn / Resume intentにaccepted Start observationとSessionIDの一致を要求する。
+Turn / Resume intentにはaccepted Start observationとSessionIDの一致を要求する。
 
 
 ### 8.1.1 Task-bound Coder Start（Controller統合対象）
@@ -233,9 +233,9 @@ Task-bound StartはDRAFT Planning Startと別のauthority pathとする。Planne
 
 1. ProviderControllerは、trusted ExecutionControllerが注入されていない場合、Task-bound dispatchを拒否する。
 2. JobAggregateから対象Task、Coder RoleExecution、ProviderStartIntent、ExecutionPermissionを解決し、各IDとTask / Role / Operation / request digestの一致を検証する。
-3. ExecutionController.ValidatePermissionへ実際のExecutionPermissionRequestを渡し、最新JobApproval、Contract revision / hash、Task scope、Resource、Effect、Provider configuration、budget、deadline、trusted assessment、permission expiryをdispatch直前に再検証する。
+3. ExecutionController.ValidatePermissionへ実際のExecutionPermissionRequestを渡し、最新JobApproval、Contract revision / hash、Task scope、Resource、Effect、Provider configuration、deadline、trusted assessment、permission expiryをdispatch直前に再検証する。
 4. Runtime.IdentityはExecutionPermissionのProviderID / AccountID / ConfigurationSHA256と完全一致しなければならない。
-5. PromptとContextは呼出し側から受け取らない。Jobの原文依頼とimmutable TaskのTitle / Purpose / AcceptanceCriteria / RequiredEvidence / target scopeから決定的に構築し、PromptSHA256を計算する。OperationID、RoleExecutionID、request digest、budget、deadlineは保存済みProviderStartIntent / ExecutionPermissionから取得する。
+5. PromptとContextは呼出し側から受け取らない。Jobの原文依頼とimmutable TaskのTitle / Purpose / AcceptanceCriteria / RequiredEvidence / target scopeから決定的に構築し、PromptSHA256を計算する。OperationID、RoleExecutionID、request digest、deadlineは保存済みProviderStartIntent / ExecutionPermissionから取得する。
 6. Start intentは既にJobAggregateへ永続化されていることを必須とする。Start呼出し前にCapabilityを確認し、同一OperationIDのStart LookupまたはStart idempotencyについてRuntimeが設定する最低証拠水準を満たさない場合はdispatchしない。E2 synthetic testではE2証拠を使用し、production Runtimeは設定済み最低水準（Live ProviderではE4）を強制する。
 7. Lookup capabilityがある場合は同一OperationIDを先に照会する。既存operationが見つかった場合はその証拠を観測し、NOT_FOUNDが検証された場合だけ、permissionを再検証して同じOperationIDでStartする。Lookupが失敗・不明の場合はUNKNOWNを保存し、Startを呼び出さない。Lookupがない場合は実証済みStart idempotencyがある場合だけ同一OperationIDでStartする。
 8. Start成功、definitive failure、ambiguous / unclassified failureをそれぞれACCEPTED、FAILED、UNKNOWNとしてJobAggregateへappend-onlyで保存する。Observation保存に失敗した場合は成功扱いせず、次回はLookup / idempotencyで同一OperationIDを照合する。
@@ -246,17 +246,19 @@ Reviewer Startは、ADR-408 / ADR-507に従うimmutable Worktree snapshotとread
 
 ### 8.2 Send（実装済み）
 
-1. 最新Job、grant、RoleExecution、accepted Session、turn budget、deadlineを検証する。
+1. 最新Job、grant、RoleExecution、accepted Session、deadlineを検証する。
 2. E4 Send idempotencyまたはSend lookup capabilityを確認する。
 3. immutable Turn intentとCommand receiptを同一transactionで保存する。
 4. commit確認後に最新Jobとauthorityを再検証する。
 5. 同一OperationID / TurnIDを使い、Lookupで未実行を確認した場合またはSend idempotencyが検証済みの場合だけ送信する。
-6. terminal responseはPlanningTurnObservationへ保存し、terminal resultとUsageは別々のObservationとして取得・保存する。
-7. UNKNOWN中は同じTurnIDで照合し、新しいTurnIDで再送しない。Lookupでterminal statusが見つかった場合もUsage Complete=trueを確認するまでturnを確定しない。
+6. terminal responseはPlanningTurnObservationへ保存し、terminal resultを取得・保存する。Usageは取得できる場合に別のObservationとして保存する。
+7. UNKNOWN中は同じTurnIDで照合し、新しいTurnIDで再送しない。Lookupの証拠と必要な最終出力でterminal statusを確定し、Usageの未報告は妨げとしない。
+
+ACPの`max_tokens` / `max_turn_requests`はProviderによる終了としてFAILEDにし、途中出力を最終結果にしない。初回promptで終了した場合はStart成功を記録しない。
 
 ### 8.3 Stop / Resume（Controller実装済み）
 
-- Stop intentを先に保存し、Runtime.Stopの後にstop proof、quiescence、terminal result、Usageを照合する。
+- Stop intentを先に保存し、Runtime.Stopの後にstop proof、quiescence、terminal resultを照合する。Usageは任意とする。
 - Resume intentとCommand receiptをRuntime.Resumeより先に保存する。
 - E5 SessionReattach capability evidence、Principal / grant / Provider identity、既存accepted Session、configuration identityを検証する。
 - Resumeは同一OperationID / SessionIDで再照合し、Attached=trueとevidenceを得た場合だけATTACHED observationを追加する。曖昧な結果はUNKNOWNとして保存し、UNKNOWN解消時は同じOperationIDのterminal evidenceだけを許可する。

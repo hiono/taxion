@@ -28,7 +28,7 @@ func createJobContractPlanner(t *testing.T, database *Store, jobID string, princ
 		ProviderID: "provider.test", AccountID: "account.primary", ConfigurationSHA256: strings.Repeat("a", 64),
 		RepositoryID:     "https://github.com/example/project@" + strings.Repeat("b", 40),
 		ReadOnlyBoundary: domain.PlanningReadOnlyBoundary{Mode: domain.PlanningReadOnlyBoundarySnapshot, Reference: "snapshot_1", SHA256: strings.Repeat("c", 64)},
-		Budget:           domain.PlanningBudget{MaxTurns: 3, MaxTokens: 1000}, Deadline: now.Add(2 * time.Hour),
+		Deadline:         now.Add(2 * time.Hour),
 	}
 	grant, err := domain.NewPlanningAuthorization(job, principal.PrincipalID(), grantCommand, request, now)
 	if err != nil {
@@ -58,7 +58,7 @@ func createJobContractPlanner(t *testing.T, database *Store, jobID string, princ
 		t.Fatalf("GetJob after accepted Start: %v", err)
 	}
 	_, turn, err := database.AddPlanningTurnIntent(ctx, jobID, job.Revision, execution.ID, "session_1",
-		"cmd_11111111111111111111111111111111", strings.Repeat("a", 64), 100, principal)
+		"cmd_11111111111111111111111111111111", strings.Repeat("a", 64), principal)
 	if err != nil {
 		t.Fatalf("AddPlanningTurnIntent: %v", err)
 	}
@@ -67,7 +67,7 @@ func createJobContractPlanner(t *testing.T, database *Store, jobID string, princ
 		t.Fatalf("GetJob before Planner Turn observation: %v", err)
 	}
 	if _, _, err := database.AddPlanningTurnObservation(ctx, jobID, job.Revision, turn.ID,
-		"cmd_22222222222222222222222222222222", domain.PlanningTurnCompleted, 10, strings.Repeat("b", 64), false, principal); err != nil {
+		"cmd_22222222222222222222222222222222", domain.PlanningTurnCompleted, strings.Repeat("b", 64), false, principal); err != nil {
 		t.Fatalf("AddPlanningTurnObservation: %v", err)
 	}
 	job, err = database.GetJob(ctx, jobID)
@@ -96,7 +96,7 @@ func validStoreJobContract() domain.JobContract {
 		Workspaces:         []string{"workspace_taxion"},
 		AcceptanceCriteria: []string{"Tests pass", "No secret leakage"},
 		RequiredEvidence:   []string{"Linux CI", "Secret scan"},
-		Budget:             domain.JobContractBudget{MaxTurns: 3, MaxTokens: 1000},
+
 		ConcurrencyCeiling: 1, Deadline: time.Now().UTC().Add(time.Hour),
 		ConfigurationSHA256: strings.Repeat("f", 64),
 	}
@@ -253,7 +253,7 @@ func TestJobContractAmendmentStoreRequiresNewApproval(t *testing.T) {
 	}
 	amendedContract := initialContract
 	amendedContract.Purpose = "Deliver the amended approved feature"
-	amendedContract.Budget.MaxTokens++
+	amendedContract.ConcurrencyCeiling++
 	amendedContract.Deadline = time.Now().UTC().Add(2 * time.Hour)
 	if _, _, err := database.AmendJobContract(
 		ctx, job.ID, job.Revision, "cmd_15151515151515151515151515151515",

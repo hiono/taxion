@@ -27,7 +27,7 @@ func jobWithAcceptedPlanner(t *testing.T) (Job, RoleExecution, ProviderResultObs
 		ProviderID: "provider.test", AccountID: "account.primary", ConfigurationSHA256: strings.Repeat("a", 64),
 		RepositoryID:     "https://github.com/example/project@" + strings.Repeat("b", 40),
 		ReadOnlyBoundary: PlanningReadOnlyBoundary{Mode: PlanningReadOnlyBoundarySnapshot, Reference: "snapshot_1", SHA256: strings.Repeat("c", 64)},
-		Budget:           PlanningBudget{MaxTurns: 3, MaxTokens: 1000}, Deadline: now.Add(2 * time.Hour),
+		Deadline:         now.Add(2 * time.Hour),
 	}
 	grant, err := NewPlanningAuthorization(job, principalID, "cmd_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", request, now)
 	if err != nil {
@@ -54,11 +54,10 @@ func jobWithAcceptedPlanner(t *testing.T) (Job, RoleExecution, ProviderResultObs
 		t.Fatalf("NewProviderStartObservation: %v", err)
 	}
 	job.ProviderStartObservations = append(job.ProviderStartObservations, observation)
-	job.ProviderLifecycleEnforcedFromRevision = observation.CreatedRevision
 	job.Revision++
 	job.UpdatedAt = now.Add(2 * time.Minute)
 	turn, err := NewPlanningTurnIntent(job, execution.ID, principalID, "session_1",
-		"cmd_11111111111111111111111111111111", strings.Repeat("a", 64), 100, now.Add(3*time.Minute))
+		"cmd_11111111111111111111111111111111", strings.Repeat("a", 64), now.Add(3*time.Minute))
 	if err != nil {
 		t.Fatalf("NewPlanningTurnIntent: %v", err)
 	}
@@ -66,7 +65,7 @@ func jobWithAcceptedPlanner(t *testing.T) (Job, RoleExecution, ProviderResultObs
 	job.Revision++
 	job.UpdatedAt = turn.CreatedAt
 	turnObservation, err := NewPlanningTurnObservation(job, turn.ID, principalID,
-		"cmd_22222222222222222222222222222222", PlanningTurnCompleted, 10, strings.Repeat("b", 64), false, now.Add(4*time.Minute))
+		"cmd_22222222222222222222222222222222", PlanningTurnCompleted, strings.Repeat("b", 64), false, now.Add(4*time.Minute))
 	if err != nil {
 		t.Fatalf("NewPlanningTurnObservation: %v", err)
 	}
@@ -97,7 +96,7 @@ func validJobContract(now time.Time) JobContract {
 		Workspaces:         []string{"workspace_taxion"},
 		AcceptanceCriteria: []string{"Tests pass", "No secret leakage"},
 		RequiredEvidence:   []string{"Linux CI", "Secret scan"},
-		Budget:             JobContractBudget{MaxTurns: 3, MaxTokens: 1000},
+
 		ConcurrencyCeiling: 1, Deadline: now.Add(time.Hour),
 		ProhibitedEffects:       []string{"production deployment"},
 		ApprovalRequiredEffects: []string{"publish release"},
@@ -120,10 +119,10 @@ func TestCanonicalizeJobContractStableAndSensitive(t *testing.T) {
 	if firstHash != secondHash || first.Purpose != second.Purpose {
 		t.Fatalf("canonical hash changed for set reordering: %s != %s", firstHash, secondHash)
 	}
-	contract.Budget.MaxTokens++
+	contract.ConcurrencyCeiling++
 	_, changedHash, err := CanonicalizeJobContract(contract, JobContractCanonicalizationVersion)
 	if err != nil || changedHash == firstHash {
-		t.Fatalf("budget change did not alter canonical hash: %s %v", changedHash, err)
+		t.Fatalf("concurrency change did not alter canonical hash: %s %v", changedHash, err)
 	}
 }
 
@@ -139,7 +138,6 @@ func TestCanonicalizeJobContractRejectsIncompleteAndDuplicateFields(t *testing.T
 		{name: "missing workspace", mutate: func(c *JobContract) { c.Workspaces = nil }},
 		{name: "missing acceptance", mutate: func(c *JobContract) { c.AcceptanceCriteria = nil }},
 		{name: "missing evidence", mutate: func(c *JobContract) { c.RequiredEvidence = nil }},
-		{name: "zero budget", mutate: func(c *JobContract) { c.Budget.MaxTokens = 0 }},
 		{name: "zero concurrency", mutate: func(c *JobContract) { c.ConcurrencyCeiling = 0 }},
 		{name: "invalid config digest", mutate: func(c *JobContract) { c.ConfigurationSHA256 = "secret-value" }},
 		{name: "duplicate after trim", mutate: func(c *JobContract) { c.Workspaces = []string{"workspace_taxion", " workspace_taxion "} }},

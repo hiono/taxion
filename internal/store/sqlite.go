@@ -30,7 +30,7 @@ var (
 )
 
 // schemaVersion identifies the single supported fresh schema. Older schemas are rejected; no migration path is retained.
-const schemaVersion = 1
+const schemaVersion = 2
 
 const createLocalDraftJobCommandType = "CreateJob"
 const createTrustedDraftJobCommandType = "CreateTrustedDraftJob"
@@ -682,9 +682,6 @@ func (s *Store) StartTasklessPlanner(ctx context.Context, jobID string, expected
 	}
 	job.RoleExecutions = append(job.RoleExecutions, execution)
 	job.ProviderStartIntents = append(job.ProviderStartIntents, intent)
-	if job.ProviderLifecycleEnforcedFromRevision == 0 {
-		job.ProviderLifecycleEnforcedFromRevision = intent.CreatedRevision
-	}
 	job.Revision++
 	job.UpdatedAt = createdAt
 	if err := job.Validate(); err != nil {

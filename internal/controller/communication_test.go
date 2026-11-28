@@ -101,7 +101,7 @@ func TestCommunicationControllerPersistsCoderPlannerQuestionAndAnswer(t *testing
 		Resource:   revision.Contract.TargetRepositories[0],
 		ProviderID: runtime.identity.ProviderID, AccountID: runtime.identity.AccountID,
 		ConfigurationSHA256: revision.Contract.ConfigurationSHA256,
-		ReservedTurns:       1, ReservedTokens: 100, ExpiresAt: now.Add(30 * time.Minute),
+		ExpiresAt:           now.Add(30 * time.Minute),
 	}
 	_, permission, err := executionController.Authorize(context.Background(), permissionRequest)
 	if err != nil {

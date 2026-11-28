@@ -65,7 +65,6 @@ AdapterはProvider固有のHTTP / SDK request、response、session、eventを内
 - IDは空でなく、長さ上限とcontrol character制約を満たす。
 - SHA-256はlowercase hex 64文字とする。
 - PromptSHA256とPrompt、ContextDocumentのdigestとContentを照合する。
-- MaxTurns / MaxTokensは0を許可しない。
 - Deadlineはゼロ値・期限切れを拒否する。
 - RequestのProvider identityはRuntimeが保持するIdentityへ束縛する。
 
@@ -277,7 +276,7 @@ type ProviderStartObservation struct {
 }
 ```
 
-UNKNOWNは同一OperationIDの照合Observationで追記できる。terminal ACCEPTED / FAILEDは先行UNKNOWNだけを解消できる。ACCEPTED observationのSessionIDと一致しないTurn / Resume intentは新規作成できない。既存Jobの読み取り互換性を維持するため、Job.ProviderLifecycleEnforcedFromRevisionを使用する。新規StartIntent作成時はそのCreatedRevisionを記録する。旧Jobにこの値がない場合は、最初のProviderStartObservationのCreatedRevisionを記録する。そのrevisionより前の既存Turn / Resumeは読み取り可能とし、そのrevision以降の新しいTurn / Resumeにはaccepted Start observationとSessionIDの一致を要求する。
+UNKNOWNは同一OperationIDの照合Observationで追記できる。terminal ACCEPTED / FAILEDは先行UNKNOWNだけを解消できる。Turn / Resume intentはaccepted Start observationのSessionIDと一致しなければならない。
 
 ### 6.2 ProviderEventObservation（Domain / Store / Controller実装済み）
 
@@ -342,7 +341,7 @@ type ProviderUsageObservation struct {
 }
 ```
 
-Complete=falseは途中値として記録可能だが、budget finalizationには使用しない。同じUsageIDのComplete=true observationを後続に追加して確定する。Complete=trueはUsageIDごとに一度だけ許可し、その後の追加Observationを拒否する。EvidenceSHA256はCompleteの値にかかわらず必須とする。
+Complete=falseは途中値として記録可能だが、確定利用量として扱わない。同じUsageIDのComplete=true observationを後続に追加して確定する。Complete=trueはUsageIDごとに一度だけ許可し、その後の追加Observationを拒否する。EvidenceSHA256はCompleteの値にかかわらず必須とする。
 
 ### 6.5 ProviderStopIntent / ProviderStopObservation（Domain / Store実装済み）
 
@@ -382,9 +381,9 @@ Job.Validateは次を検証する。
 - append-only順序と時刻の単調性
 - Event cursorの連続性、重複、逆行の不存在
 - UNKNOWN解消Observationが同一OperationID / TurnIDを参照すること
-- Complete=falseのUsageをfinal budgetへ計上しないこと
+- Complete=falseのUsageを確定利用量として扱わないこと
 - Quiescent=falseのStopをrelease proofとして使用しないこと
-- terminal result / usage / stop proofが揃う前に完了へ進まないこと
+- terminal result / stop proofが揃う前に完了へ進まないこと。Usageは任意とする
 
 ## 7. Store設計
 
@@ -445,7 +444,7 @@ type ProviderController struct {
 }
 ```
 
-現時点のController interfaceはDRAFT Planning Start / Send / Resume / Stop、accepted Sessionに束縛したEvent replay、Result / Usage retrievalに対応する。Sendはintent-first、E4 Send idempotency / lookup gate、同一OperationID / TurnIDのLookup recovery、Usage Complete=true確認を実装済み。ResumeはE5 SessionReattach evidence、intent-first永続化、同一OperationID / SessionIDのUNKNOWN reconciliationを実装済み。Controller testsではfake implementationを注入する。
+現時点のController interfaceはDRAFT Planning Start / Send / Resume / Stop、accepted Sessionに束縛したEvent replay、Result / Usage retrievalに対応する。Sendはintent-first、E4 Send idempotency / lookup gate、同一OperationID / TurnIDのLookup recoveryを実装済み。Usageは任意とする。ResumeはE5 SessionReattach evidence、intent-first永続化、同一OperationID / SessionIDのUNKNOWN reconciliationを実装済み。Controller testsではfake implementationを注入する。
 
 TaskへのProvider dispatchは未実装。ACP AdapterはTask Startとすべてのツール権限要求を拒否する。
 
@@ -468,7 +467,7 @@ Start intentが保存された後にauthorityが失効した場合、新規Start
 
 ```text
 Load Job
-  -> Validate Principal / grant / RoleExecution / accepted Session / budget / deadline
+  -> Validate Principal / grant / RoleExecution / accepted Session / deadline
   -> Verify E4 Send idempotency or Send lookup capability
   -> Persist TurnIntent + CommandReceipt
   -> Confirm commit / reload Job / revalidate authority
@@ -476,11 +475,11 @@ Load Job
   -> For an existing UNKNOWN, Lookup same OperationID / TurnID if supported
   -> Runtime.Send only for the claim owner or verified Send idempotency after recovery
   -> Persist terminal or UNKNOWN PlanningTurnObservation
-  -> Retrieve Usage and require Complete=true before reconciling a terminal Lookup result
-  -> Retrieve Result / Usage as separate append-only facts
+  -> Reconcile a terminal Lookup result using its evidence and required final output
+  -> Retrieve Result, and optionally Usage, as separate append-only facts
 ```
 
-Sendの結果がAmbiguousの場合は同じTurnIDのUNKNOWNを追加し、新しいTurnIDを生成しない。LookupがNOT_FOUNDでも、実証済みSend idempotencyなしには再送しない。Lookupがterminal statusを返してもUsage Complete=trueを得るまでterminal TurnObservationへ遷移させない。
+Sendの結果がAmbiguousの場合は同じTurnIDのUNKNOWNを追加し、新しいTurnIDを生成しない。LookupがNOT_FOUNDでも、実証済みSend idempotencyなしには再送しない。Lookupの証拠と必要な最終出力に基づいてterminal TurnObservationへ遷移し、Usageの未報告は妨げとしない。
 
 ### 8.4 Recovery sequence（Start / Send / Resume / Event replay実装済み）
 

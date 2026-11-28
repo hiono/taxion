@@ -197,7 +197,7 @@ func TestOpenRejectsLegacySchemaWithoutMigration(t *testing.T) {
 	if _, err := database.db.ExecContext(context.Background(), "PRAGMA journal_mode = DELETE"); err != nil {
 		t.Fatalf("set DELETE journal mode: %v", err)
 	}
-	if _, err := database.db.ExecContext(context.Background(), "PRAGMA user_version = 2"); err != nil {
+	if _, err := database.db.ExecContext(context.Background(), "PRAGMA user_version = 1"); err != nil {
 		t.Fatalf("set legacy schema version: %v", err)
 	}
 	if err := database.Close(); err != nil {
@@ -215,8 +215,8 @@ func TestOpenRejectsLegacySchemaWithoutMigration(t *testing.T) {
 	if err := check.QueryRowContext(context.Background(), "PRAGMA user_version").Scan(&version); err != nil {
 		t.Fatalf("read legacy schema version: %v", err)
 	}
-	if version != 2 {
-		t.Fatalf("legacy schema version = %d, want unchanged version 2", version)
+	if version != 1 {
+		t.Fatalf("legacy schema version = %d, want unchanged version 1", version)
 	}
 	var journalMode string
 	if err := check.QueryRowContext(context.Background(), "PRAGMA journal_mode").Scan(&journalMode); err != nil {
@@ -791,7 +791,7 @@ func TestAddPlanningAuthorizationPersistsAndIsIdempotent(t *testing.T) {
 			Reference: "snapshot_store",
 			SHA256:    strings.Repeat("c", 64),
 		},
-		Budget:   domain.PlanningBudget{MaxTurns: 8, MaxTokens: 100000},
+
 		Deadline: issuedAt.Add(15 * time.Minute),
 	}
 	grant, err := domain.NewPlanningAuthorization(job, principal.PrincipalID(), "cmd_11111111111111111111111111111111", request, issuedAt)
@@ -819,7 +819,7 @@ func TestAddPlanningAuthorizationPersistsAndIsIdempotent(t *testing.T) {
 		t.Fatalf("retry with caller-supplied timestamp = %#v, %v; want %#v", retried, err, first)
 	}
 	changedGrant := grant
-	changedGrant.Budget.MaxTurns++
+	changedGrant.Deadline = changedGrant.Deadline.Add(time.Minute)
 	if _, err := database.AddPlanningAuthorization(ctx, job.ID, job.Revision, "cmd_11111111111111111111111111111111", changedGrant, principal); !errors.Is(err, ErrIdempotencyConflict) {
 		t.Fatalf("reused command ID error = %v, want ErrIdempotencyConflict", err)
 	}
@@ -904,7 +904,7 @@ func TestStartTasklessPlannerPersistsAndIsIdempotent(t *testing.T) {
 			Reference: "snapshot_start",
 			SHA256:    strings.Repeat("c", 64),
 		},
-		Budget:   domain.PlanningBudget{MaxTurns: 8, MaxTokens: 100000},
+
 		Deadline: issuedAt.Add(time.Hour),
 	}
 	grant, err := domain.NewPlanningAuthorization(job, principal.PrincipalID(), grantCommandID, request, issuedAt)
@@ -1005,7 +1005,7 @@ func TestStartTasklessPlannerRejectsWrongPrincipalAndRollsBack(t *testing.T) {
 			Reference: "snapshot_atomic",
 			SHA256:    strings.Repeat("c", 64),
 		},
-		Budget:   domain.PlanningBudget{MaxTurns: 4, MaxTokens: 50000},
+
 		Deadline: issuedAt.Add(time.Hour),
 	}
 	grant, err := domain.NewPlanningAuthorization(job, principal.PrincipalID(), grantCommandID, request, issuedAt)
@@ -1065,7 +1065,7 @@ func TestAddPlanningAuthorizationRejectsWrongPrincipalAndRollsBack(t *testing.T)
 			Reference: "documents_atomic",
 			SHA256:    strings.Repeat("c", 64),
 		},
-		Budget:   domain.PlanningBudget{MaxTurns: 4, MaxTokens: 50000},
+
 		Deadline: issuedAt.Add(10 * time.Minute),
 	}
 	grant, err := domain.NewPlanningAuthorization(job, principal.PrincipalID(), "cmd_22222222222222222222222222222222", request, issuedAt)
@@ -1115,7 +1115,7 @@ func TestAddPlanningAuthorizationAppendsWithoutChangingExistingFacts(t *testing.
 			Reference: "snapshot_first",
 			SHA256:    strings.Repeat("c", 64),
 		},
-		Budget:   domain.PlanningBudget{MaxTurns: 4, MaxTokens: 50000},
+
 		Deadline: firstIssuedAt.Add(time.Hour),
 	}
 	firstGrant, err := domain.NewPlanningAuthorization(job, principal.PrincipalID(),
@@ -1141,7 +1141,6 @@ func TestAddPlanningAuthorizationAppendsWithoutChangingExistingFacts(t *testing.
 		Reference: "documents_second",
 		SHA256:    strings.Repeat("e", 64),
 	}
-	secondRequest.Budget = domain.PlanningBudget{MaxTurns: 6, MaxTokens: 75000}
 	secondRequest.Deadline = secondIssuedAt.Add(2 * time.Hour)
 	secondGrant, err := domain.NewPlanningAuthorization(afterFirst, principal.PrincipalID(),
 		"cmd_77777777777777777777777777777777", secondRequest, secondIssuedAt)

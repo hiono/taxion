@@ -29,7 +29,7 @@ Taskは次を保持します。
 - effective target repositories / resources / workspaces
 - additional acceptance criteria / required evidence
 - effective prohibited effects / approval-required effects
-- effective turn / token budget、concurrency ceiling、deadline
+- effective concurrency ceiling、deadline
 - CreatedAtとCreatedRevision
 
 Parent-child包含とTask dependencyは異なる関係です。SchedulerはDependsOnTaskIDsだけをdependencyとして扱います。JobMessageやRoleExecutionの関係からdependencyを推定しません。
@@ -40,7 +40,7 @@ ParentTaskIDおよびDependsOnTaskIDsは同一Job・同一ContractRevisionの既
 
 TaskのscopeはJobContractまたはParentTaskのeffective scopeを継承します。requestでtarget repository / resource / workspaceを省略（nil）した場合は親scopeを継承します。明示した値は親scopeの完全一致subsetでなければなりません。明示的な空配列はそのresource dimensionへのアクセスを許可しない指定として扱います。TargetRepositories / TargetResources / Workspacesの全てを空にするTaskは拒否します。prefix / substring / host-only matchは認めません。
 
-TaskのBudget、ConcurrencyCeiling、Deadlineはrequestで省略した次元を親から継承します。明示値は親の上限以下でなければなりません。BudgetはMaxTurns / MaxTokensともに正数とします。Deadlineは現在時刻より後で、JobContract / ParentTaskのdeadline以下とします。
+TaskのConcurrencyCeiling、Deadlineはrequestで省略した次元を親から継承します。明示値は親の上限以下でなければなりません。Deadlineは現在時刻より後で、JobContract / ParentTaskのdeadline以下とします。
 
 TaskのProhibitedEffectsとApprovalRequiredEffectsはJobContract / ParentTaskの値を継承し、追加だけを許可します。既存の禁止や追加承認要件を削除できません。
 
@@ -48,8 +48,8 @@ AcceptanceCriteriaとRequiredEvidenceはTask固有の追加条件です。Task c
 
 ## 5. Immutability and validation
 
-- Taskはappend-only factです。既存Taskのscope、dependency、budget、deadlineをin-place変更しません。
-- JobAggregate validationは復元時もTaskID / CommandIDの一意性、approval provenance、parent / dependency参照、scope subset、budget / deadline上限、dependency DAGを検証します。
+- Taskはappend-only factです。既存Taskのscope、dependency、deadlineをin-place変更しません。
+- JobAggregate validationは復元時もTaskID / CommandIDの一意性、approval provenance、parent / dependency参照、scope subset、deadline上限、dependency DAGを検証します。
 - Task作成の拒否はJob revision、Tasks、receiptを変更しません。
 - Task creation後もJobApprovalとJobContractRevisionがauthorityの正本です。TaskはJob scopeを拡張できません。
 - Task state / progressはこのTask definition unitでは定義しません。RoleExecution、Provider observations、Output、Evidence等の事実と混同しません。

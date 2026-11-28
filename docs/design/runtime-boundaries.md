@@ -21,7 +21,7 @@ Provider Adapter design: [Provider Adapter 詳細設計書](provider-adapter-det
 | Role Runtime | Planner / Coder / Reviewerの個別実行とContextを提供 | JobApprovalやresource boundaryの発行 |
 | Computer Sandbox Manager | Task単位の独立Computer、filesystem / process / credential / network / host境界を強制 | Job authorityやJob scopeの発行 |
 | Context Manager | TurnごとのContext選択、Skill / Fileのon-demand load、履歴圧縮を実施 | Job facts、承認、provenanceの正本 |
-| Execution Telemetry | Model / Tool Callとturn / operationの相関、coverage gapと停滞兆候を記録 | 実行権限、budget、deadlineの拡張 |
+| Execution Telemetry | Model / Tool Callとturn / operationの相関、coverage gapと停滞兆候を記録 | 実行権限、deadlineの拡張 |
 | Provider Adapter | Provider固有APIを呼び出し、receipt / event / result / stop observationを返す | TaxionのJob identity、承認、認可の正本 |
 | A2A Gateway | 外部AgentとのA2A discovery / task / message / artifact相互運用 | 内部JobMessage、JobAggregate、JobApprovalの置換 |
 | Persistence | JobAggregate Commandと関連factを原子的に保存・復元 | 別の独立したJob authority store |
@@ -73,7 +73,7 @@ Context Managerは各turnで必要なContextだけを選択し、Skill / Fileを
 
 ### 4.2 Approved implementation
 
-1. Controllerが現在のJobApproval、Task scope、budget、deadline、Runtime configurationを検証する。
+1. Controllerが現在のJobApproval、Task scope、deadline、Runtime configurationを検証する。
 2. ExecutionControllerがeffect / resource / Provider identity / request digestを評価し、JobApprovalと最新JobContractに束縛した単一OperationのExecutionPermissionをJobAggregateへ保存する。
 3. TaskIDに束縛されたExecutionPermissionをsingle-useで消費し、Coder / Reviewer RoleExecutionとProviderStartIntentをJobAggregate Commandで同時にappendする。ProviderStartIntentは同じPermission ID / OperationIDを参照する。
 4. Coding TaskにWorktreeを割り当て、repository identity、Worktree path、baseline commit、ownerを永続化する。
@@ -113,8 +113,8 @@ Context Managerは各turnで必要なContextだけを選択し、Skill / Fileを
 
 ### 5.2 After external side effect
 
-- Provider receipt、event、terminal result、usage、stop evidenceをappend-only observationとして保存する。
-- Usage completenessとProvider quiescenceが確定するまで、完了・資源解放を許可しない。
+- Provider receipt、event、terminal result、stop evidenceをappend-only observationとして保存する。報告されたUsageも記録できる。
+- Provider quiescenceが確定するまで、完了・資源解放を許可しない。Usageの未報告は妨げとしない。
 - DB commitとProvider operation resultを同一の成功状態へまとめない。
 - timeout、connection loss、receipt欠落はUNKNOWNとして保持する。
 - 同じOperationIDで照会できない、またはProvider idempotencyを証明できない場合はblind replayしない。
@@ -124,15 +124,15 @@ Context Managerは各turnで必要なContextだけを選択し、Skill / Fileを
 - JobAggregateをrevisionとschema versionを検証して復元する。
 - 未解決OperationIDをProviderへ照会し、観測結果をappend-onlyで追加する。
 - AdapterがProvider / SDK versionとconfiguration identityに対応して宣言したcapabilityを確認する。Session reattachmentは保存済みの正確なSession / Provider / account / configuration identityに一致する場合だけ許可する。
-- Adapterがcross-process reattachmentをサポートしない場合、同じRoleExecutionへ新しいSessionを作成しない。旧operationの停止・result・usageを照合するまでWorktreeを保持またはquarantineする。
-- Worktree owner、Provider stop proof、result、usage、artifact identityを照合する。
+- Adapterがcross-process reattachmentをサポートしない場合、同じRoleExecutionへ新しいSessionを作成しない。旧operationの停止・resultを照合するまでWorktreeを保持またはquarantineする。
+- Worktree owner、Provider stop proof、result、artifact identityを照合する。Usageが報告されれば記録する。
 - 停止・結果が不明なWorktreeはquarantineし、所有権を解放しない。
-- 旧RoleExecutionを解決した後の継続は、新しいRoleExecutionとしてJobApproval、Task scope、budget、deadlineを再検証して開始する。
+- 旧RoleExecutionを解決した後の継続は、新しいRoleExecutionとしてJobApproval、Task scope、deadlineを再検証して開始する。
 - 復旧不能な破損・矛盾は隔離し、成功へ推測変換しない。
 
 ## 6. Completion boundary
 
-Job完了CommandはControllerだけが実行する。必須受入条件、JobEvidence、Usage finality、未解決Provider operationの不存在、Provider quiescence、Worktree release、未完了RoleExecutionの不存在、認可・安全上の阻害事項を確認する。UI、Role、Provider、A2A GatewayはJob完了状態を直接設定しない。
+Job完了CommandはControllerだけが実行する。必須受入条件、JobEvidence、未解決Provider operationの不存在、Provider quiescence、Worktree release、未完了RoleExecutionの不存在、認可・安全上の阻害事項を確認する。Usageの未報告は妨げとしない。UI、Role、Provider、A2A GatewayはJob完了状態を直接設定しない。
 
 ## 7. Implementation constraints
 

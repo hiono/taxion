@@ -288,8 +288,6 @@ func authorizePlanning(ctx context.Context, args []string, stdout, stderr io.Wri
 	readOnlyMode := flags.String("read-only-mode", "", "Read-only context mode: snapshot or documents")
 	readOnlyReference := flags.String("read-only-reference", "", "Immutable snapshot or document-set identity")
 	readOnlySHA256 := flags.String("read-only-sha256", "", "SHA-256 of the immutable read-only context")
-	maxTurns := flags.Uint("max-turns", 0, "Maximum planning turns")
-	maxTokens := flags.Uint64("max-tokens", 0, "Maximum planning tokens")
 	deadlineText := flags.String("deadline", "", "Grant deadline in RFC3339 format")
 	commandID := flags.String("command-id", "", "Command ID for idempotent retry")
 	path := flags.String("store", "", "Override the local Job database path")
@@ -297,15 +295,14 @@ func authorizePlanning(ctx context.Context, args []string, stdout, stderr io.Wri
 		return 2
 	}
 	if flags.NArg() != 1 {
-		fmt.Fprintln(stderr, "usage: taxion job authorize-planning --provider id --account id --configuration-sha256 sha256 --repository https-url --commit sha --read-only-mode snapshot|documents --read-only-reference id --read-only-sha256 sha256 --max-turns n --max-tokens n --deadline RFC3339 <job-id>")
+		fmt.Fprintln(stderr, "usage: taxion job authorize-planning --provider id --account id --configuration-sha256 sha256 --repository https-url --commit sha --read-only-mode snapshot|documents --read-only-reference id --read-only-sha256 sha256 --deadline RFC3339 <job-id>")
 		return 2
 	}
 	if strings.TrimSpace(*provider) == "" || strings.TrimSpace(*account) == "" ||
 		strings.TrimSpace(*configurationSHA256) == "" || strings.TrimSpace(*repository) == "" ||
 		strings.TrimSpace(*commit) == "" || strings.TrimSpace(*readOnlyReference) == "" ||
-		strings.TrimSpace(*readOnlySHA256) == "" || *maxTurns == 0 ||
-		*maxTurns > uint(^uint32(0)) || *maxTokens == 0 || strings.TrimSpace(*deadlineText) == "" {
-		fmt.Fprintln(stderr, "Provider、account、configuration、repository、read-only boundary、budget、deadlineは必須です")
+		strings.TrimSpace(*readOnlySHA256) == "" || strings.TrimSpace(*deadlineText) == "" {
+		fmt.Fprintln(stderr, "Provider、account、configuration、repository、read-only boundary、deadlineは必須です")
 		return 2
 	}
 	if *readOnlyMode != domain.PlanningReadOnlyBoundarySnapshot &&
@@ -332,7 +329,6 @@ func authorizePlanning(ctx context.Context, args []string, stdout, stderr io.Wri
 			Reference: *readOnlyReference,
 			SHA256:    *readOnlySHA256,
 		},
-		Budget:   domain.PlanningBudget{MaxTurns: uint32(*maxTurns), MaxTokens: *maxTokens},
 		Deadline: deadline,
 	}
 	resolvedCommandID := strings.TrimSpace(*commandID)
@@ -721,7 +717,7 @@ func printUsage(w io.Writer) {
 Usage:
   taxion auth login
   taxion job create --request "Trusted OIDC-authenticated DRAFT"
-  taxion job authorize-planning [scope and budget options] <job-id>
+  taxion job authorize-planning [scope options] <job-id>
   taxion job start-planning --authorization-id <grant-id> <job-id>
   taxion job message --body "..." [--to <role-execution-id>] [--reply-to <message-id>] <job-id>
   taxion job approve --revision <n> --canonical-hash <sha256> --canonicalization-version <n> --reason <text> <job-id>
@@ -741,7 +737,7 @@ Planning authorization options:
   --repository <https-url> --commit <40-or-64-hex>
   --read-only-mode <snapshot|documents>
   --read-only-reference <id> --read-only-sha256 <hex>
-  --max-turns <n> --max-tokens <n> --deadline <RFC3339>
+  --deadline <RFC3339>
   --command-id <id>  Reuse the same ID to retry an identical request
 
 OIDC environment:

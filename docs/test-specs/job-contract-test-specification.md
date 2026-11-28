@@ -5,9 +5,9 @@
 | ID | Scenario | Input / setup | Expected result |
 |---|---|---|---|
 | JC-001 | Canonical stability | Same contract with set-valued slices in different orders | Same canonical content and hash |
-| JC-002 | Canonical sensitivity | Change purpose, scope, budget, deadline, effect boundary, or configuration digest | Hash changes |
+| JC-002 | Canonical sensitivity | Change purpose, scope, deadline, effect boundary, or configuration digest | Hash changes |
 | JC-003 | Canonicalization version | Change version | Hash preimage and revision identity differ |
-| JC-004 | Invalid contract | Missing purpose / scope / workspace / acceptance / evidence / budget / deadline / config digest | Reject |
+| JC-004 | Invalid contract | Missing purpose / scope / workspace / acceptance / evidence / deadline / config digest | Reject |
 | JC-005 | Duplicate set values | Duplicate after trimming | Reject |
 | JC-006 | Revision sequence | Append revisions 1, 2, 3 | Accept contiguous order |
 | JC-007 | Revision proposer | Nonexistent or non-PLANNER RoleExecution | Reject |
@@ -67,7 +67,7 @@
 | JC-220 | Invalid Result evidence | Result is non-final or digest / Start / Session / Turn binding is invalid | Reject without mutation |
 | JC-221 | Strict Planner Result JSON | Final Result contains exactly one valid JobContract JSON object | Decode and persist the exact contract with Result provenance |
 | JC-222 | Unknown / non-canonical key | Result JSON contains unknown key or incorrect key casing | Reject without mutation |
-| JC-223 | Duplicate JSON key | Duplicate root or nested budget key | Reject without mutation |
+| JC-223 | Duplicate JSON key | Duplicate key | Reject without mutation |
 | JC-224 | Trailing content | Result contains a second JSON value, prose, or Markdown fence | Reject without mutation |
 | JC-225 | Invalid JSON shape | Malformed JSON, non-object root, or field type mismatch | Reject without mutation |
 | JC-226 | Separate caller contract | Caller attempts to submit a JobContract independently of the persisted Result | No such Controller input is accepted |
@@ -90,10 +90,10 @@ These are acceptance scenarios for an unimplemented workflow, not evidence of a 
 
 | ID | Scenario | Input / setup | Expected result |
 |---|---|---|---|
-| JC-239 | Completed Planner workflow | Exact Taskless PLANNER Turn is COMPLETED, Usage is complete, and no Result is persisted | Persist final Result first, then append JobContractRevision bound to that Result |
+| JC-239 | Completed Planner workflow | Exact Taskless PLANNER Turn is COMPLETED and no Result is persisted | Persist final Result first, then append JobContractRevision bound to that Result |
 | JC-240 | Existing final Result | Exact final Result observation already exists for the same Job / RoleExecution / Session / Turn | Reuse the persisted Result; do not call Provider Result again |
 | JC-241 | Turn not completed | Turn observation is missing, UNKNOWN, or FAILED | Reject before Provider Result retrieval; no JobContract mutation |
-| JC-242 | Usage incomplete | Usage is missing or latest observation has Complete=false | Reject before Provider Result retrieval; no JobContract mutation |
+| JC-242 | Usage incomplete | Usage is missing or latest observation has Complete=false | Do not block Result retrieval or JobContract proposal |
 | JC-243 | Turn identity mismatch | Turn, RoleExecution, Session, or operation differs | Reject without Provider call or JobContract mutation |
 | JC-244 | Proposal persistence failure | Final Result append succeeds but JobContract Store command fails | Keep the Result observation; no partial JobContract revision |
 | JC-245 | Retry after proposal failure | Retry with the same CommandID after Result persistence | Reuse the exact Result observation and append at most one revision |
@@ -129,18 +129,13 @@ These are acceptance scenarios for an unimplemented workflow, not evidence of a 
 | JC-256 | Unknown but contained effect | Unknown effect name with trusted assessment proving reversibility or containment and no approval requirement | Allow only the exact operation |
 | JC-257 | Unassessable effect | Missing / invalid assessment or impact is neither reversible nor contained | Reject without mutation |
 | JC-258 | Provider identity mismatch | Configuration digest differs from approved configuration reference | Reject without mutation |
-| JC-259 | Budget upper boundary | Reservation exactly reaches MaxTurns / MaxTokens | Accept |
-| JC-260 | Budget overflow | Reservation exceeds either approved limit | Reject without mutation |
-| JC-261 | Cumulative reservation | Each permission reserves its explicit ReservedTurns and ReservedTokens | Cumulative reservations never exceed the approved budget; no refund is inferred from missing Usage |
 | JC-262 | Exact permission replay | Same CommandID and identical request | Return original receipt and permission |
 | JC-263 | Permission idempotency conflict | Same CommandID with changed effect / resource / provider / digest | Reject without mutation |
 | JC-264 | Permission operation binding | Reuse permission with another OperationID or request digest | Reject before effect |
 | JC-265 | Store rollback | Inject failure while appending permission / receipt | No partial permission or receipt |
 | JC-266 | Restart restoration | Reopen Store after permission append | Permission and approval provenance remain valid |
-| JC-267 | Concurrent budget race | Two requests reserve the last budget concurrently | At most one commits; loser sees current revision / budget and is rejected |
 | JC-268 | Permission authority separation | Successful permission issuance | No Provider call, JobApproval mutation, or JobContract revision |
 | JC-269 | Task binding | Permission request references missing / foreign / stale Task or a resource outside Task scope | Reject without mutation |
-| JC-270 | Task budget | ReservedTurns / ReservedTokens exceed Task budget but fit Job budget | Reject without mutation |
 | JC-271 | Single-use permission | Same permission is referenced by a second RoleExecution / ProviderStartIntent | Reject; first binding remains unchanged |
 | JC-272 | Atomic Task execution start | Valid Task / Permission / Start Command | Append exactly one Coder / Reviewer RoleExecution and paired ProviderStartIntent in one revision |
 | JC-273 | Start intent replay | Same Start Command and exact Task / Permission | Return original RoleExecution and ProviderStartIntent |

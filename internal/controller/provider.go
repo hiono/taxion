@@ -21,8 +21,8 @@ type ProviderExecutionStore interface {
 	JobContractProposalStore
 	CommunicationStore
 	AddProviderStartObservation(context.Context, string, uint64, string, string, string, string, string, string, bool, auth.AuthenticatedPrincipal) (store.CommandReceipt, domain.ProviderStartObservation, error)
-	AddPlanningTurnIntent(context.Context, string, uint64, string, string, string, string, uint64, auth.AuthenticatedPrincipal) (store.CommandReceipt, domain.PlanningTurnIntent, error)
-	AddPlanningTurnObservation(context.Context, string, uint64, string, string, string, uint64, string, bool, auth.AuthenticatedPrincipal) (store.CommandReceipt, domain.PlanningTurnObservation, error)
+	AddPlanningTurnIntent(context.Context, string, uint64, string, string, string, string, auth.AuthenticatedPrincipal) (store.CommandReceipt, domain.PlanningTurnIntent, error)
+	AddPlanningTurnObservation(context.Context, string, uint64, string, string, string, string, bool, auth.AuthenticatedPrincipal) (store.CommandReceipt, domain.PlanningTurnObservation, error)
 	AddPlanningResumeIntent(context.Context, string, uint64, string, string, string, string, bool, auth.AuthenticatedPrincipal) (store.CommandReceipt, domain.PlanningResumeIntent, error)
 	AddPlanningResumeObservation(context.Context, string, uint64, string, string, string, string, bool, auth.AuthenticatedPrincipal) (store.CommandReceipt, domain.PlanningResumeObservation, error)
 	StartTasklessPlanner(context.Context, string, uint64, string, string, auth.AuthenticatedPrincipal) (store.CommandReceipt, domain.RoleExecution, domain.ProviderStartIntent, error)
@@ -113,7 +113,6 @@ func (c *ProviderController) StartPlanning(
 		RequestSHA256: grant.RequestSHA256,
 		Prompt:        job.Request, PromptSHA256: sha256String(job.Request),
 		Context:  append([]provider.ContextDocument(nil), contextDocuments...),
-		MaxTurns: grant.Budget.MaxTurns, MaxTokens: grant.Budget.MaxTokens,
 		Deadline: grant.Deadline,
 	}
 	if err := request.Validate(); err != nil {
@@ -803,14 +802,6 @@ func (c *ProviderController) RetrieveProviderUsage(
 	jobID, roleExecutionID, sessionID, turnID string,
 	principal auth.AuthenticatedPrincipal,
 ) (store.CommandReceipt, domain.ProviderUsageObservation, error) {
-	return c.retrieveProviderUsage(ctx, jobID, roleExecutionID, sessionID, turnID, "", principal)
-}
-
-func (c *ProviderController) retrieveProviderUsage(
-	ctx context.Context,
-	jobID, roleExecutionID, sessionID, turnID, expectedUsageID string,
-	principal auth.AuthenticatedPrincipal,
-) (store.CommandReceipt, domain.ProviderUsageObservation, error) {
 	_, _, _, operationID, err := c.providerObservationTarget(
 		ctx, jobID, roleExecutionID, sessionID, turnID, principal,
 	)
@@ -834,8 +825,7 @@ func (c *ProviderController) retrieveProviderUsage(
 	if err != nil {
 		return store.CommandReceipt{}, domain.ProviderUsageObservation{}, err
 	}
-	if result.OperationID != operationID || result.SessionID != sessionID || result.TurnID != turnID ||
-		(expectedUsageID != "" && result.UsageID != expectedUsageID) {
+	if result.OperationID != operationID || result.SessionID != sessionID || result.TurnID != turnID {
 		return store.CommandReceipt{}, domain.ProviderUsageObservation{}, provider.ErrProviderInvalidResult
 	}
 	current, _, _, currentOperationID, err := c.providerObservationTarget(
@@ -932,10 +922,9 @@ func (c *ProviderController) providerObservationTarget(
 func (c *ProviderController) SendPlanning(
 	ctx context.Context,
 	jobID, roleExecutionID, sessionID, commandID, prompt string,
-	reservedTokens uint64,
 	principal auth.AuthenticatedPrincipal,
 ) (store.CommandReceipt, domain.PlanningTurnIntent, domain.PlanningTurnObservation, provider.TurnResult, error) {
-	if ctx == nil || prompt == "" || reservedTokens == 0 {
+	if ctx == nil || prompt == "" {
 		return store.CommandReceipt{}, domain.PlanningTurnIntent{}, domain.PlanningTurnObservation{}, provider.TurnResult{}, provider.ErrProviderInvalidRequest
 	}
 	job, execution, grant, _, err := c.providerObservationTarget(
@@ -960,7 +949,7 @@ func (c *ProviderController) SendPlanning(
 	request := provider.TurnRequest{
 		OperationID: domain.PlanningTurnOperationID(commandID), TurnID: domain.PlanningTurnIntentID(commandID),
 		SessionID: sessionID, PromptSHA256: promptSHA256, Prompt: prompt,
-		MaxTokens: reservedTokens, Deadline: grant.Deadline,
+		Deadline: grant.Deadline,
 	}
 	if err := request.Validate(); err != nil {
 		return store.CommandReceipt{}, domain.PlanningTurnIntent{}, domain.PlanningTurnObservation{}, provider.TurnResult{}, provider.ErrProviderInvalidRequest
@@ -971,7 +960,7 @@ func (c *ProviderController) SendPlanning(
 		}
 	}
 	receipt, turn, err := c.store.AddPlanningTurnIntent(
-		ctx, jobID, job.Revision, execution.ID, sessionID, commandID, promptSHA256, reservedTokens, principal,
+		ctx, jobID, job.Revision, execution.ID, sessionID, commandID, promptSHA256, principal,
 	)
 	if err != nil {
 		return store.CommandReceipt{}, domain.PlanningTurnIntent{}, domain.PlanningTurnObservation{}, provider.TurnResult{}, err
@@ -1049,7 +1038,7 @@ func (c *ProviderController) reconcileTurn(
 			})
 			if lookupErr != nil {
 				observation, persistErr := c.recordTurnObservation(
-					ctx, job.ID, turn.ID, domain.PlanningTurnUnknown, 0, "", principal,
+					ctx, job.ID, turn.ID, domain.PlanningTurnUnknown, "", principal,
 				)
 				if persistErr != nil {
 					return receipt, turn, observation, provider.TurnResult{}, errors.Join(lookupErr, persistErr)
@@ -1058,27 +1047,6 @@ func (c *ProviderController) reconcileTurn(
 			}
 			if lookup.Found {
 				if lookup.Status == domain.PlanningTurnCompleted || lookup.Status == domain.PlanningTurnFailed {
-					_, usage, usageErr := c.retrieveProviderUsage(
-						ctx, job.ID, turn.RoleExecutionID, turn.ProviderSessionID, turn.ID, lookup.UsageID, principal,
-					)
-					if usageErr != nil {
-						observation, persistErr := c.recordTurnObservation(
-							ctx, job.ID, turn.ID, domain.PlanningTurnUnknown, 0, "", principal,
-						)
-						if persistErr != nil {
-							return receipt, turn, observation, provider.TurnResult{}, errors.Join(usageErr, persistErr)
-						}
-						return receipt, turn, observation, provider.TurnResult{}, usageErr
-					}
-					if !usage.Complete {
-						observation, persistErr := c.recordTurnObservation(
-							ctx, job.ID, turn.ID, domain.PlanningTurnUnknown, 0, "", principal,
-						)
-						if persistErr != nil {
-							return receipt, turn, observation, provider.TurnResult{}, persistErr
-						}
-						return receipt, turn, observation, provider.TurnResult{}, errors.New("Provider Turn terminal state awaits complete Usage evidence")
-					}
 					current, err := c.store.GetJob(ctx, job.ID)
 					if err != nil {
 						return receipt, turn, previous, provider.TurnResult{}, err
@@ -1112,7 +1080,7 @@ func (c *ProviderController) reconcileTurn(
 							}
 						}
 						if !found {
-							if err := c.validatePlannerTurnCompletion(ctx, turn, usage.Tokens, usage.EvidenceSHA256, principal); err != nil {
+							if err := c.validatePlannerTurnCompletion(ctx, turn, lookup.EvidenceSHA256, principal); err != nil {
 								return receipt, turn, previous, provider.TurnResult{}, err
 							}
 							if err := c.savePlannerTurnMessage(ctx, turn, content); err != nil {
@@ -1121,11 +1089,11 @@ func (c *ProviderController) reconcileTurn(
 						}
 					}
 					observation, err := c.recordTurnObservation(
-						ctx, job.ID, turn.ID, lookup.Status, usage.Tokens, usage.EvidenceSHA256, principal,
+						ctx, job.ID, turn.ID, lookup.Status, lookup.EvidenceSHA256, principal,
 					)
 					if err != nil {
 						unknown, persistErr := c.recordTurnObservation(
-							ctx, job.ID, turn.ID, domain.PlanningTurnUnknown, 0, "", principal,
+							ctx, job.ID, turn.ID, domain.PlanningTurnUnknown, "", principal,
 						)
 						if persistErr != nil {
 							return receipt, turn, unknown, provider.TurnResult{}, errors.Join(err, persistErr)
@@ -1138,12 +1106,12 @@ func (c *ProviderController) reconcileTurn(
 					}
 					return receipt, turn, observation, provider.TurnResult{
 						OperationID: turn.OperationID, TurnID: turn.ID, SessionID: turn.ProviderSessionID,
-						ReceiptID: lookup.ReceiptID, Status: lookup.Status, TokensUsed: usage.Tokens,
-						EvidenceSHA256: usage.EvidenceSHA256, Output: turnResultFromObservation(current, observation).Output,
+						ReceiptID: lookup.ReceiptID, Status: lookup.Status,
+						EvidenceSHA256: lookup.EvidenceSHA256, Output: turnResultFromObservation(current, observation).Output,
 					}, nil
 				}
 				observation, persistErr := c.recordTurnObservation(
-					ctx, job.ID, turn.ID, domain.PlanningTurnUnknown, 0, "", principal,
+					ctx, job.ID, turn.ID, domain.PlanningTurnUnknown, "", principal,
 				)
 				if persistErr != nil {
 					return receipt, turn, observation, provider.TurnResult{}, persistErr
@@ -1153,7 +1121,7 @@ func (c *ProviderController) reconcileTurn(
 		}
 		if !canRetry {
 			observation, persistErr := c.recordTurnObservation(
-				ctx, job.ID, turn.ID, domain.PlanningTurnUnknown, 0, "", principal,
+				ctx, job.ID, turn.ID, domain.PlanningTurnUnknown, "", principal,
 			)
 			if persistErr != nil {
 				return receipt, turn, observation, provider.TurnResult{}, persistErr
@@ -1179,7 +1147,7 @@ func (c *ProviderController) reconcileTurn(
 	if err != nil {
 		if providerOperationMayHaveStarted(err) {
 			observation, persistErr := c.recordTurnObservation(
-				ctx, job.ID, turn.ID, domain.PlanningTurnUnknown, 0, "", principal,
+				ctx, job.ID, turn.ID, domain.PlanningTurnUnknown, "", principal,
 			)
 			if persistErr != nil {
 				return receipt, turn, observation, provider.TurnResult{}, errors.Join(err, persistErr)
@@ -1190,7 +1158,7 @@ func (c *ProviderController) reconcileTurn(
 	}
 	if result.OperationID != turn.OperationID || result.TurnID != turn.ID || result.SessionID != turn.ProviderSessionID {
 		observation, persistErr := c.recordTurnObservation(
-			ctx, job.ID, turn.ID, domain.PlanningTurnUnknown, 0, "", principal,
+			ctx, job.ID, turn.ID, domain.PlanningTurnUnknown, "", principal,
 		)
 		if persistErr != nil {
 			return receipt, turn, observation, provider.TurnResult{}, errors.Join(provider.ErrProviderInvalidResult, persistErr)
@@ -1199,7 +1167,7 @@ func (c *ProviderController) reconcileTurn(
 	}
 	if result.Status == domain.PlanningTurnUnknown {
 		observation, persistErr := c.recordTurnObservation(
-			ctx, job.ID, turn.ID, domain.PlanningTurnUnknown, 0, "", principal,
+			ctx, job.ID, turn.ID, domain.PlanningTurnUnknown, "", principal,
 		)
 		if persistErr != nil {
 			return receipt, turn, observation, provider.TurnResult{}, persistErr
@@ -1208,7 +1176,7 @@ func (c *ProviderController) reconcileTurn(
 	}
 	if result.Status != domain.PlanningTurnCompleted && result.Status != domain.PlanningTurnFailed {
 		observation, persistErr := c.recordTurnObservation(
-			ctx, job.ID, turn.ID, domain.PlanningTurnUnknown, 0, "", principal,
+			ctx, job.ID, turn.ID, domain.PlanningTurnUnknown, "", principal,
 		)
 		if persistErr != nil {
 			return receipt, turn, observation, provider.TurnResult{}, persistErr
@@ -1226,7 +1194,7 @@ func (c *ProviderController) reconcileTurn(
 		}
 	}
 	if result.Status == domain.PlanningTurnCompleted && strings.TrimSpace(result.Output) != "" {
-		if err := c.validatePlannerTurnCompletion(ctx, turn, result.TokensUsed, result.EvidenceSHA256, principal); err != nil {
+		if err := c.validatePlannerTurnCompletion(ctx, turn, result.EvidenceSHA256, principal); err != nil {
 			return receipt, turn, previous, result, err
 		}
 		if err := c.savePlannerTurnMessage(ctx, turn, result.Output); err != nil {
@@ -1234,11 +1202,11 @@ func (c *ProviderController) reconcileTurn(
 		}
 	}
 	observation, err := c.recordTurnObservation(
-		ctx, job.ID, turn.ID, result.Status, result.TokensUsed, result.EvidenceSHA256, principal,
+		ctx, job.ID, turn.ID, result.Status, result.EvidenceSHA256, principal,
 	)
 	if err != nil {
 		observation, persistErr := c.recordTurnObservation(
-			ctx, job.ID, turn.ID, domain.PlanningTurnUnknown, 0, "", principal,
+			ctx, job.ID, turn.ID, domain.PlanningTurnUnknown, "", principal,
 		)
 		if persistErr != nil {
 			return receipt, turn, observation, provider.TurnResult{}, errors.Join(err, persistErr)
@@ -1251,7 +1219,6 @@ func (c *ProviderController) reconcileTurn(
 func (c *ProviderController) recordTurnObservation(
 	ctx context.Context,
 	jobID, turnID, status string,
-	tokensUsed uint64,
 	evidenceSHA256 string,
 	principal auth.AuthenticatedPrincipal,
 ) (domain.PlanningTurnObservation, error) {
@@ -1265,16 +1232,16 @@ func (c *ProviderController) recordTurnObservation(
 			if status == domain.PlanningTurnUnknown {
 				return previous, nil
 			}
-		} else if previous.Status == status && previous.TokensUsed == tokensUsed && previous.EvidenceSHA256 == evidenceSHA256 {
+		} else if previous.Status == status && previous.EvidenceSHA256 == evidenceSHA256 {
 			return previous, nil
 		} else {
 			return domain.PlanningTurnObservation{}, errors.New("Provider Turn already has a terminal observation")
 		}
 	}
 	reconcilesUnknown := found && previous.Status == domain.PlanningTurnUnknown && status != domain.PlanningTurnUnknown
-	commandID := providerTurnObservationCommandID(turnID, status, tokensUsed, evidenceSHA256, reconcilesUnknown)
+	commandID := providerTurnObservationCommandID(turnID, status, evidenceSHA256, reconcilesUnknown)
 	_, observation, err := c.store.AddPlanningTurnObservation(
-		ctx, job.ID, job.Revision, turnID, commandID, status, tokensUsed, evidenceSHA256, reconcilesUnknown, principal,
+		ctx, job.ID, job.Revision, turnID, commandID, status, evidenceSHA256, reconcilesUnknown, principal,
 	)
 	return observation, err
 }
@@ -1296,7 +1263,7 @@ func (c *ProviderController) claimPlanningTurnDispatch(
 		return domain.PlanningTurnObservation{}, false, err
 	}
 	_, observation, err := c.store.AddPlanningTurnObservation(
-		ctx, job.ID, job.Revision, turnID, commandID, domain.PlanningTurnUnknown, 0, "", false, principal,
+		ctx, job.ID, job.Revision, turnID, commandID, domain.PlanningTurnUnknown, "", false, principal,
 	)
 	if err != nil {
 		return domain.PlanningTurnObservation{}, false, err
@@ -1323,8 +1290,8 @@ func latestProviderTurnObservation(job domain.Job, turnID string) (domain.Planni
 	return latest, found
 }
 
-func providerTurnObservationCommandID(turnID, status string, tokensUsed uint64, evidenceSHA256 string, reconcilesUnknown bool) string {
-	material := fmt.Sprintf("taxion:planning-turn-observation:%s:%s:%d:%s:%t", turnID, status, tokensUsed, evidenceSHA256, reconcilesUnknown)
+func providerTurnObservationCommandID(turnID, status, evidenceSHA256 string, reconcilesUnknown bool) string {
+	material := fmt.Sprintf("taxion:planning-turn-observation:%s:%s:%s:%t", turnID, status, evidenceSHA256, reconcilesUnknown)
 	sum := sha256.Sum256([]byte(material))
 	return "cmd_" + hex.EncodeToString(sum[:16])
 }
@@ -1334,21 +1301,21 @@ func providerTurnMessageCommandID(turnID string) string {
 	return "cmd_" + hex.EncodeToString(sum[:16])
 }
 
-func (c *ProviderController) validatePlannerTurnCompletion(ctx context.Context, turn domain.PlanningTurnIntent, tokens uint64, evidence string, principal auth.AuthenticatedPrincipal) error {
+func (c *ProviderController) validatePlannerTurnCompletion(ctx context.Context, turn domain.PlanningTurnIntent, evidence string, principal auth.AuthenticatedPrincipal) error {
 	job, err := c.store.GetJob(ctx, turn.JobID)
 	if err != nil {
 		return err
 	}
 	latest, found := latestProviderTurnObservation(job, turn.ID)
 	if found && latest.Status != domain.PlanningTurnUnknown {
-		if latest.Status == domain.PlanningTurnCompleted && latest.TokensUsed == tokens && latest.EvidenceSHA256 == evidence {
+		if latest.Status == domain.PlanningTurnCompleted && latest.EvidenceSHA256 == evidence {
 			return nil
 		}
 		return errors.New("Provider Turn already has a different terminal observation")
 	}
-	commandID := providerTurnObservationCommandID(turn.ID, domain.PlanningTurnCompleted, tokens, evidence, found)
+	commandID := providerTurnObservationCommandID(turn.ID, domain.PlanningTurnCompleted, evidence, found)
 	_, err = domain.NewPlanningTurnObservation(job, turn.ID, principal.PrincipalID(), commandID,
-		domain.PlanningTurnCompleted, tokens, evidence, found, c.now())
+		domain.PlanningTurnCompleted, evidence, found, c.now())
 	return err
 }
 
@@ -1383,7 +1350,7 @@ func plannerTurnMessage(job domain.Job, turn domain.PlanningTurnIntent) (string,
 func turnResultFromObservation(job domain.Job, observation domain.PlanningTurnObservation) provider.TurnResult {
 	result := provider.TurnResult{
 		OperationID: observation.OperationID, TurnID: observation.TurnID, SessionID: observation.ProviderSessionID,
-		Status: observation.Status, TokensUsed: observation.TokensUsed, EvidenceSHA256: observation.EvidenceSHA256,
+		Status: observation.Status, EvidenceSHA256: observation.EvidenceSHA256,
 	}
 	if observation.Status == domain.PlanningTurnCompleted {
 		for _, turn := range job.PlanningTurnIntents {

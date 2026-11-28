@@ -68,8 +68,8 @@ Status: Draft
 
 - JobID、Job revision、RoleExecutionID
 - 認証済みHUMAN PrincipalとIntakeProvenance
-- DRAFT planningの場合はPlanningAuthorizationの有効性、Job / request digest、Provider / account / configuration、read-only context、budget、deadline
-- 承認済み実行の場合はJobApprovalの正確なContract revision、Task scope、resource scope、budget、deadline。Task-bound StartではExecutionPermissionをdispatch直前に再検証し、Task・RoleExecution・ProviderStartIntent・Provider identityを完全一致させる
+- DRAFT planningの場合はPlanningAuthorizationの有効性、Job / request digest、Provider / account / configuration、read-only context、deadline
+- 承認済み実行の場合はJobApprovalの正確なContract revision、Task scope、resource scope、deadline。Task-bound StartではExecutionPermissionをdispatch直前に再検証し、Task・RoleExecution・ProviderStartIntent・Provider identityを完全一致させる
 - 操作対象のProvider / account / SDK・protocol version / configuration identity
 - Context documentはID、content digest、実contentの一致を検証する。Snapshot modeはReferenceと一致する単一documentを要求する。Documents modeはID昇順で各documentの「ID + LF + SHA256 + LF」を連結したUTF-8 bytesのSHA-256をReadOnlyBoundary.SHA256と照合する。
 - 当該操作に必要なCapabilityとその証拠水準
@@ -120,7 +120,7 @@ Capabilityは個別に扱う。未検証のCapabilityを利用可能と推定し
 - E5で検証されたcross-process reattachment capabilityがない場合、同じRoleExecutionへ新しいSessionを割り当てない。
 - ResumeのUNKNOWNは同じResume OperationIDで照合する。
 - ResumeがATTACHEDと確定する前に新しいturnを開始しない。
-- Stopの成功は単なるcancel通知では認定しない。Stop proof、terminal result、Usageを照合する。
+- Stopの成功は単なるcancel通知では認定しない。Stop proofとterminal resultを照合する。
 - Stop状態またはresultが不明な資源は未解決として保持し、再利用・所有権解放を行わない。
 
 ### 4.6 Credential isolation
@@ -172,7 +172,7 @@ Capabilityは個別に扱う。未検証のCapabilityを利用可能と推定し
 3. intentのcommit失敗・UNKNOWN時にProvider呼出しが発生しない。
 4. Provider受理応答だけでterminal result、stop、usageを確定しない。
 5. timeout / disconnect / receipt欠落 / crashをUNKNOWNとして保持し、blind replayしない。
-6. Stop proof、terminal result、Usageの未照合中は完了・解放を許可しない。
+6. Stop proof、terminal resultの未照合中は完了・解放を許可しない。Usageの未報告は停止理由にしない。
 7. E5未検証のResumeで同一RoleExecutionへ新Sessionを付け替えない。
 8. credentialがJob、receipt、Observation、ログ、error、Model / Tool / Sandboxへ漏えいしない。
 9. credential leaseは正常・異常・panic・cancelの各経路でCloseされる。

@@ -64,7 +64,6 @@ func NewTaskRoleExecutionStart(
 		RoleExecutionID: execution.ID, TaskID: task.ID, ExecutionPermissionID: permission.ID,
 		ProviderID: permission.ProviderID, AccountID: permission.AccountID,
 		ConfigurationSHA256: permission.ConfigurationSHA256,
-		Budget:              PlanningBudget{MaxTurns: permission.ReservedTurns, MaxTokens: permission.ReservedTokens},
 		Deadline:            permission.ExpiresAt, RequestSHA256: permission.RequestSHA256,
 		CreatedAt: now, CreatedRevision: createdRevision,
 	}

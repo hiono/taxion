@@ -18,7 +18,7 @@ Accepted
 - Task間の独立性と明示的依存関係を確認してWorktreeを割り当てます。並行実行数はJobApprovalで承認されたMaxConcurrentExecutionsを上限とし、独立性が不明な場合は逐次実行します。
 - Worktreeの作成、割当て、識別、解放はControllerが管理し、repository identity、path、baseline commit、ownerを永続化します。
 - 同一Worktreeのmutating RoleExecutionは最大一つとします。Coder、Reviewer、修正担当は同じWorktreeを順次引き継げます。
-- Handoff前にProvider停止、event・usage・result、review target identityを確認します。停止や結果が不明なWorktreeは保持またはquarantineします。
+- Handoff前にProvider停止、event・result、review target identityを確認します。停止や結果が不明なWorktreeは保持またはquarantineします。
 - Reviewerは独立したRoleExecution / Contextで固定commit・tree・snapshotをread-onlyで評価します。
 - Repository共通Git metadataの変更はRepository単位で直列化し、Worktree間の競合は統合Taskで明示的に解決します。
 - Worktree分離はJobApproval、resource boundary、Computer Sandboxを代替しません。

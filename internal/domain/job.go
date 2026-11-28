@@ -30,36 +30,35 @@ const (
 )
 
 type Job struct {
-	ID                                    string                      `json:"id"`
-	Request                               string                      `json:"request"`
-	Goal                                  string                      `json:"goal,omitempty"`
-	State                                 JobState                    `json:"state"`
-	Revision                              uint64                      `json:"revision"`
-	CreatedAt                             time.Time                   `json:"created_at"`
-	UpdatedAt                             time.Time                   `json:"updated_at"`
-	IntakeProvenance                      *IntakeProvenance           `json:"intake_provenance,omitempty"`
-	PlanningAuthorizations                []PlanningAuthorization     `json:"planning_authorizations,omitempty"`
-	JobContractRevisions                  []JobContractRevision       `json:"job_contract_revisions,omitempty"`
-	JobApprovals                          []JobApproval               `json:"job_approvals,omitempty"`
-	Tasks                                 []Task                      `json:"tasks,omitempty"`
-	ExecutionPermissions                  []ExecutionPermission       `json:"execution_permissions,omitempty"`
-	WorktreeAssignments                   []WorktreeAssignment        `json:"worktree_assignments,omitempty"`
-	RoleExecutions                        []RoleExecution             `json:"role_executions,omitempty"`
-	ProviderStartIntents                  []ProviderStartIntent       `json:"provider_start_intents,omitempty"`
-	ProviderStartObservations             []ProviderStartObservation  `json:"provider_start_observations,omitempty"`
-	ProviderEventObservations             []ProviderEventObservation  `json:"provider_event_observations,omitempty"`
-	ProviderStopIntents                   []ProviderStopIntent        `json:"provider_stop_intents,omitempty"`
-	ProviderStopObservations              []ProviderStopObservation   `json:"provider_stop_observations,omitempty"`
-	ProviderResultObservations            []ProviderResultObservation `json:"provider_result_observations,omitempty"`
-	ProviderUsageObservations             []ProviderUsageObservation  `json:"provider_usage_observations,omitempty"`
-	ProviderLifecycleEnforcedFromRevision uint64                      `json:"provider_lifecycle_enforced_from_revision,omitempty"`
-	PlanningTurnIntents                   []PlanningTurnIntent        `json:"planning_turn_intents,omitempty"`
-	PlanningTurnObservations              []PlanningTurnObservation   `json:"planning_turn_observations,omitempty"`
-	PlanningEffectDecisions               []PlanningEffectDecision    `json:"planning_effect_decisions,omitempty"`
-	PlanningResumeIntents                 []PlanningResumeIntent      `json:"planning_resume_intents,omitempty"`
-	PlanningResumeObservations            []PlanningResumeObservation `json:"planning_resume_observations,omitempty"`
-	PlanningBoundaryDecisions             []PlanningBoundaryDecision  `json:"planning_boundary_decisions,omitempty"`
-	JobMessages                           []JobMessage                `json:"job_messages,omitempty"`
+	ID                         string                      `json:"id"`
+	Request                    string                      `json:"request"`
+	Goal                       string                      `json:"goal,omitempty"`
+	State                      JobState                    `json:"state"`
+	Revision                   uint64                      `json:"revision"`
+	CreatedAt                  time.Time                   `json:"created_at"`
+	UpdatedAt                  time.Time                   `json:"updated_at"`
+	IntakeProvenance           *IntakeProvenance           `json:"intake_provenance,omitempty"`
+	PlanningAuthorizations     []PlanningAuthorization     `json:"planning_authorizations,omitempty"`
+	JobContractRevisions       []JobContractRevision       `json:"job_contract_revisions,omitempty"`
+	JobApprovals               []JobApproval               `json:"job_approvals,omitempty"`
+	Tasks                      []Task                      `json:"tasks,omitempty"`
+	ExecutionPermissions       []ExecutionPermission       `json:"execution_permissions,omitempty"`
+	WorktreeAssignments        []WorktreeAssignment        `json:"worktree_assignments,omitempty"`
+	RoleExecutions             []RoleExecution             `json:"role_executions,omitempty"`
+	ProviderStartIntents       []ProviderStartIntent       `json:"provider_start_intents,omitempty"`
+	ProviderStartObservations  []ProviderStartObservation  `json:"provider_start_observations,omitempty"`
+	ProviderEventObservations  []ProviderEventObservation  `json:"provider_event_observations,omitempty"`
+	ProviderStopIntents        []ProviderStopIntent        `json:"provider_stop_intents,omitempty"`
+	ProviderStopObservations   []ProviderStopObservation   `json:"provider_stop_observations,omitempty"`
+	ProviderResultObservations []ProviderResultObservation `json:"provider_result_observations,omitempty"`
+	ProviderUsageObservations  []ProviderUsageObservation  `json:"provider_usage_observations,omitempty"`
+	PlanningTurnIntents        []PlanningTurnIntent        `json:"planning_turn_intents,omitempty"`
+	PlanningTurnObservations   []PlanningTurnObservation   `json:"planning_turn_observations,omitempty"`
+	PlanningEffectDecisions    []PlanningEffectDecision    `json:"planning_effect_decisions,omitempty"`
+	PlanningResumeIntents      []PlanningResumeIntent      `json:"planning_resume_intents,omitempty"`
+	PlanningResumeObservations []PlanningResumeObservation `json:"planning_resume_observations,omitempty"`
+	PlanningBoundaryDecisions  []PlanningBoundaryDecision  `json:"planning_boundary_decisions,omitempty"`
+	JobMessages                []JobMessage                `json:"job_messages,omitempty"`
 }
 
 type IntakeProvenance struct {
@@ -167,11 +166,6 @@ const (
 	PlanningEffectRepositoryRead      = "repository.read"
 )
 
-type PlanningBudget struct {
-	MaxTurns  uint32 `json:"max_turns"`
-	MaxTokens uint64 `json:"max_tokens"`
-}
-
 type PlanningReadOnlyBoundary struct {
 	Mode      string `json:"mode"`
 	Reference string `json:"reference"`
@@ -184,7 +178,6 @@ type PlanningAuthorizationRequest struct {
 	ConfigurationSHA256 string                   `json:"configuration_sha256"`
 	RepositoryID        string                   `json:"repository_id"`
 	ReadOnlyBoundary    PlanningReadOnlyBoundary `json:"read_only_boundary"`
-	Budget              PlanningBudget           `json:"budget"`
 	Deadline            time.Time                `json:"deadline"`
 }
 
@@ -200,7 +193,6 @@ type PlanningAuthorization struct {
 	RepositoryID        string                   `json:"repository_id"`
 	ReadOnlyBoundary    PlanningReadOnlyBoundary `json:"read_only_boundary"`
 	PermittedEffects    []string                 `json:"permitted_effects"`
-	Budget              PlanningBudget           `json:"budget"`
 	IssuedAt            time.Time                `json:"issued_at"`
 	Deadline            time.Time                `json:"deadline"`
 }
@@ -384,7 +376,6 @@ type ProviderStartIntent struct {
 	AccountID               string                   `json:"account_id"`
 	ConfigurationSHA256     string                   `json:"configuration_sha256"`
 	ReadOnlyBoundary        PlanningReadOnlyBoundary `json:"read_only_boundary"`
-	Budget                  PlanningBudget           `json:"budget"`
 	Deadline                time.Time                `json:"deadline"`
 	RequestSHA256           string                   `json:"request_sha256"`
 	ClaimBeforeDispatch     bool                     `json:"claim_before_dispatch,omitempty"`
@@ -462,7 +453,6 @@ func NewTasklessPlannerStart(job Job, authorizationID, principalID, commandID, r
 		AccountID:               grant.AccountID,
 		ConfigurationSHA256:     grant.ConfigurationSHA256,
 		ReadOnlyBoundary:        grant.ReadOnlyBoundary,
-		Budget:                  grant.Budget,
 		Deadline:                grant.Deadline,
 		RequestSHA256:           requestSHA256,
 		ClaimBeforeDispatch:     true,
@@ -566,7 +556,7 @@ func (p ProviderStartIntent) Validate(job Job, execution RoleExecution) error {
 			}
 			if p.ProviderID != grant.ProviderID || p.AccountID != grant.AccountID ||
 				p.ConfigurationSHA256 != grant.ConfigurationSHA256 ||
-				p.ReadOnlyBoundary != grant.ReadOnlyBoundary || p.Budget != grant.Budget ||
+				p.ReadOnlyBoundary != grant.ReadOnlyBoundary ||
 				!p.Deadline.Equal(grant.Deadline) {
 				return errors.New("Provider Start intent exceeds PlanningAuthorization scope")
 			}
@@ -586,7 +576,6 @@ func (p ProviderStartIntent) Validate(job Job, execution RoleExecution) error {
 			permission.RequestSHA256 != p.RequestSHA256 ||
 			permission.ProviderID != p.ProviderID || permission.AccountID != p.AccountID ||
 			permission.ConfigurationSHA256 != p.ConfigurationSHA256 ||
-			p.Budget != (PlanningBudget{MaxTurns: permission.ReservedTurns, MaxTokens: permission.ReservedTokens}) ||
 			p.Deadline.After(task.Deadline) || p.Deadline.After(permission.ExpiresAt) ||
 			!p.Deadline.Equal(permission.ExpiresAt) ||
 			p.ReadOnlyBoundary != (PlanningReadOnlyBoundary{}) {
@@ -634,7 +623,6 @@ func NewPlanningAuthorization(job Job, principalID, commandID string, request Pl
 		RepositoryID:        request.RepositoryID,
 		ReadOnlyBoundary:    request.ReadOnlyBoundary,
 		PermittedEffects:    []string{PlanningEffectRepositoryRead},
-		Budget:              request.Budget,
 		IssuedAt:            issuedAt,
 		Deadline:            deadline,
 	}
@@ -733,9 +721,6 @@ func (a PlanningAuthorization) Validate(job Job) error {
 	}
 	if len(a.PermittedEffects) != 1 || a.PermittedEffects[0] != PlanningEffectRepositoryRead {
 		return errors.New("PlanningAuthorization permits an unsupported effect")
-	}
-	if a.Budget.MaxTurns == 0 || a.Budget.MaxTokens == 0 {
-		return errors.New("PlanningAuthorization budget must set positive turn and token limits")
 	}
 	if a.IssuedAt.IsZero() || a.Deadline.IsZero() || !a.Deadline.After(a.IssuedAt) {
 		return errors.New("PlanningAuthorization deadline must follow issue time")
@@ -913,29 +898,6 @@ func (j Job) Validate() error {
 		}
 		seenStartObservationIDs[observation.ID] = struct{}{}
 		startObservationsByOperation[observation.OperationID] = append(startObservationsByOperation[observation.OperationID], observation)
-	}
-	if j.ProviderLifecycleEnforcedFromRevision > j.Revision {
-		return fmt.Errorf("%w: Provider Start observation activation revision exceeds Job revision", ErrInvalidJob)
-	}
-	if j.ProviderLifecycleEnforcedFromRevision > 0 {
-		foundActivationFact := false
-		for _, intent := range j.ProviderStartIntents {
-			if intent.CreatedRevision == j.ProviderLifecycleEnforcedFromRevision {
-				foundActivationFact = true
-				break
-			}
-		}
-		if !foundActivationFact {
-			for _, observation := range j.ProviderStartObservations {
-				if observation.CreatedRevision == j.ProviderLifecycleEnforcedFromRevision {
-					foundActivationFact = true
-					break
-				}
-			}
-		}
-		if !foundActivationFact {
-			return fmt.Errorf("%w: Provider lifecycle activation revision has no matching Start fact", ErrInvalidJob)
-		}
 	}
 	for operationID, observations := range startObservationsByOperation {
 		for i, observation := range observations {
@@ -1260,39 +1222,6 @@ func (j Job) Validate() error {
 			return fmt.Errorf("%w: duplicate PlanningBoundaryDecision ID", ErrInvalidJob)
 		}
 		seenBoundaryDecisions[decision.ID] = struct{}{}
-	}
-	budgetUsed := make(map[string]uint64)
-	budgetLimits := make(map[string]uint64, len(j.PlanningAuthorizations))
-	for _, grant := range j.PlanningAuthorizations {
-		budgetLimits[grant.ID] = grant.Budget.MaxTokens
-	}
-	overrunTurnRevision := make(map[string]uint64)
-	for _, turn := range j.PlanningTurnIntents {
-		amount := turn.ReservedTokens
-		status := PlanningTurnUnknown
-		observations := observationsByTurn[turn.ID]
-		if len(observations) > 0 && observations[len(observations)-1].Status != PlanningTurnUnknown {
-			amount = observations[len(observations)-1].TokensUsed
-			status = observations[len(observations)-1].Status
-		}
-		grantID := turn.PlanningAuthorizationID
-		if ^uint64(0)-budgetUsed[grantID] < amount {
-			return fmt.Errorf("%w: planning token usage overflow", ErrInvalidJob)
-		}
-		budgetUsed[grantID] += amount
-		if limit, found := budgetLimits[grantID]; found && budgetUsed[grantID] > limit {
-			if status != PlanningTurnFailed || overrunTurnRevision[grantID] != 0 {
-				return fmt.Errorf("%w: planning token usage exceeds authorization budget", ErrInvalidJob)
-			}
-			overrunTurnRevision[grantID] = turn.CreatedRevision
-		}
-	}
-	for grantID, revision := range overrunTurnRevision {
-		for _, turn := range j.PlanningTurnIntents {
-			if turn.PlanningAuthorizationID == grantID && turn.CreatedRevision > revision {
-				return fmt.Errorf("%w: planning continued after an over-budget FAILED turn", ErrInvalidJob)
-			}
-		}
 	}
 	seenResultIDs := make(map[string]struct{}, len(j.ProviderResultObservations))
 	seenResultCommands := make(map[string]struct{}, len(j.ProviderResultObservations))

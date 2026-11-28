@@ -61,7 +61,7 @@ func TestExecutionPermissionStoreRollbackReplayAndRestart(t *testing.T) {
 		Role: "CODER", Effect: "repository.write", Resource: contract.TargetRepositories[0],
 		ProviderID: "provider.test", AccountID: "account.primary",
 		ConfigurationSHA256: contract.ConfigurationSHA256,
-		ReservedTurns:       1, ReservedTokens: 100, ExpiresAt: now.Add(30 * time.Minute),
+		ExpiresAt:           now.Add(30 * time.Minute),
 	}
 	requestSHA, err := domain.ExecutionPermissionRequestSHA256(request)
 	if err != nil {
@@ -187,7 +187,7 @@ func TestTaskExecutionStartAtomicRollbackReplaySingleUseAndRestart(t *testing.T)
 				Role: role, Effect: effect, Resource: contract.TargetRepositories[0],
 				ProviderID: "provider.test", AccountID: "account.primary",
 				ConfigurationSHA256: contract.ConfigurationSHA256,
-				ReservedTurns:       2, ReservedTokens: 500, ExpiresAt: now.Add(30 * time.Minute),
+				ExpiresAt:           now.Add(30 * time.Minute),
 			}
 			requestSHA, err := domain.ExecutionPermissionRequestSHA256(request)
 			if err != nil {
@@ -243,8 +243,7 @@ func TestTaskExecutionStartAtomicRollbackReplaySingleUseAndRestart(t *testing.T)
 				started.RoleExecution.TaskID != task.ID ||
 				started.RoleExecution.ExecutionPermissionID != permission.ID ||
 				started.ProviderStartIntent.ExecutionPermissionID != permission.ID ||
-				started.ProviderStartIntent.ID != permission.OperationID ||
-				started.ProviderStartIntent.Budget != (domain.PlanningBudget{MaxTurns: request.ReservedTurns, MaxTokens: request.ReservedTokens}) {
+				started.ProviderStartIntent.ID != permission.OperationID {
 				t.Fatalf("Task execution facts are not atomically bound to permission: receipt=%#v started=%#v", receipt, started)
 			}
 

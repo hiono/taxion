@@ -189,7 +189,7 @@ func newValidPlanningAuthorization(t *testing.T, job Job, issuedAt time.Time) Pl
 			Reference: "snapshot_1",
 			SHA256:    strings.Repeat("c", 64),
 		},
-		Budget:   PlanningBudget{MaxTurns: 8, MaxTokens: 100000},
+
 		Deadline: issuedAt.Add(15 * time.Minute),
 	}
 	grant, err := NewPlanningAuthorization(job, job.IntakeProvenance.PrincipalID,
@@ -234,8 +234,6 @@ func TestPlanningAuthorizationRejectsScopeAndIdentityChanges(t *testing.T) {
 		{name: "read-only reference", mutate: func(a *PlanningAuthorization) { a.ReadOnlyBoundary.Reference = "" }},
 		{name: "read-only digest", mutate: func(a *PlanningAuthorization) { a.ReadOnlyBoundary.SHA256 = "not-a-digest" }},
 		{name: "additional effect", mutate: func(a *PlanningAuthorization) { a.PermittedEffects = append(a.PermittedEffects, "repository.write") }},
-		{name: "empty turn budget", mutate: func(a *PlanningAuthorization) { a.Budget.MaxTurns = 0 }},
-		{name: "empty token budget", mutate: func(a *PlanningAuthorization) { a.Budget.MaxTokens = 0 }},
 		{name: "command identity", mutate: func(a *PlanningAuthorization) { a.CommandID = "cmd_22222222222222222222222222222222" }},
 		{name: "grant identity", mutate: func(a *PlanningAuthorization) { a.ID = "plan_auth_other" }},
 		{name: "deadline", mutate: func(a *PlanningAuthorization) { a.Deadline = a.IssuedAt }},
@@ -305,7 +303,7 @@ func TestTasklessPlannerStartBindsActiveGrantAndProviderIntent(t *testing.T) {
 	if intent.RoleExecutionID != execution.ID || intent.PlanningAuthorizationID != grant.ID ||
 		intent.ProviderID != grant.ProviderID || intent.AccountID != grant.AccountID ||
 		intent.ConfigurationSHA256 != grant.ConfigurationSHA256 ||
-		intent.ReadOnlyBoundary != grant.ReadOnlyBoundary || intent.Budget != grant.Budget ||
+		intent.ReadOnlyBoundary != grant.ReadOnlyBoundary ||
 		!intent.Deadline.Equal(grant.Deadline) || intent.RequestSHA256 != strings.Repeat("d", 64) {
 		t.Fatalf("ProviderStartIntent = %#v", intent)
 	}
@@ -418,7 +416,7 @@ func TestPlanningAuthorizationRequiresTrustedIntake(t *testing.T) {
 			Reference: "snapshot_1",
 			SHA256:    strings.Repeat("c", 64),
 		},
-		Budget:   PlanningBudget{MaxTurns: 8, MaxTokens: 100000},
+
 		Deadline: job.CreatedAt.Add(15 * time.Minute),
 	}
 	if _, err := NewPlanningAuthorization(job, "human_123",
@@ -440,7 +438,7 @@ func TestPlanningAuthorizationCanReconstructExpiredIdempotentRetry(t *testing.T)
 			Reference: "snapshot_1",
 			SHA256:    strings.Repeat("c", 64),
 		},
-		Budget:   PlanningBudget{MaxTurns: 8, MaxTokens: 100000},
+
 		Deadline: issuedAt.Add(time.Minute),
 	}
 	retryAt := request.Deadline.Add(time.Minute)

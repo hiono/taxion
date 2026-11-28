@@ -23,18 +23,17 @@ const (
 	addPlanningResumeIntentCommandType     = "AddPlanningResumeIntent"
 )
 
-func (s *Store) AddPlanningTurnIntent(ctx context.Context, jobID string, expectedRevision uint64, roleExecutionID, providerSessionID, commandID, promptSHA256 string, reservedTokens uint64, principal auth.AuthenticatedPrincipal) (CommandReceipt, domain.PlanningTurnIntent, error) {
+func (s *Store) AddPlanningTurnIntent(ctx context.Context, jobID string, expectedRevision uint64, roleExecutionID, providerSessionID, commandID, promptSHA256 string, principal auth.AuthenticatedPrincipal) (CommandReceipt, domain.PlanningTurnIntent, error) {
 	if err := principal.Validate(); err != nil {
 		return CommandReceipt{}, domain.PlanningTurnIntent{}, fmt.Errorf("validate authenticated HUMAN Principal: %w", err)
 	}
 	request := struct {
 		JobID, RoleExecutionID, ProviderSessionID, CommandID, PromptSHA256 string
-		ReservedTokens                                                     uint64
 		PrincipalID                                                        string
-	}{jobID, roleExecutionID, providerSessionID, commandID, promptSHA256, reservedTokens, principal.PrincipalID()}
+	}{jobID, roleExecutionID, providerSessionID, commandID, promptSHA256, principal.PrincipalID()}
 	return persistPlanningFact(ctx, s, jobID, expectedRevision, commandID, addPlanningTurnIntentCommandType, request,
 		func(job domain.Job, now time.Time) (domain.PlanningTurnIntent, error) {
-			return domain.NewPlanningTurnIntent(job, roleExecutionID, principal.PrincipalID(), providerSessionID, commandID, promptSHA256, reservedTokens, now)
+			return domain.NewPlanningTurnIntent(job, roleExecutionID, principal.PrincipalID(), providerSessionID, commandID, promptSHA256, now)
 		},
 		func(job *domain.Job, fact domain.PlanningTurnIntent) {
 			job.PlanningTurnIntents = append(job.PlanningTurnIntents, fact)
@@ -49,19 +48,18 @@ func (s *Store) AddPlanningTurnIntent(ctx context.Context, jobID string, expecte
 		})
 }
 
-func (s *Store) AddPlanningTurnObservation(ctx context.Context, jobID string, expectedRevision uint64, turnID, commandID, status string, tokensUsed uint64, evidenceSHA256 string, reconcilesUnknown bool, principal auth.AuthenticatedPrincipal) (CommandReceipt, domain.PlanningTurnObservation, error) {
+func (s *Store) AddPlanningTurnObservation(ctx context.Context, jobID string, expectedRevision uint64, turnID, commandID, status, evidenceSHA256 string, reconcilesUnknown bool, principal auth.AuthenticatedPrincipal) (CommandReceipt, domain.PlanningTurnObservation, error) {
 	if err := principal.Validate(); err != nil {
 		return CommandReceipt{}, domain.PlanningTurnObservation{}, fmt.Errorf("validate authenticated HUMAN Principal: %w", err)
 	}
 	request := struct {
 		JobID, TurnID, CommandID, Status, EvidenceSHA256 string
-		TokensUsed                                       uint64
 		ReconcilesUnknown                                bool
 		PrincipalID                                      string
-	}{jobID, turnID, commandID, status, evidenceSHA256, tokensUsed, reconcilesUnknown, principal.PrincipalID()}
+	}{jobID, turnID, commandID, status, evidenceSHA256, reconcilesUnknown, principal.PrincipalID()}
 	return persistPlanningFact(ctx, s, jobID, expectedRevision, commandID, addPlanningTurnObservationCommandType, request,
 		func(job domain.Job, now time.Time) (domain.PlanningTurnObservation, error) {
-			return domain.NewPlanningTurnObservation(job, turnID, principal.PrincipalID(), commandID, status, tokensUsed, evidenceSHA256, reconcilesUnknown, now)
+			return domain.NewPlanningTurnObservation(job, turnID, principal.PrincipalID(), commandID, status, evidenceSHA256, reconcilesUnknown, now)
 		},
 		func(job *domain.Job, fact domain.PlanningTurnObservation) {
 			job.PlanningTurnObservations = append(job.PlanningTurnObservations, fact)
@@ -549,9 +547,6 @@ func (s *Store) AddProviderStartObservation(
 			)
 		},
 		func(job *domain.Job, fact domain.ProviderStartObservation) {
-			if job.ProviderLifecycleEnforcedFromRevision == 0 {
-				job.ProviderLifecycleEnforcedFromRevision = fact.CreatedRevision
-			}
 			job.ProviderStartObservations = append(job.ProviderStartObservations, fact)
 		},
 		func(job domain.Job) (domain.ProviderStartObservation, bool) {
@@ -584,9 +579,6 @@ func (s *Store) AddTaskProviderStartObservation(
 			)
 		},
 		func(job *domain.Job, fact domain.ProviderStartObservation) {
-			if job.ProviderLifecycleEnforcedFromRevision == 0 {
-				job.ProviderLifecycleEnforcedFromRevision = fact.CreatedRevision
-			}
 			job.ProviderStartObservations = append(job.ProviderStartObservations, fact)
 		},
 		func(job domain.Job) (domain.ProviderStartObservation, bool) {

@@ -39,13 +39,11 @@ taxion job authorize-planning \
   --read-only-mode snapshot \
   --read-only-reference snapshot_<id> \
   --read-only-sha256 <64-hex> \
-  --max-turns 8 \
-  --max-tokens 100000 \
   --deadline <RFC3339> \
   job_<id>
 ```
 
-OIDCで再認証し、認証済みHUMAN PrincipalがJobのIntakeProvenanceと一致することを検証します。grantはJob ID、原文依頼digest、Provider / account / configuration、repository URLとimmutable commit、read-only snapshotまたは明示文書のidentityとdigest、turn / token budget、deadlineへ束縛します。Provider configurationの秘密情報は入力・保存しません。
+OIDCで再認証し、認証済みHUMAN PrincipalがJobのIntakeProvenanceと一致することを検証します。grantはJob ID、原文依頼digest、Provider / account / configuration、repository URLとimmutable commit、read-only snapshotまたは明示文書のidentityとdigest、deadlineへ束縛します。Provider configurationの秘密情報は入力・保存しません。
 
 許可effectはrepository readに限定します。JobはDRAFTのままであり、JobApproval、実装Task、write、validation、commit、publish、任意network access、external mutation、Planner実行を許可しません。このコマンドはgrantを永続化するだけで、Providerを起動しません。
 
@@ -63,7 +61,7 @@ taxion job start-planning \
   job_<id>
 ```
 
-OIDCで再認証し、認証済みHUMAN Principal、DRAFT Job、grantの有効期間、Job / request digest、Provider / account / configuration、read-only context、permitted effects、budget、deadlineを再検証します。RoleExecutionはPLANNERとして作成し、TaskIDは持ちません。RoleExecution、Provider Start intent、Command receiptは同一SQLite transactionで保存します。
+OIDCで再認証し、認証済みHUMAN Principal、DRAFT Job、grantの有効期間、Job / request digest、Provider / account / configuration、read-only context、permitted effects、deadlineを再検証します。RoleExecutionはPLANNERとして作成し、TaskIDは持ちません。RoleExecution、Provider Start intent、Command receiptは同一SQLite transactionで保存します。
 
 このコマンドはProviderを起動しません。Provider呼出しはStart intentのcommit確認後にProvider Adapterが行う後続機能です。JobはDRAFTのままであり、Task、JobApproval、write、commit、publish、external mutationを許可しません。
 

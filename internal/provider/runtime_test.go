@@ -124,7 +124,7 @@ func (a *testAdapter) Send(_ context.Context, request TurnRequest, _ CredentialL
 	}
 	return TurnResult{
 		OperationID: request.OperationID, TurnID: request.TurnID, SessionID: request.SessionID,
-		ReceiptID: "receipt_2", Status: "COMPLETED", TokensUsed: 10,
+		ReceiptID: "receipt_2", Status: "COMPLETED",
 		Output: a.sendOutput, EvidenceSHA256: strings.Repeat("b", 64),
 	}, nil
 }
@@ -259,7 +259,7 @@ func validStartRequest() StartRequest {
 	return StartRequest{
 		OperationID: "provider_op_1", JobID: "job_1", RoleExecutionID: "role_1",
 		RequestSHA256: sha256Hex("request"), PromptSHA256: sha256Hex(prompt),
-		Prompt: prompt, MaxTurns: 3, MaxTokens: 100, Deadline: time.Now().UTC().Add(time.Hour),
+		Prompt: prompt, Deadline: time.Now().UTC().Add(time.Hour),
 	}
 }
 
@@ -267,7 +267,7 @@ func validTurnRequest() TurnRequest {
 	prompt := "Continue planning"
 	return TurnRequest{
 		OperationID: "provider_turn_1", TurnID: "turn_1", SessionID: "session_1",
-		PromptSHA256: sha256Hex(prompt), Prompt: prompt, MaxTokens: 20,
+		PromptSHA256: sha256Hex(prompt), Prompt: prompt,
 		Deadline: time.Now().UTC().Add(time.Hour),
 	}
 }
@@ -532,26 +532,6 @@ func TestRuntimeSendPreservesUnknownAndRejectsCredentialBearingOutput(t *testing
 	}
 	if adapter.sendCalls != 2 || broker.closed != 2 {
 		t.Fatalf("Send calls / credential lease: adapter=%d closed=%d", adapter.sendCalls, broker.closed)
-	}
-}
-
-func TestRuntimePreservesReportedUsageWhenTurnExceedsBudget(t *testing.T) {
-	adapter := newTestAdapter(CapabilitySendIdempotency)
-	adapter.sendResult = TurnResult{
-		Status: "FAILED", TokensUsed: 25, ReceiptID: "receipt_2",
-		EvidenceSHA256: strings.Repeat("b", 64),
-	}
-	broker := &testBroker{secret: []byte("runtime-test-secret")}
-	runtime, err := newTestRuntime(adapter, broker)
-	if err != nil {
-		t.Fatalf("NewRuntime: %v", err)
-	}
-	result, err := runtime.Send(context.Background(), validTurnRequest())
-	if err != nil {
-		t.Fatalf("Send over-budget FAILED result: %v", err)
-	}
-	if result.Status != "FAILED" || result.TokensUsed != 25 || result.Output != "" {
-		t.Fatalf("over-budget usage was not preserved safely: %#v", result)
 	}
 }
 
