@@ -39,7 +39,8 @@ Taxion は、最初から完全な要求仕様や実装手順を利用者へ要�
 - `taxion dev provider run --provider opencode --job <local-job-id>`：未認証のローカルDRAFT Jobに限り、依頼と過去の会話を自然言語でProviderへ渡し、Controller / Orchestrator間の記録として同じJobへ保存します。`--prompt`を省略するとJobの依頼を使います。各実行は新しいSessionを開始し、履歴のコピーで文脈を再構成します。Provider失敗時も送信前に保存した入力は残ります。取得した応答は保存してからProviderを終了します。認可済みJob実行やAgent間自動配送ではありません。
 - 上記に `--consult` を付けると、主Agentの質問を別Sessionへ渡し、その回答を同じ主Agent Sessionへ戻します。質問・回答はOrchestratorによる記録として返信関係をつけて順に保存し、失敗時も保存済みの内容は残ります。質問を必ず一回求める開発用の実験であり、RoleExecution間の配送や終了後のSession再開ではありません。
 - 上記に `--review` を付けると、Plannerの計画をCoderへ、CoderのテキストをReviewerへ渡し、指摘を同じCoder Sessionへ戻した後、同じReviewer Sessionで再レビューします。`--consult` も付けると、Coderに質問を一つ求め、同じPlanner Sessionの回答を同じCoder Sessionへ戻してから作業を続けます。各応答はOrchestratorの記録として順に保存します。既定ではツール権限要求を拒否します。
-- `--review --allow-coder-tools` はCoderのツール権限要求を許可し、作業ディレクトリのファイルを直接編集できるようにします。**OS隔離はなく、Coderはディレクトリ外やネットワークにもアクセスできます。** 失敗時も変更は残り、終了後の子プロセス停止は保証されません。PlannerとReviewerのツール権限要求は引き続き拒否しますが、Provider自体もOSで隔離されていません。Reviewerが確認するのはCoderの報告テキストであり、実際の変更を独立に検証したことにはなりません。正式なJob実行ではありません。
+- `--review --allow-coder-tools` はCoderのツール権限要求を許可し、作業ディレクトリのファイルを直接編集できるようにします。**OS隔離はなく、Coderはディレクトリ外やネットワークにもアクセスできます。** 失敗時も変更は残り、終了後の子プロセス停止は保証されません。PlannerとReviewerのツール権限要求は引き続き拒否しますが、Provider自体もOSで隔離されていません。正式なJob実行ではありません。
+- Gitリポジトリでは、Coder開始時のcommitとの差分と新しい未追跡ファイルを、初回レビューと再レビューの際にReviewerのProviderへ送ります。作業前からの管理済み変更も含みます。作業前からの未追跡パス、無視された未追跡ファイル、作業ディレクトリ外、バイナリとsubmoduleの内容は含みません。既存の未追跡ファイルを別名にコピーした場合は区別できません。作業領域は取得中・取得後にも変更されうるため、この差分は完全な独立検証を保証しません。Gitまたは開始時のcommitが利用できない場合は警告してテキストのみをレビューします。そのほかの取得エラーやGit出力が8 MiBを超えた場合は終了し、変更は残ります。
 - `taxion job show <job-id>`：Jobの現在の内容をJSONで表示します。
 - `taxion job list`：保存済みJobを一覧表示します。
 

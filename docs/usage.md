@@ -77,7 +77,9 @@ taxion dev job create --request "Local untrusted DRAFT for development."
 
 作成したJobの依頼をProviderへ渡す場合、`taxion dev provider run --job <job-id>`を使います。別の指示を渡す場合は`--prompt`を指定します。これは認可済みJobの実行ではありません。
 
-`--review --allow-coder-tools`を指定すると、Coderのツール権限要求を許可し、作業ディレクトリで直接編集させます。OS隔離はなく、ディレクトリ外やネットワークにもアクセス可能です。失敗時も変更は残り、終了後の子プロセス停止は保証されません。PlannerとReviewerのツール権限要求は拒否しますが、Provider自体もOSで隔離されていません。ReviewerはCoderの報告テキストを確認し、実際の変更を独立に検証しません。
+`--review --allow-coder-tools`を指定すると、Coderのツール権限要求を許可し、作業ディレクトリで直接編集させます。OS隔離はなく、ディレクトリ外やネットワークにもアクセス可能です。失敗時も変更は残り、終了後の子プロセス停止は保証されません。PlannerとReviewerのツール権限要求は拒否しますが、Provider自体もOSで隔離されていません。
+
+Gitリポジトリでは、Coder開始時のcommitとの差分と新しい未追跡ファイルをReviewerのProviderに送ります。作業前からの管理済み変更も含みます。作業前からの未追跡パスと無視された未追跡ファイル、作業ディレクトリ外、バイナリとsubmoduleの内容は含みません。既存の未追跡ファイルを別名にコピーした場合は区別できません。作業領域は取得中・取得後にも変更される可能性があるため、完全な独立検証は保証されません。Gitまたは開始時のcommitが利用できない場合は警告してテキストのみをレビューします。そのほかの取得エラーやGit出力が8 MiBを超えた場合は終了し、変更は残ります。
 
 ## Jobの表示
 
