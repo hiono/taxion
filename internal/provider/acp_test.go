@@ -288,6 +288,27 @@ func TestACPAdapterUsesOneProcessPerRoleAndDeniesToolRequests(t *testing.T) {
 	}
 }
 
+func TestACPAdapterAllowsExplicitToolRequestsWithoutReadOnlyCapability(t *testing.T) {
+	t.Setenv("TAXION_ACP_HELPER", "1;require-allow=1")
+	adapter, err := NewACPAdapter(ACPConfig{
+		Command: os.Args[0], Args: []string{"-test.run=TestACPHelperProcess"},
+		WorkingDirectory: t.TempDir(), Identity: testIdentity(),
+		Environment: []string{"TAXION_ACP_HELPER"}, AllowToolRequests: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer adapter.Close()
+	capabilities, err := adapter.Capabilities(context.Background())
+	if err != nil || capabilities.Has(CapabilityReadOnlyContextEnforcement) {
+		t.Fatalf("capabilities = %#v, error = %v", capabilities, err)
+	}
+	_, err = adapter.Start(context.Background(), newACPTestStartRequest("start", "role_coder_tools"), nil)
+	if err != nil {
+		t.Fatalf("Start with allowed tool request: %v", err)
+	}
+}
+
 func TestACPAdapterKeepsCompletedOutputWhenUsageIsMissing(t *testing.T) {
 	t.Setenv("TAXION_ACP_HELPER", "1;usage=missing")
 	adapter := newACPTestAdapter(t)
