@@ -23,6 +23,7 @@ var (
 	ErrNotFound            = errors.New("job not found")
 	ErrJobExists           = errors.New("job already exists")
 	ErrIdempotencyConflict = errors.New("idempotency key reused with different content")
+	ErrRevisionConflict    = errors.New("Job revision conflict")
 	ErrIntegrity           = errors.New("job integrity check failed")
 	ErrUnsupportedSchema   = errors.New("unsupported database schema version")
 )
