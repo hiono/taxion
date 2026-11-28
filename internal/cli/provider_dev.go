@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -21,7 +22,7 @@ import (
 )
 
 func loginACPProvider(ctx context.Context, args []string, stdout, stderr io.Writer) int {
-	flags := flag.NewFlagSet("taxion dev provider login", flag.ContinueOnError)
+	flags := flag.NewFlagSet("taxion provider login", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	command := flags.String("command", "copilot", "Copilot CLI executable")
 	if err := flags.Parse(args); err != nil || flags.NArg() != 0 {
@@ -53,10 +54,15 @@ func loginACPProvider(ctx context.Context, args []string, stdout, stderr io.Writ
 	return 0
 }
 
-func runACPProvider(ctx context.Context, args []string, stdout, stderr io.Writer) int {
-	flags := flag.NewFlagSet("taxion dev provider run", flag.ContinueOnError)
+func runACPProvider(ctx context.Context, args []string, stdout, stderr io.Writer, product bool) int {
+	name := "taxion dev provider run"
+	if product {
+		name = "taxion run"
+	}
+	flags := flag.NewFlagSet(name, flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	prompt := flags.String("prompt", "", "Natural-language prompt (defaults to the local Job request)")
+	requestText := flags.String("request", "", "Natural-language request for a new local Job")
 	backend := flags.String("provider", "copilot", "Provider: copilot or opencode")
 	command := flags.String("command", "", "Provider CLI executable")
 	workingDirectory := flags.String("working-directory", ".", "Provider working directory")
@@ -69,9 +75,26 @@ func runACPProvider(ctx context.Context, args []string, stdout, stderr io.Writer
 	if err := flags.Parse(args); err != nil {
 		return 2
 	}
+	if product {
+		if flags.NArg() != 0 || strings.TrimSpace(*requestText) == "" || *localJobID != "" ||
+			*prompt != "" || *command != "" || *review || !*allowTools || *timeout <= 0 ||
+			*backend != "copilot" {
+			fmt.Fprintln(stderr, "usage: taxion run --request \"...\" --allow-coder-tools [--consult] [--provider copilot] [--working-directory .]")
+			return 2
+		}
+		*prompt = *requestText
+		*review = true
+		if runtime.GOOS != "linux" {
+			fmt.Fprintln(stderr, "taxion run currently supports Linux only")
+			return 1
+		}
+	} else if *requestText != "" {
+		fmt.Fprintln(stderr, "--request is only supported by taxion run")
+		return 2
+	}
 	if flags.NArg() != 0 || (strings.TrimSpace(*prompt) == "" && *localJobID == "") || *timeout <= 0 ||
 		(*backend != "copilot" && *backend != "opencode") ||
-		((*consult || *review) && *localJobID == "") || (*allowTools && !*review) {
+		(!product && (*consult || *review) && *localJobID == "") || (*allowTools && !*review) {
 		fmt.Fprintln(stderr, "usage: taxion dev provider run [--prompt \"...\"] [--provider copilot|opencode] [--job <local-job-id> [--consult] [--review [--allow-coder-tools]]] [--timeout 10m]")
 		return 2
 	}
@@ -128,7 +151,7 @@ func runACPProvider(ctx context.Context, args []string, stdout, stderr io.Writer
 	promptText := *prompt
 	var communication *controller.CommunicationController
 	var question controller.CommunicationOutcome
-	if *localJobID != "" {
+	if *localJobID != "" || product {
 		dbPath, err := resolveStorePath(*storePath)
 		if err != nil {
 			return report(stderr, err)
@@ -138,6 +161,25 @@ func runACPProvider(ctx context.Context, args []string, stdout, stderr io.Writer
 			return report(stderr, err)
 		}
 		defer database.Close()
+		if product {
+			id, idErr := domain.NewID("job")
+			if idErr != nil {
+				return report(stderr, idErr)
+			}
+			commandID, idErr := domain.NewID("cmd")
+			if idErr != nil {
+				return report(stderr, idErr)
+			}
+			job, createErr := domain.NewDraftJob(id, *requestText, time.Now().UTC())
+			if createErr != nil {
+				return report(stderr, createErr)
+			}
+			if _, createErr = database.CreateLocalDraftJob(ctx, job, commandID); createErr != nil {
+				return report(stderr, createErr)
+			}
+			*localJobID = id
+			fmt.Fprintf(stdout, "Local Job ID: %s\n", id)
+		}
 		job, err := database.GetJob(ctx, *localJobID)
 		if err != nil {
 			return report(stderr, err)
@@ -193,7 +235,21 @@ func runACPProvider(ctx context.Context, args []string, stdout, stderr io.Writer
 	if *backend == "opencode" {
 		config.RequiredModel = "opencode/big-pickle"
 	}
-	adapter, err := provider.NewACPAdapter(config)
+	textConfig := config
+	if product {
+		fmt.Fprintln(stderr, "Planner and Reviewer use text-only sessions; Provider processes run on the host without OS isolation.")
+		textDir, err := os.MkdirTemp("", "taxion-text-")
+		if err != nil {
+			return report(stderr, err)
+		}
+		defer os.RemoveAll(textDir)
+		textConfig.WorkingDirectory = textDir
+		textConfig.Args = append(append([]string(nil), cliArgs...), "--available-tools=__taxion_no_tools__", "--disable-builtin-mcps", "--no-custom-instructions")
+		textConfig.Identity.ConfigurationSHA256 = sha256Hex(strings.Join([]string{
+			textConfig.Command, strings.Join(textConfig.Args, " "), textConfig.WorkingDirectory, textConfig.HomeDirectory,
+		}, "\n"))
+	}
+	adapter, err := provider.NewACPAdapter(textConfig)
 	if err != nil {
 		return report(stderr, err)
 	}
@@ -283,7 +339,11 @@ func runACPProvider(ctx context.Context, args []string, stdout, stderr io.Writer
 			if err := adapter.Close(); err != nil {
 				return report(stderr, fmt.Errorf("%s process did not close cleanly", cliName))
 			}
-			fmt.Fprintln(stdout, "Local Job conversation saved (not an authorized Job execution)")
+			if product {
+				fmt.Fprintln(stdout, "Local collaboration saved. Review the feedback above; no Job completion was recorded.")
+			} else {
+				fmt.Fprintln(stdout, "Local Job conversation saved (not an authorized Job execution)")
+			}
 			return 0
 		}
 		if err := record("Main agent question:", result.Content); err != nil {
@@ -335,7 +395,7 @@ func runACPProvider(ctx context.Context, args []string, stdout, stderr io.Writer
 	return 0
 }
 
-func reviewLocalJob(ctx context.Context, adapter, coderAdapter *provider.ACPAdapter, request provider.StartRequest, planner, jobContext, plan, workingDir string, consult, allowTools bool, stderr io.Writer, record func(string, string) error) error {
+func reviewLocalJob(ctx context.Context, adapter, coderAdapter *provider.ACPAdapter, request provider.StartRequest, planner, jobContext, plan, workingDir string, consult, allowTools bool, stderr io.Writer, record func(string, string) error) (resultErr error) {
 	prompt := "Act as the coder. Work on this request using the plan; provide your complete work as text."
 	finish := "Continue and provide your complete work as text."
 	revise := "Consider the review below. Revise your work only where warranted and provide the complete result."
@@ -346,6 +406,7 @@ func reviewLocalJob(ctx context.Context, adapter, coderAdapter *provider.ACPAdap
 		if err != nil {
 			return err
 		}
+		defer func() { resultErr = errors.Join(resultErr, baseline.close()) }()
 		if baseline == nil {
 			fmt.Fprintln(stderr, "Git workspace diff unavailable; Reviewer cannot inspect actual file changes.")
 		}

@@ -1,5 +1,24 @@
 # CLI使用方法
 
+## ローカル協調実行
+
+ローカル協調実行はLinuxで利用できます。Copilot CLI、Git、`diff`が必要です。最初にTaxion専用プロファイルへログインします。
+
+```sh
+taxion provider login
+taxion run --request "依頼内容" --working-directory /path/to/work --allow-coder-tools
+```
+
+Plannerの計画、Coderの作業、Reviewerの指摘、Coderの修正、再レビューを順に実行し、会話をローカルJobに保存します。表示されたJob IDは `taxion job show <job-id>` で参照できます。`--store` で保存先、`--timeout` で実行期限を変更できます。
+
+`--consult` を指定すると、Coderに作業前の質問を一つ求め、同じPlanner sessionの回答をCoderへ返します。
+
+PlannerとReviewerは文章専用の設定で起動し、Coderの作業報告とGit差分をReviewerに渡します。ProviderプロセスはOS隔離されず、Providerのツール制御を信頼する必要があります。Coderはホストで実行され、指定ディレクトリ外やネットワークにもアクセスできます。`--allow-coder-tools` はこの実行を明示するために必須です。
+
+差分はCoder開始前の作業ファイルとindexを基準に取得し、既存の未追跡ファイルへの変更も含みます。無視された未追跡ファイル、作業ディレクトリ外、バイナリとsubmoduleの内容は含みません。変更・削除された行や別名にコピーされた内容は送信されるため、秘密情報を含む作業領域には注意してください。差分は固定された成果物ではなく、他プロセスによって変更される可能性があります。Gitリポジトリでない場合など、Gitの確認ができない場合は警告してテキストだけをレビューします。未解決の競合、8 MiBを超える変更ファイルや差分などの取得エラーでは終了します。比較用の一時ファイルは所有者のみが読めるディレクトリに置いて削除しますが、強制終了時には残ることがあります。失敗時も保存済みの会話とファイル変更は残り、自動再開や終了後の子プロセス停止は保証されません。
+
+この経路はOIDC認証、JobApproval、操作単位の許可やJob完了を記録しません。会話の一巡はレビュー合格や作業完了の保証ではありません。
+
 ## OIDC認証
 
 Trusted Job作成では、管理者が設定したOIDC issuer / client ID / audienceを使用します。Identity Providerにはloopback redirect URIを登録してください。
@@ -114,4 +133,4 @@ SQLite databaseとWALファイルは秘密情報を含む可能性があるた�
 
 ## 現在の制限
 
-本段階ではOIDC認証済みCLIからのDRAFT Job作成、PlanningAuthorizationの発行・永続化、Taskless PLANNER RoleExecutionとProvider Start intentの永続化までを提供します。HTTP ingress、Provider Adapterによる実起動、turn / effect / resume、JobApproval、Job完了は未実装です。grant発行の成功をplanning実行やJob完遂の証拠として扱いません。
+Trusted JobではOIDC認証済みDRAFT Jobの作成、PlanningAuthorizationの発行、Taskless PLANNERのStart intentの保存までを提供します。Start intentはProviderを起動しません。ローカル協調実行はTrusted Jobの実行・完了や中断後の自動再開ではありません。

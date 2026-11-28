@@ -14,6 +14,8 @@ Job、Task、RoleExecution、通信、Provider実行、Worktree、成果・証�
 
 **JobAggregateを、Jobの意図、承認、協調、実行事実、成果および証拠の唯一のドメイン正本とします。**
 
+ローカルの `taxion run` は原文依頼と会話をJobに保存しますが、Trusted Jobの承認、RoleExecution、Provider operation、Worktree所有権またはJob完了を記録しません。以下のそれらに関する要件はTrusted Jobに適用します。
+
 ### Job model
 
 - Jobは利用者の依頼、目的、制約、承認、協調履歴、実行状態、成果、証拠を保持する永続的な作業単位です。最初のPlanner呼出し前にDRAFTとして作成し、原文依頼を保存します。

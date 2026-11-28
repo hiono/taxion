@@ -27,6 +27,9 @@ Taxion は、最初から完全な要求仕様や実装手順を利用者へ要�
 
 ## 現在利用できる機能
 
+- `taxion provider login`：Copilot CLIをTaxion専用のローカルプロファイルへログインします。
+- `taxion run --request "..." --allow-coder-tools --working-directory <path>`：Linux上でPlanner、Coder、Reviewerを順に実行し、レビュー後にCoderへ修正を依頼して再レビューします。Copilot CLI、Git、`diff`が必要です。PlannerとReviewerには文章と差分を渡し、ツールを使わない設定で起動します。Coderのホスト実行は明示指定が必要です。ProviderとCoderはOS隔離されず、Coderは指定ディレクトリ外やネットワークにもアクセスできます。
+- ローカル実行はOIDC認証や操作ごとの許可を要求せず、会話をローカルJobに保存します。Trusted Jobの承認・完了、自動復旧、対象の固定、実行中の排他を提供するものではありません。失敗時の変更と保存済みの会話は残り、終了後の子プロセス停止は保証されません。
 - `taxion auth login`：OIDC Authorization Code Flow with PKCEでHUMAN Principalを検証します。ログインSessionやtokenは保存しません。
 - `taxion job create --request "..."`：OIDC認証後、原文依頼とIntakeProvenanceを同一Job transactionで保存したDRAFT Jobを作成します。
 - `taxion job authorize-planning ... <job-id>`：OIDC再認証後、DRAFT Jobに束縛したbounded read-only PlanningAuthorizationを発行・永続化します。
@@ -40,7 +43,7 @@ Taxion は、最初から完全な要求仕様や実装手順を利用者へ要�
 - 上記に `--consult` を付けると、主Agentの質問を別Sessionへ渡し、その回答を同じ主Agent Sessionへ戻します。質問・回答はOrchestratorによる記録として返信関係をつけて順に保存し、失敗時も保存済みの内容は残ります。質問を必ず一回求める開発用の実験であり、RoleExecution間の配送や終了後のSession再開ではありません。
 - 上記に `--review` を付けると、Plannerの計画をCoderへ、CoderのテキストをReviewerへ渡し、指摘を同じCoder Sessionへ戻した後、同じReviewer Sessionで再レビューします。`--consult` も付けると、Coderに質問を一つ求め、同じPlanner Sessionの回答を同じCoder Sessionへ戻してから作業を続けます。各応答はOrchestratorの記録として順に保存します。既定ではツール権限要求を拒否します。
 - `--review --allow-coder-tools` はCoderのツール権限要求を許可し、作業ディレクトリのファイルを直接編集できるようにします。**OS隔離はなく、Coderはディレクトリ外やネットワークにもアクセスできます。** 失敗時も変更は残り、終了後の子プロセス停止は保証されません。PlannerとReviewerのツール権限要求は引き続き拒否しますが、Provider自体もOSで隔離されていません。正式なJob実行ではありません。
-- Gitリポジトリでは、Coder開始時のcommitとの差分と新しい未追跡ファイルを、初回レビューと再レビューの際にReviewerのProviderへ送ります。作業前からの管理済み変更も含みます。作業前からの未追跡パス、無視された未追跡ファイル、作業ディレクトリ外、バイナリとsubmoduleの内容は含みません。既存の未追跡ファイルを別名にコピーした場合は区別できません。作業領域は取得中・取得後にも変更されうるため、この差分は完全な独立検証を保証しません。Gitまたは開始時のcommitが利用できない場合は警告してテキストのみをレビューします。そのほかの取得エラーやGit出力が8 MiBを超えた場合は終了し、変更は残ります。
+- Gitリポジトリでは、Coder開始前の作業ファイルとindexを基準とした差分をReviewerのProviderへ送ります。既存の未追跡ファイルへの変更も含みます。無視された未追跡ファイル、作業ディレクトリ外、バイナリとsubmoduleの内容は含みません。変更・削除された行や別名にコピーされた内容は送信されるため、秘密情報を含む作業領域には注意してください。作業領域は取得中・取得後にも変更されうるため、差分は完全な独立検証を保証しません。Gitリポジトリでない場合など、Gitの確認ができない場合は警告してテキストのみをレビューします。未解決の競合、8 MiBを超える変更ファイルや差分などの取得エラーでは終了し、変更は残ります。比較用の一時ファイルは所有者のみが読めるディレクトリに置いて削除しますが、強制終了時には残ることがあります。
 - `taxion job show <job-id>`：Jobの現在の内容をJSONで表示します。
 - `taxion job list`：保存済みJobを一覧表示します。
 
@@ -74,7 +77,7 @@ JobはSQLiteへtransactionで保存し、Command receiptとpayload hashを照合
 
 UnixではSQLiteを開く前にデータベースと既存のjournalファイルの権限を所有者のみの読み書きに制限します。保存先には、ほかのユーザーがファイルを置き換えられないディレクトリを指定してください。
 
-PlanningAuthorizationの発行・永続化と、Taskless PLANNERのRoleExecution / Provider Start intentの記録まで利用できます。開発用ProviderスモークテストではCopilot CLIの実起動と応答取得を確認できますが、結果はJobへ結び付かず、承認済みJobのPlanner / Coder実行ではありません。Provider turn / effect / resume、JobContractの承認、Coder / Reviewer実行、Handoff、Job完了は未実装です。Start intentの記録をProvider実行やplanning完了の証拠として扱いません。機能の実装状態はコード、テスト、対象HEADのCIによって確認します。
+Trusted JobではPlanningAuthorizationの発行・永続化と、Taskless PLANNERのRoleExecution / Provider Start intentの記録まで利用できます。Start intentの記録はProvider実行やplanning完了の証拠ではありません。ローカル実行はTrusted JobのPlanner / Coder実行やJob完了を表しません。
 
 ## 仕様・設計・受入れ
 

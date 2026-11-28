@@ -12,6 +12,10 @@ Taxionは、人間の曖昧な思考を対話で整理し、実行可能な計�
 
 ## 2. Normative principles
 
+本節以降のJobApproval、PlanningAuthorization、Execution Permission、WorktreeおよびH1〜H8はTrusted Jobの契約です。ローカルの `taxion run` は別の協調実行として扱い、これらの実装や受入れを完了したとは主張しません。
+
+ローカル実行はLinux上でCopilot CLIを使用します。利用者が自然言語の依頼を渡し、Coderのホスト実行を明示します。PlannerとReviewerは文章専用のProvider sessionで、Coderは指定した作業ディレクトリを使用します。ProviderプロセスとCoderはOS隔離されません。会話はローカルJobに保存しますが、JobApproval、operation単位の許可、Job完了の記録は作成しません。中断後の自動再開や不明な実行の再送は行いません。
+
 1. 利用者は最初から完全な要求仕様や実装手順を提示する必要はない。
 2. 目的、制約、受入条件、確定事項、仮定、未解決事項を区別する。
 3. Jobを利用者の意図、承認、協調、実行事実、成果、証拠の継続単位とする。
@@ -23,7 +27,7 @@ Taxionは、人間の曖昧な思考を対話で整理し、実行可能な計�
 9. 製品受入れは検証可能な成果と実Job完遂で判断する。
 10. Agent Harnessの能力要求H1〜H8を満たす。能力をProvider / Runtimeへ委譲する場合も、対応構成と実動作の証拠を確認する。
 11. Agent間の質問・回答は通常のJobMessageとして扱い、通信専用の認可を要求しません。
-12. Jobの依頼主体は認証済みHUMAN Principalとし、Ingress Clientは人間の依頼を伝達します。Execution AgentはJobの目的と要求能力に基づいてTaxionが選択します。
+12. Trusted Jobの依頼主体は認証済みHUMAN Principalとし、Ingress Clientは人間の依頼を伝達します。Execution AgentはJobの目的と要求能力に基づいてTaxionが選択します。
 
 ## 3. Actors and responsibilities
 
@@ -182,6 +186,8 @@ JobAggregateの変更はexpected revisionとstable idempotency identityを持つ
 Observation、Conformance、Admission、Execution Permissionは別の責務とする。観測や受入れの成功から実行権限を推論しない。
 
 ## 7. Worktree and concurrency
+
+この節はTrusted Jobに適用します。ローカル実行にはWorktreeの作成、排他や隔離はありません。
 
 - Coding executionはGit repository内で行う。
 - TaskごとにGit Worktreeを割り当てる。

@@ -12,9 +12,11 @@ Agentへ静的な操作許可一覧だけを与えると、承認済みJob内の
 
 ## Decision
 
-**Taxionの権限は、認証済みPrincipalによるJobの明示的承認を基礎とし、Controllerと実行基盤が承認済みscopeおよび禁止副作用を強制します。**
+**Trusted Jobの権限は、認証済みPrincipalによるJobの明示的承認を基礎とし、Controllerと実行基盤が承認済みscopeおよび禁止副作用を強制します。**
 
 認証と認可を分離します。情報交換自体に独立したauthorityを追加せず、DRAFT planningはADR-505 PlanningAuthorization、承認後のProvider operationはADR-507 Execution Permissionで認可します。Agentは承認済みJobの範囲内で作業手段を選択できますが、Job scopeの拡張、禁止副作用、未承認の不可逆操作を自己判断で許可できません。
+
+ローカルの `taxion run` はTrusted Jobではなく、利用者の明示的な起動とCoderのホスト実行指定に基づく協調実行です。PlannerとReviewerは文章専用とし、Providerはホストで動作します。JobApprovalやoperation単位の許可は発行せず、Trusted Jobと同じ制御・隔離があるとは扱いません。
 
 ## Consequences
 

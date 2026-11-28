@@ -14,6 +14,8 @@ Jobの承認、対象の観測、契約への適合評価、次工程への登�
 
 **Execution Permissionは、現在有効なJobApprovalと承認済みscopeに束縛した単一operationの実行許可とします。**
 
+この判断はTrusted Jobに適用します。ローカルの `taxion run` は利用者の起動とCoderの明示指定に基づき、operationごとのExecution Permissionを発行しません。
+
 Execution Permissionはeffect、resource、Provider identityおよび実行要求に対して発行し、副作用の直前に再検証します。Observation、Conformance、Admissionはそれぞれ独立した事実・評価として扱い、いずれもExecution Permissionを代替しません。JobMessageの保存・参照・転送や自然言語の質問・回答にはExecution Permissionを要求しません。JobApproval前のDRAFT Plannerによるbounded read-only Provider turnには、ADR-505のPlanningAuthorizationを適用します。JobApproval後のProvider Send / Turnを含むProvider operationや外部副作用には、Execution Permissionを適用します。禁止された副作用と、人間承認を要する操作は通常のExecution Permissionで許可しません。
 
 ## Consequences

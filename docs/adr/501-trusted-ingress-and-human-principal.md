@@ -14,6 +14,8 @@ Job intakeとJobApprovalには認証済みhuman actorが必要です。自然言
 
 **人間の認証には管理者が設定したOpenID Connect（OIDC）issuerを使用し、Trusted Ingressだけが検証済みHUMAN Principalを生成します。**
 
+この判断はTrusted Jobに適用します。ローカルの `taxion run` はOIDC認証を行わず、Trusted JobやJobApprovalを生成しません。
+
 ### Authentication
 
 - 標準フローはOIDC Authorization Code Flow with PKCEとします。
