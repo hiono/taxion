@@ -242,7 +242,7 @@ func TestACPAdapterUsesOneProcessPerRoleAndDeniesToolRequests(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
-	if result.SessionID != "fake-session" || result.OperationID != start.OperationID || !validSHA256(result.EvidenceSHA256) {
+	if result.SessionID == "fake-session" || result.SessionID != acpReceiptID("acp-session-", start.RoleExecutionID+":"+start.OperationID) || result.OperationID != start.OperationID || !validSHA256(result.EvidenceSHA256) {
 		t.Fatalf("unexpected Start result: %#v", result)
 	}
 
@@ -345,6 +345,58 @@ func TestACPAdapterReportsOverBudgetUsageAsFailed(t *testing.T) {
 	}
 	if turn.Status != "FAILED" || turn.TokensUsed != 15 || turn.Output != "" {
 		t.Fatalf("over-budget turn = %#v, want failed with actual usage and no output", turn)
+	}
+}
+
+func TestACPAdapterDoesNotPublishStartReceiptWhenInitialTurnFails(t *testing.T) {
+	t.Setenv("TAXION_ACP_HELPER", "1")
+	adapter := newACPTestAdapter(t)
+	defer adapter.Close()
+	request := newACPTestStartRequest("operation_start_initial_budget", "role_execution_initial_budget")
+	request.MaxTokens = 5
+	result, err := adapter.Start(context.Background(), request, nil)
+	var operationErr *OperationError
+	if !errors.As(err, &operationErr) || operationErr.Class != FailureDefinitive || operationErr.Code != OperationCodeBudgetExceeded {
+		t.Fatalf("Start error = %v, want definitive budget_exceeded", err)
+	}
+	if result.SessionID != "" || result.ReceiptID != "" {
+		t.Fatalf("failed initial turn published a Start receipt: %#v", result)
+	}
+	adapter.mu.Lock()
+	_, cached := adapter.byOp[request.OperationID]
+	adapter.mu.Unlock()
+	if cached {
+		t.Fatal("failed initial turn was cached as a successful Start operation")
+	}
+}
+
+func TestACPAdapterAssignsUniqueIDsWhenPeerReusesSessionID(t *testing.T) {
+	t.Setenv("TAXION_ACP_HELPER", "1")
+	adapter := newACPTestAdapter(t)
+	defer adapter.Close()
+	requests := []StartRequest{
+		newACPTestStartRequest("operation_start_unique_1", "role_execution_unique_1"),
+		newACPTestStartRequest("operation_start_unique_2", "role_execution_unique_2"),
+	}
+	results := make(chan StartResult, len(requests))
+	errorsFound := make(chan error, len(requests))
+	for _, request := range requests {
+		request := request
+		go func() {
+			result, err := adapter.Start(context.Background(), request, nil)
+			results <- result
+			errorsFound <- err
+		}()
+	}
+	first := <-results
+	firstErr := <-errorsFound
+	second := <-results
+	secondErr := <-errorsFound
+	if firstErr != nil || secondErr != nil {
+		t.Fatalf("concurrent Start errors = %v, %v", firstErr, secondErr)
+	}
+	if first.SessionID == "" || second.SessionID == "" || first.SessionID == second.SessionID {
+		t.Fatalf("adapter-owned Session IDs are not unique: %q, %q", first.SessionID, second.SessionID)
 	}
 }
 
@@ -1422,7 +1474,7 @@ func (a *acpTestPermissionAuthorizer) Authorize(_ context.Context, request ACPTo
 	if request.OperationID != "operation_start_1" || request.JobID != "job_1" ||
 		request.RoleExecutionID != "role_execution_1" || request.TaskID != "task_1" ||
 		request.ExecutionPermissionID != "permission_1" || request.WorktreeAssignmentID != "worktree_1" ||
-		request.WorktreePath == "" || request.SessionID != "fake-session" ||
+		request.WorktreePath == "" || request.SessionID != acpReceiptID("acp-session-", request.RoleExecutionID+":"+request.OperationID) ||
 		request.RequestSHA256 != strings.Repeat("a", 64) || request.ProviderIdentity.ProviderID != "provider.test" ||
 		!strings.Contains(string(request.ToolCall), "git status") {
 		return errors.New("ACP permission request did not preserve its exact Task authority")
@@ -1488,40 +1540,58 @@ func TestACPProcessBoundsQueuedUpdateBytes(t *testing.T) {
 	process.beginUpdateConsumer()
 	chunk := strings.Repeat("x", 2*1024*1024)
 	notification := `{"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"` + chunk + `"}}}}` + "\n"
-	go process.read(strings.NewReader(strings.Repeat(notification, 5)))
+	frameBytes := int64(len(notification))
+	frameCount := int(maxACPQueuedUpdateBytes/frameBytes) + 1
+	go process.read(strings.NewReader(strings.Repeat(notification, frameCount)))
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	updates := 0
 	for {
-		if err := process.drainUpdates(ctx, func(json.RawMessage) error {
-			updates++
-			return nil
-		}); err != nil {
-			t.Fatalf("drainUpdates: %v", err)
+		if len(process.updates) == frameCount-1 {
+			break
 		}
 		select {
 		case <-process.readerDone:
-			if err := process.drainUpdates(ctx, func(json.RawMessage) error {
-				updates++
-				return nil
-			}); err != nil {
-				t.Fatalf("final drainUpdates: %v", err)
-			}
-			if updates != 5 {
-				t.Fatalf("drained %d updates, want 5", updates)
-			}
-			if process.updateBytes != 0 {
-				t.Fatalf("queued bytes after drain = %d, want 0", process.updateBytes)
-			}
-			if err := process.endUpdateConsumer(); err != nil {
-				t.Fatalf("endUpdateConsumer: %v", err)
-			}
-			return
+			t.Fatal("reader completed instead of blocking at the queued-byte limit")
 		case <-ctx.Done():
-			t.Fatal("reader did not resume after queued bytes were released")
+			t.Fatalf("reader did not fill queue to byte limit: queued=%d bytes=%d", len(process.updates), process.updateBytes)
 		default:
 			time.Sleep(time.Millisecond)
 		}
+	}
+	if process.updateBytes < maxACPQueuedUpdateBytes-frameBytes {
+		t.Fatalf("queued bytes = %d, want queue near %d-byte limit", process.updateBytes, maxACPQueuedUpdateBytes)
+	}
+	select {
+	case <-process.readerDone:
+		t.Fatal("reader did not block while queued bytes were at the limit")
+	default:
+	}
+	updates := 0
+	if err := process.drainUpdates(ctx, func(json.RawMessage) error {
+		updates++
+		return nil
+	}); err != nil {
+		t.Fatalf("release queued updates: %v", err)
+	}
+	select {
+	case <-process.readerDone:
+	case <-ctx.Done():
+		t.Fatal("reader did not resume after queued bytes were released")
+	}
+	if err := process.drainUpdates(ctx, func(json.RawMessage) error {
+		updates++
+		return nil
+	}); err != nil {
+		t.Fatalf("final drainUpdates: %v", err)
+	}
+	if updates != frameCount {
+		t.Fatalf("drained %d updates, want %d", updates, frameCount)
+	}
+	if process.updateBytes != 0 {
+		t.Fatalf("queued bytes after drain = %d, want 0", process.updateBytes)
+	}
+	if err := process.endUpdateConsumer(); err != nil {
+		t.Fatalf("endUpdateConsumer: %v", err)
 	}
 }
 
