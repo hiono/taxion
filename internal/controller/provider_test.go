@@ -417,6 +417,170 @@ func newProviderControllerFixture(t *testing.T, runtime *fakePlanningProviderRun
 	return controller, database, principal, jobID, grant.ID, documents
 }
 
+type providerClaimBarrierStore struct {
+	*store.Store
+	mu      sync.Mutex
+	reads   int
+	release chan struct{}
+}
+
+func (s *providerClaimBarrierStore) GetJob(ctx context.Context, jobID string) (domain.Job, error) {
+	job, err := s.Store.GetJob(ctx, jobID)
+	if err != nil {
+		return domain.Job{}, err
+	}
+	s.mu.Lock()
+	s.reads++
+	read := s.reads
+	if read == 2 {
+		close(s.release)
+	}
+	release := s.release
+	s.mu.Unlock()
+	if read <= 2 {
+		select {
+		case <-release:
+		case <-ctx.Done():
+			return domain.Job{}, ctx.Err()
+		}
+	}
+	return job, nil
+}
+
+func TestProviderTaskStartDispatchClaimIsExclusive(t *testing.T) {
+	database, jobID, revision, task := approvedExecutionPermissionControllerFixture(t)
+	now := time.Now().UTC().Round(0)
+	assessor := &fakeExecutionEffectAssessor{assessment: domain.ExecutionEffectAssessment{
+		Reversible: true, Mutating: true, ValidUntil: now.Add(45 * time.Minute),
+	}}
+	executionController, err := NewExecutionController(database, assessor)
+	if err != nil {
+		t.Fatalf("NewExecutionController: %v", err)
+	}
+	executionController.now = func() time.Time { return now }
+	request := domain.ExecutionPermissionRequest{
+		JobID: jobID, TaskID: task.ID, CommandID: "cmd_92929292929292929292929292929292",
+		Role: "CODER", Effect: "repository.write", Resource: revision.Contract.TargetRepositories[0],
+		ProviderID: "provider.test", AccountID: "account.primary",
+		ConfigurationSHA256: revision.Contract.ConfigurationSHA256,
+		ReservedTurns: 1, ReservedTokens: 100, ExpiresAt: now.Add(30 * time.Minute),
+	}
+	_, permission, err := executionController.Authorize(context.Background(), request)
+	if err != nil {
+		t.Fatalf("Authorize: %v", err)
+	}
+	_, _, intent, err := executionController.StartTaskExecution(
+		context.Background(), permission.ID, "cmd_a7070707070707070707070707070707", request,
+	)
+	if err != nil {
+		t.Fatalf("StartTaskExecution: %v", err)
+	}
+	barrierStore := &providerClaimBarrierStore{Store: database, release: make(chan struct{})}
+	controller := &ProviderController{store: barrierStore}
+	type claimResult struct {
+		claimed bool
+		err     error
+	}
+	results := make(chan claimResult, 2)
+	for i := 0; i < 2; i++ {
+		go func() {
+			_, claimed, claimErr := controller.claimTaskStartDispatch(context.Background(), jobID, intent.ID)
+			results <- claimResult{claimed: claimed, err: claimErr}
+		}()
+	}
+	first, second := <-results, <-results
+	claims := 0
+	conflicts := 0
+	for _, result := range []claimResult{first, second} {
+		if result.claimed {
+			claims++
+		}
+		if errors.Is(result.err, domain.ErrRevisionConflict) {
+			conflicts++
+		}
+	}
+	if claims != 1 || conflicts != 1 {
+		t.Fatalf("dispatch claims = %d, revision conflicts = %d; want one exclusive claim", claims, conflicts)
+	}
+	job, err := database.GetJob(context.Background(), jobID)
+	if err != nil {
+		t.Fatalf("GetJob after dispatch claim: %v", err)
+	}
+	observations := 0
+	for _, observation := range job.ProviderStartObservations {
+		if observation.OperationID == intent.ID && observation.Status == domain.ProviderStartUnknown {
+			observations++
+		}
+	}
+	if observations != 1 {
+		t.Fatalf("UNKNOWN start claims = %d, want 1", observations)
+	}
+}
+
+func TestProviderPlanningTurnDispatchClaimIsExclusive(t *testing.T) {
+	runtime := &fakePlanningProviderRuntime{}
+	controller, database, principal, jobID, grantID, documents := newProviderControllerFixture(t, runtime)
+	_, execution, _, _, err := controller.StartPlanning(
+		context.Background(), jobID, grantID, "cmd_18181818181818181818181818181818", documents, principal,
+	)
+	if err != nil {
+		t.Fatalf("StartPlanning: %v", err)
+	}
+	job, err := database.GetJob(context.Background(), jobID)
+	if err != nil {
+		t.Fatalf("GetJob before turn intent: %v", err)
+	}
+	_, turn, err := database.AddPlanningTurnIntent(
+		context.Background(), jobID, job.Revision, execution.ID, "session_1",
+		"cmd_19191919191919191919191919191919", strings.Repeat("f", 64), 100, principal,
+	)
+	if err != nil {
+		t.Fatalf("AddPlanningTurnIntent: %v", err)
+	}
+	barrierStore := &providerClaimBarrierStore{Store: database, release: make(chan struct{})}
+	claimController := &ProviderController{store: barrierStore}
+	type claimResult struct {
+		claimed bool
+		err     error
+	}
+	results := make(chan claimResult, 2)
+	for i := 0; i < 2; i++ {
+		go func() {
+			_, claimed, claimErr := claimController.claimPlanningTurnDispatch(
+				context.Background(), jobID, turn.ID, principal,
+			)
+			results <- claimResult{claimed: claimed, err: claimErr}
+		}()
+	}
+	first, second := <-results, <-results
+	claims := 0
+	conflicts := 0
+	for _, result := range []claimResult{first, second} {
+		if result.claimed {
+			claims++
+		}
+		if errors.Is(result.err, domain.ErrRevisionConflict) {
+			conflicts++
+		}
+	}
+	if claims != 1 || conflicts != 1 {
+		t.Fatalf("dispatch claims = %d, revision conflicts = %d; want one exclusive claim", claims, conflicts)
+	}
+	job, err = database.GetJob(context.Background(), jobID)
+	if err != nil {
+		t.Fatalf("GetJob after planning dispatch claim: %v", err)
+	}
+	observations := 0
+	for _, observation := range job.PlanningTurnObservations {
+		if observation.TurnID == turn.ID && observation.Status == domain.PlanningTurnUnknown {
+			observations++
+		}
+	}
+	if observations != 1 {
+		t.Fatalf("UNKNOWN planning dispatch claims = %d, want 1", observations)
+	}
+}
+
 func TestProviderControllerRejectsInvalidResultAndUsageResponses(t *testing.T) {
 	runtime := &fakePlanningProviderRuntime{}
 	controller, database, principal, jobID, grantID, documents := newProviderControllerFixture(t, runtime)
