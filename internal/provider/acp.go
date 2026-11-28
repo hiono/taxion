@@ -84,6 +84,7 @@ type acpStartReservation struct {
 type acpSession struct {
 	roleExecutionID  string
 	sessionID        string
+	peerSessionID    string
 	startOperationID string
 	process          *acpProcess
 	turnGate         chan struct{}
@@ -359,12 +360,13 @@ func (a *ACPAdapter) Start(ctx context.Context, request StartRequest, _ Credenti
 		return StartResult{}, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown}
 	}
 	var sessionReply map[string]json.RawMessage
-	var sessionID string
+	var peerSessionID string
 	if json.Unmarshal(created, &sessionReply) != nil ||
-		json.Unmarshal(sessionReply["sessionId"], &sessionID) != nil || !validIdentifier(sessionID) {
+		json.Unmarshal(sessionReply["sessionId"], &peerSessionID) != nil || !validIdentifier(peerSessionID) {
 		closeOnFailure()
 		return StartResult{}, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown}
 	}
+	sessionID := acpReceiptID("acp-session-", request.RoleExecutionID+":"+request.OperationID)
 	turnGate := make(chan struct{}, 1)
 	turnGate <- struct{}{}
 	promptGate := make(chan struct{}, 1)
@@ -372,6 +374,7 @@ func (a *ACPAdapter) Start(ctx context.Context, request StartRequest, _ Credenti
 	session := &acpSession{
 		roleExecutionID:  request.RoleExecutionID,
 		sessionID:        sessionID,
+		peerSessionID:    peerSessionID,
 		startOperationID: request.OperationID,
 		process:          process,
 		turnGate:         turnGate,
@@ -387,7 +390,7 @@ func (a *ACPAdapter) Start(ctx context.Context, request StartRequest, _ Credenti
 				ToolCall  json.RawMessage `json:"toolCall"`
 			}
 			if json.Unmarshal(raw, &permissionRequest) != nil ||
-				permissionRequest.SessionID != session.sessionID ||
+				permissionRequest.SessionID != session.peerSessionID ||
 				len(bytes.TrimSpace(permissionRequest.ToolCall)) == 0 ||
 				bytes.Equal(bytes.TrimSpace(permissionRequest.ToolCall), []byte("null")) {
 				return false, nil
@@ -461,10 +464,20 @@ func (a *ACPAdapter) Start(ctx context.Context, request StartRequest, _ Credenti
 		MaxTokens:    request.MaxTokens,
 		Deadline:     request.Deadline,
 	}
-	if _, err := a.send(operationCtx, session, initialTurn, nil); err != nil {
-		a.detachSession(session)
+	initialResult, initialErr := a.send(operationCtx, session, initialTurn, nil)
+	if initialErr != nil {
+		// Keep RoleExecution ownership until trackProcess observes process.done.
+		// Detaching here would allow a replacement Start while this CLI is alive.
+		session.stopping.Store(true)
 		session.process.terminate()
 		return StartResult{}, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown}
+	}
+	if initialResult.Status == "FAILED" {
+		// The initial prompt ran but exceeded its token reservation. Do not
+		// publish a successful Start receipt or permit a blind Start retry.
+		session.stopping.Store(true)
+		session.process.terminate()
+		return StartResult{}, &OperationError{Class: FailureDefinitive, Code: OperationCodeRateLimited}
 	}
 	a.mu.Lock()
 	if a.closed || session.stopping.Load() {
@@ -516,6 +529,11 @@ func (a *ACPAdapter) trackProcess(process *acpProcess) error {
 				sessions = append(sessions, session)
 			}
 		}
+		for _, session := range a.detached {
+			if session.process == process {
+				sessions = append(sessions, session)
+			}
+		}
 		a.mu.Unlock()
 		// Let any in-flight turn consume its final response and persist its
 		// output before detaching the dead process from the session indexes.
@@ -528,9 +546,15 @@ func (a *ACPAdapter) trackProcess(process *acpProcess) error {
 		}
 		a.mu.Lock()
 		delete(a.processes, process)
+		process.discardQueuedUpdates()
+		a.mu.Lock()
+		delete(a.processes, process)
 		for _, session := range sessions {
 			if a.byID[session.sessionID] == session {
 				a.retireSessionLocked(session)
+			}
+			if a.detached[session.sessionID] == session {
+				session.process = nil
 			}
 		}
 		a.mu.Unlock()
@@ -688,7 +712,7 @@ func (a *ACPAdapter) send(ctx context.Context, session *acpSession, request Turn
 		if err := json.Unmarshal(raw, &notification); err != nil {
 			return errors.New("invalid ACP session update")
 		}
-		if notification.Method != "session/update" || notification.Params.SessionID != request.SessionID {
+		if notification.Method != "session/update" || notification.Params.SessionID != session.peerSessionID {
 			return errors.New("ACP session update belongs to another Session")
 		}
 		if _, found := notification.Params.Update.Meta["opencode/child-session"]; found {
@@ -737,7 +761,7 @@ func (a *ACPAdapter) send(ctx context.Context, session *acpSession, request Turn
 		if operationCtx.Err() != nil {
 			session.stopping.Store(true)
 			cancelCtx, cancelNotify := context.WithTimeout(context.Background(), 100*time.Millisecond)
-			_ = session.process.notify(cancelCtx, "session/cancel", map[string]string{"sessionId": request.SessionID})
+			_ = session.process.notify(cancelCtx, "session/cancel", map[string]string{"sessionId": session.peerSessionID})
 			cancelNotify()
 		}
 		session.stopping.Store(true)
@@ -1405,6 +1429,20 @@ func (p *acpProcess) releaseUpdate(update json.RawMessage) {
 	}
 	p.updateMu.Unlock()
 	p.signalUpdateWake()
+}
+
+func (p *acpProcess) discardQueuedUpdates() {
+	if p == nil {
+		return
+	}
+	for {
+		select {
+		case update := <-p.updates:
+			p.releaseUpdate(update)
+		default:
+			return
+		}
+	}
 }
 
 func (p *acpProcess) beginUpdateConsumer() {
