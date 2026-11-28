@@ -877,6 +877,12 @@ func TestProviderControllerReconcilesUnknownTurnWithLookupAndCompleteUsage(t *te
 	if err == nil || unknown.Status != domain.PlanningTurnUnknown || runtime.sendCalls != 1 || receipt.Revision == 0 {
 		t.Fatalf("ambiguous Send did not persist UNKNOWN: %#v %#v calls=%d err=%v", turn, unknown, runtime.sendCalls, err)
 	}
+	if _, _, _, _, err := controller.SendPlanning(
+		context.Background(), jobID, execution.ID, "session_1", commandID,
+		"inspect the accepted repository snapshot", 100, principal,
+	); !errors.Is(err, provider.ErrUnsupportedCapability) || runtime.sendCalls != 1 {
+		t.Fatalf("NOT_FOUND without idempotency retried Send: calls=%d err=%v", runtime.sendCalls, err)
+	}
 	runtime.lookupResult = provider.LookupResult{
 		Found: true, OperationID: operationID, Status: domain.PlanningTurnCompleted,
 		ReceiptID: "receipt_turn_1", SessionID: "session_1", TurnID: turnID,
@@ -892,7 +898,7 @@ func TestProviderControllerReconcilesUnknownTurnWithLookupAndCompleteUsage(t *te
 	if err != nil || receipt.Revision == 0 || reconciledTurn.ID != turn.ID ||
 		completed.Status != domain.PlanningTurnCompleted || !completed.ReconcilesUnknown ||
 		result.Status != domain.PlanningTurnCompleted || result.TokensUsed != 18 ||
-		runtime.sendCalls != 1 || runtime.lookupCalls != 1 || runtime.usageCalls != 1 {
+		runtime.sendCalls != 1 || runtime.lookupCalls != 2 || runtime.usageCalls != 1 {
 		t.Fatalf("same-Turn reconciliation failed: %#v %#v %#v calls(send=%d lookup=%d usage=%d) err=%v",
 			receipt, reconciledTurn, completed, runtime.sendCalls, runtime.lookupCalls, runtime.usageCalls, err)
 	}
@@ -937,6 +943,42 @@ func TestProviderControllerAllowsOneShotSendButNeverRetriesUnknownWithoutProof(t
 		runtime.sendCalls != 1 || runtime.lookupCalls != 0 {
 		t.Fatalf("unsafe retry or missing lifecycle facts: intents=%d observations=%d sends=%d lookups=%d err=%v",
 			len(job.PlanningTurnIntents), len(job.PlanningTurnObservations), runtime.sendCalls, runtime.lookupCalls, err)
+	}
+}
+
+func TestProviderControllerRetriesMissingTurnOnlyWithIdempotency(t *testing.T) {
+	runtime := &fakePlanningProviderRuntime{
+		sendErr: &provider.OperationError{Class: provider.FailureAmbiguous, Code: provider.OperationCodeTimeout},
+	}
+	controller, _, principal, jobID, grantID, documents := newProviderControllerFixture(t, runtime)
+	_, execution, _, _, err := controller.StartPlanning(
+		context.Background(), jobID, grantID, "cmd_24242424242424242424242424242424", documents, principal,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commandID := "cmd_25252525252525252525252525252525"
+	_, _, unknown, _, err := controller.SendPlanning(context.Background(), jobID, execution.ID, "session_1",
+		commandID, "inspect the accepted repository snapshot", 100, principal)
+	if err == nil || unknown.Status != domain.PlanningTurnUnknown || runtime.sendCalls != 1 {
+		t.Fatalf("initial Send did not become UNKNOWN: observation=%#v sends=%d err=%v", unknown, runtime.sendCalls, err)
+	}
+	now := time.Now().UTC()
+	runtime.capabilities.SendLookup = true
+	runtime.capabilities.SendIdempotency = true
+	runtime.capabilities.Evidence = append(runtime.capabilities.Evidence,
+		provider.CapabilityEvidence{Capability: provider.CapabilitySendLookup, Identity: runtime.identity, TestID: "controller-test", EvidenceSHA256: strings.Repeat("a", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
+		provider.CapabilityEvidence{Capability: provider.CapabilitySendIdempotency, Identity: runtime.identity, TestID: "controller-test", EvidenceSHA256: strings.Repeat("b", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
+	)
+	runtime.lookupResult = provider.LookupResult{
+		OperationID: domain.PlanningTurnOperationID(commandID), TurnID: domain.PlanningTurnIntentID(commandID),
+		SessionID: "session_1", Status: provider.LookupStatusNotFound, EvidenceSHA256: strings.Repeat("c", 64),
+	}
+	runtime.sendErr = nil
+	_, _, observation, _, err := controller.SendPlanning(context.Background(), jobID, execution.ID, "session_1",
+		commandID, "inspect the accepted repository snapshot", 100, principal)
+	if err != nil || observation.Status != domain.PlanningTurnCompleted || runtime.sendCalls != 2 {
+		t.Fatalf("idempotent retry failed: observation=%#v sends=%d err=%v", observation, runtime.sendCalls, err)
 	}
 }
 

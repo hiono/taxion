@@ -1578,7 +1578,8 @@ func (c *ProviderController) reconcileTurn(
 				}
 				return receipt, turn, observation, provider.TurnResult{}, errors.New("Provider Turn lookup has not confirmed a terminal result")
 			}
-		} else if !canRetry {
+		}
+		if !canRetry {
 			observation, persistErr := c.recordTurnObservation(
 				ctx, job.ID, turn.ID, domain.PlanningTurnUnknown, 0, "", principal,
 			)
