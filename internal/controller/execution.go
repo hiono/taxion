@@ -14,6 +14,7 @@ type ExecutionPermissionStore interface {
 	GetJob(context.Context, string) (domain.Job, error)
 	AddExecutionPermission(context.Context, uint64, domain.ExecutionPermissionRequest, string, domain.ExecutionEffectAssessment) (store.CommandReceipt, domain.ExecutionPermission, error)
 	StartTaskExecution(context.Context, uint64, string, string, string, string, string) (store.CommandReceipt, domain.TaskExecutionStart, error)
+	BindRoleExecutionWorktree(context.Context, uint64, string, string, string, domain.WorktreeAssignment) (store.CommandReceipt, domain.WorktreeAssignment, error)
 }
 
 type ExecutionEffectAssessor interface {
@@ -93,6 +94,24 @@ func (c *ExecutionController) ValidatePermission(
 		return permission, nil
 	}
 	return domain.ExecutionPermission{}, store.ErrNotFound
+}
+
+// BindWorktree persists the exact Job-owned Worktree assignment before Provider Start.
+func (c *ExecutionController) BindWorktree(
+	ctx context.Context,
+	roleExecutionID, commandID string,
+	assignment domain.WorktreeAssignment,
+) (store.CommandReceipt, domain.WorktreeAssignment, error) {
+	if c == nil || ctx == nil || roleExecutionID == "" || commandID == "" || assignment.JobID == "" {
+		return store.CommandReceipt{}, domain.WorktreeAssignment{}, errors.New("Worktree binding requires context and exact Job execution identities")
+	}
+	job, err := c.store.GetJob(ctx, assignment.JobID)
+	if err != nil {
+		return store.CommandReceipt{}, domain.WorktreeAssignment{}, err
+	}
+	return c.store.BindRoleExecutionWorktree(
+		ctx, job.Revision, job.ID, roleExecutionID, commandID, assignment,
+	)
 }
 
 // StartTaskExecution atomically consumes a Task-bound permission into a Coder / Reviewer RoleExecution and ProviderStartIntent.
