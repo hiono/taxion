@@ -718,6 +718,7 @@ func (e *OperationError) Error() string {
 const (
 	OperationCodeUnauthorized   = "unauthorized"
 	OperationCodeRateLimited    = "rate_limited"
+	OperationCodeBudgetExceeded = "budget_exceeded"
 	OperationCodeInvalidRequest = "invalid_request"
 	OperationCodeNotFound       = "not_found"
 	OperationCodeUnsupported    = "unsupported"
@@ -729,7 +730,7 @@ const (
 
 func validOperationCode(code string) bool {
 	switch code {
-	case OperationCodeUnauthorized, OperationCodeRateLimited, OperationCodeInvalidRequest,
+	case OperationCodeUnauthorized, OperationCodeRateLimited, OperationCodeBudgetExceeded, OperationCodeInvalidRequest,
 		OperationCodeNotFound, OperationCodeUnsupported, OperationCodeTimeout,
 		OperationCodeTransport, OperationCodeUnavailable, OperationCodeUnknown:
 		return true
