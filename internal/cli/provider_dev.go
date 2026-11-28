@@ -14,8 +14,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/hiono/taxion/internal/controller"
 	"github.com/hiono/taxion/internal/domain"
 	"github.com/hiono/taxion/internal/provider"
+	"github.com/hiono/taxion/internal/store"
 )
 
 func loginACPProvider(ctx context.Context, args []string, stdout, stderr io.Writer) int {
@@ -59,6 +61,8 @@ func runACPProvider(ctx context.Context, args []string, stdout, stderr io.Writer
 	command := flags.String("command", "", "Provider CLI executable")
 	workingDirectory := flags.String("working-directory", ".", "Provider working directory")
 	timeout := flags.Duration("timeout", 10*time.Minute, "Provider request timeout")
+	localJobID := flags.String("job", "", "Local untrusted Job ID")
+	storePath := flags.String("store", "", "Override the local Job database path")
 	if err := flags.Parse(args); err != nil {
 		return 2
 	}
@@ -117,7 +121,59 @@ func runACPProvider(ctx context.Context, args []string, stdout, stderr io.Writer
 		return 1
 	}
 
-	requestHash := sha256Hex(*prompt)
+	promptText := *prompt
+	var communication *controller.CommunicationController
+	var question controller.CommunicationOutcome
+	if *localJobID != "" {
+		dbPath, err := resolveStorePath(*storePath)
+		if err != nil {
+			return report(stderr, err)
+		}
+		database, err := store.Open(ctx, dbPath)
+		if err != nil {
+			return report(stderr, err)
+		}
+		defer database.Close()
+		job, err := database.GetJob(ctx, *localJobID)
+		if err != nil {
+			return report(stderr, err)
+		}
+		if job.IntakeProvenance != nil || job.State != domain.JobDraft {
+			return report(stderr, errors.New("dev provider conversation requires an untrusted local DRAFT Job"))
+		}
+		communication, err = controller.NewCommunicationController(database)
+		if err != nil {
+			return report(stderr, err)
+		}
+		commandID, err := domain.NewID("cmd")
+		if err != nil {
+			return report(stderr, err)
+		}
+		question, err = communication.SendFromController(ctx, controller.SystemMessageRequest{
+			JobID: job.ID, CommandID: commandID,
+			Recipient: domain.ActorRef{Kind: domain.ActorOrchestrator, ID: domain.OrchestratorActorID},
+			Body:      *prompt,
+		})
+		if err != nil {
+			return report(stderr, err)
+		}
+		job, err = database.GetJob(ctx, job.ID)
+		if err != nil {
+			return report(stderr, err)
+		}
+		var history strings.Builder
+		fmt.Fprintf(&history, "Original request:\n%s", job.Request)
+		for _, message := range job.JobMessages {
+			if message.Sender.Kind == domain.ActorController && message.Recipient.Kind == domain.ActorOrchestrator {
+				fmt.Fprintf(&history, "\n\nController:\n%s", message.Body)
+			} else if message.Sender.Kind == domain.ActorOrchestrator && message.Recipient.Kind == domain.ActorController {
+				fmt.Fprintf(&history, "\n\nProvider response:\n%s", message.Body)
+			}
+		}
+		promptText = history.String()
+	}
+
+	requestHash := sha256Hex(promptText)
 	configurationHash := sha256Hex(strings.Join([]string{commandPath, strings.Join(cliArgs, " "), workingDir, profile}, "\n"))
 	identity := provider.Identity{
 		ProviderID: providerID, AccountID: "local-profile", SDKVersion: "acp-v1",
@@ -135,6 +191,9 @@ func runACPProvider(ctx context.Context, args []string, stdout, stderr io.Writer
 		_ = adapter.Close()
 		return report(stderr, err)
 	}
+	if *localJobID != "" {
+		jobID = *localJobID
+	}
 	operationID, err := domain.NewID("op")
 	if err != nil {
 		_ = adapter.Close()
@@ -147,7 +206,7 @@ func runACPProvider(ctx context.Context, args []string, stdout, stderr io.Writer
 	}
 	request := provider.StartRequest{
 		OperationID: operationID, JobID: jobID, RoleExecutionID: roleExecutionID,
-		RequestSHA256: requestHash, PromptSHA256: requestHash, Prompt: *prompt,
+		RequestSHA256: requestHash, PromptSHA256: requestHash, Prompt: promptText,
 		MaxTurns: 1, MaxTokens: ^uint64(0), Deadline: time.Now().Add(*timeout),
 	}
 	if err := request.Validate(); err != nil {
@@ -170,6 +229,21 @@ func runACPProvider(ctx context.Context, args []string, stdout, stderr io.Writer
 		return report(stderr, fmt.Errorf("%s process did not close cleanly", cliName))
 	}
 	fmt.Fprintf(stdout, "Provider: %s\nSession: %s\nToken usage: not reported by ACP\n\n%s\n", identity.ProviderID, start.SessionID, result.Content)
+	if communication != nil {
+		commandID, err := domain.NewID("cmd")
+		if err != nil {
+			return report(stderr, err)
+		}
+		if _, err := communication.SendFromOrchestrator(ctx, controller.SystemMessageRequest{
+			JobID: jobID, CommandID: commandID,
+			Recipient:        domain.ActorRef{Kind: domain.ActorController, ID: domain.ControllerActorID},
+			ReplyToMessageID: question.Message.ID,
+			Body:             result.Content,
+		}); err != nil {
+			return report(stderr, err)
+		}
+		fmt.Fprintln(stdout, "\nLocal Job conversation saved (not an authorized Job execution)")
+	}
 	return 0
 }
 

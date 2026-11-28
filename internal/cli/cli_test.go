@@ -1002,7 +1002,8 @@ func TestDevProviderRunRequiresPrompt(t *testing.T) {
 	}
 }
 
-func TestDevProviderRunOpenCode(t *testing.T) {
+func fakeOpenCode(t *testing.T) string {
+	t.Helper()
 	if runtime.GOOS == "windows" {
 		t.Skip("test helper uses a shell script")
 	}
@@ -1015,6 +1016,11 @@ func TestDevProviderRunOpenCode(t *testing.T) {
 	if err := os.WriteFile(helper, []byte(script), 0700); err != nil {
 		t.Fatal(err)
 	}
+	return helper
+}
+
+func TestDevProviderRunOpenCode(t *testing.T) {
+	helper := fakeOpenCode(t)
 	t.Setenv("TAXION_TEST_HOST_SECRET", "must-not-be-inherited")
 	var stdout, stderr bytes.Buffer
 	code := Run(context.Background(), []string{"dev", "provider", "run", "--provider", "opencode",
@@ -1023,6 +1029,105 @@ func TestDevProviderRunOpenCode(t *testing.T) {
 	if code != 0 || !strings.Contains(stdout.String(), "Provider: opencode") ||
 		!strings.Contains(stdout.String(), "hello from ACP") {
 		t.Fatalf("exit=%d, stdout=%q, stderr=%q", code, stdout.String(), stderr.String())
+	}
+}
+
+func TestDevProviderConversationPersistsAndReusesLocalJobHistory(t *testing.T) {
+	helper := fakeOpenCode(t)
+	path := filepath.Join(t.TempDir(), "jobs.sqlite")
+	var stdout, stderr bytes.Buffer
+	if code := Run(context.Background(), []string{"dev", "job", "create", "--store", path,
+		"--request", "The original request."}, &stdout, &stderr, VersionInfo{}); code != 0 {
+		t.Fatalf("create exit=%d, stderr=%q", code, stderr.String())
+	}
+	jobID := strings.TrimPrefix(strings.Split(stdout.String(), "\n")[1], "ID: ")
+	for _, prompt := range []string{"Remember the token HARBOR42.", "what token?"} {
+		stdout.Reset()
+		stderr.Reset()
+		code := Run(context.Background(), []string{"dev", "provider", "run", "--provider", "opencode",
+			"--command", helper, "--working-directory", t.TempDir(), "--store", path,
+			"--job", jobID, "--prompt", prompt}, &stdout, &stderr, VersionInfo{})
+		if code != 0 || !strings.Contains(stdout.String(), "Local Job conversation saved") {
+			t.Fatalf("conversation exit=%d, stdout=%q, stderr=%q", code, stdout.String(), stderr.String())
+		}
+	}
+	if !strings.Contains(stdout.String(), "HARBOR42") {
+		t.Fatalf("follow-up response=%q", stdout.String())
+	}
+	database, err := store.Open(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	job, err := database.GetJob(context.Background(), jobID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(job.JobMessages) != 4 ||
+		job.JobMessages[0].Sender.Kind != domain.ActorController ||
+		job.JobMessages[1].Sender.Kind != domain.ActorOrchestrator ||
+		job.JobMessages[1].ReplyToMessageID != job.JobMessages[0].ID ||
+		job.JobMessages[3].ReplyToMessageID != job.JobMessages[2].ID ||
+		job.JobMessages[3].Body != "HARBOR42" {
+		t.Fatalf("stored conversation=%#v", job.JobMessages)
+	}
+}
+
+func TestDevProviderConversationRejectsTrustedJob(t *testing.T) {
+	helper := fakeOpenCode(t)
+	server := newCLIAuthServer(t)
+	principal := authenticateCLIPrincipal(t, server)
+	path := filepath.Join(t.TempDir(), "jobs.sqlite")
+	database, err := store.Open(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const jobID = "job_trusted_dev_rejection"
+	_, err = database.CreateTrustedDraftJob(context.Background(), jobID, "trusted",
+		"cmd_11111111111111111111111111111111", principal.AuthenticatedAt(), principal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	code := Run(context.Background(), []string{"dev", "provider", "run", "--provider", "opencode",
+		"--command", helper, "--working-directory", t.TempDir(), "--store", path, "--job", jobID,
+		"--prompt", "test"}, &stdout, &stderr, VersionInfo{})
+	if code != 1 || !strings.Contains(stderr.String(), "untrusted local DRAFT") {
+		t.Fatalf("trusted job exit=%d, stdout=%q, stderr=%q", code, stdout.String(), stderr.String())
+	}
+}
+
+func TestDevProviderConversationRetainsInputOnProviderFailure(t *testing.T) {
+	helper := fakeOpenCode(t)
+	path := filepath.Join(t.TempDir(), "jobs.sqlite")
+	var stdout, stderr bytes.Buffer
+	if code := Run(context.Background(), []string{"dev", "job", "create", "--store", path,
+		"--request", "The original request."}, &stdout, &stderr, VersionInfo{}); code != 0 {
+		t.Fatalf("create exit=%d, stderr=%q", code, stderr.String())
+	}
+	jobID := strings.TrimPrefix(strings.Split(stdout.String(), "\n")[1], "ID: ")
+	stdout.Reset()
+	stderr.Reset()
+	code := Run(context.Background(), []string{"dev", "provider", "run", "--provider", "opencode",
+		"--command", helper, "--working-directory", t.TempDir(), "--store", path,
+		"--job", jobID, "--prompt", "simulate provider failure"}, &stdout, &stderr, VersionInfo{})
+	if code != 1 {
+		t.Fatalf("provider failure exit=%d, stdout=%q", code, stdout.String())
+	}
+	database, err := store.Open(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	job, err := database.GetJob(context.Background(), jobID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(job.JobMessages) != 1 || job.JobMessages[0].Body != "simulate provider failure" {
+		t.Fatalf("stored conversation=%#v", job.JobMessages)
 	}
 }
 
@@ -1041,6 +1146,11 @@ func TestDevProviderACPHelper(t *testing.T) {
 		var request struct {
 			ID     json.RawMessage `json:"id"`
 			Method string          `json:"method"`
+			Params struct {
+				Prompt []struct {
+					Text string `json:"text"`
+				} `json:"prompt"`
+			} `json:"params"`
 		}
 		if json.Unmarshal(scanner.Bytes(), &request) != nil {
 			os.Exit(1)
@@ -1053,9 +1163,25 @@ func TestDevProviderACPHelper(t *testing.T) {
 			_ = writer.Encode(map[string]any{"jsonrpc": "2.0", "id": request.ID,
 				"result": map[string]any{"sessionId": "session_test"}})
 		case "session/prompt":
+			response := "hello from ACP"
+			if len(request.Params.Prompt) > 0 {
+				prompt := request.Params.Prompt[0].Text
+				if strings.Contains(prompt, "simulate provider failure") {
+					os.Exit(1)
+				} else if strings.Contains(prompt, "what token?") {
+					if !strings.Contains(prompt, "The original request.") ||
+						!strings.Contains(prompt, "Remember the token HARBOR42.") ||
+						!strings.Contains(prompt, "remembered") {
+						os.Exit(1)
+					}
+					response = "HARBOR42"
+				} else if strings.Contains(prompt, "Remember the token HARBOR42.") {
+					response = "remembered"
+				}
+			}
 			_ = writer.Encode(map[string]any{"jsonrpc": "2.0", "method": "session/update",
 				"params": map[string]any{"sessionId": "session_test", "update": map[string]any{
-					"sessionUpdate": "agent_message_chunk", "content": map[string]string{"type": "text", "text": "hello from ACP"},
+					"sessionUpdate": "agent_message_chunk", "content": map[string]string{"type": "text", "text": response},
 				}}})
 			_ = writer.Encode(map[string]any{"jsonrpc": "2.0", "id": request.ID,
 				"result": map[string]any{"stopReason": "end_turn"}})

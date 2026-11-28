@@ -727,7 +727,7 @@ Usage:
   taxion job approve --revision <n> --canonical-hash <sha256> --canonicalization-version <n> --reason <text> <job-id>
   taxion dev job create --request "Local untrusted DRAFT only"
   taxion dev provider login
-  taxion dev provider run --prompt "..." [--provider copilot|opencode]
+  taxion dev provider run --prompt "..." [--provider copilot|opencode] [--job <local-job-id>]
   taxion job show <job-id>
   taxion job list
   taxion version
