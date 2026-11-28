@@ -161,16 +161,10 @@ func runACPProvider(ctx context.Context, args []string, stdout, stderr io.Writer
 		if err != nil {
 			return report(stderr, err)
 		}
-		var history strings.Builder
-		fmt.Fprintf(&history, "Original request:\n%s", job.Request)
-		for _, message := range job.JobMessages {
-			if message.Sender.Kind == domain.ActorController && message.Recipient.Kind == domain.ActorOrchestrator {
-				fmt.Fprintf(&history, "\n\nController:\n%s", message.Body)
-			} else if message.Sender.Kind == domain.ActorOrchestrator && message.Recipient.Kind == domain.ActorController {
-				fmt.Fprintf(&history, "\n\nProvider response:\n%s", message.Body)
-			}
+		promptText, err = localJobPrompt(job, question.Message.ID)
+		if err != nil {
+			return report(stderr, err)
 		}
-		promptText = history.String()
 	}
 
 	requestHash := sha256Hex(promptText)
@@ -179,10 +173,14 @@ func runACPProvider(ctx context.Context, args []string, stdout, stderr io.Writer
 		ProviderID: providerID, AccountID: "local-profile", SDKVersion: "acp-v1",
 		ConfigurationSHA256: configurationHash,
 	}
-	adapter, err := provider.NewACPAdapter(provider.ACPConfig{
+	config := provider.ACPConfig{
 		Command: commandPath, Args: cliArgs,
 		WorkingDirectory: workingDir, HomeDirectory: profile, Identity: identity,
-	})
+	}
+	if *backend == "opencode" {
+		config.RequiredModel = "opencode/big-pickle"
+	}
+	adapter, err := provider.NewACPAdapter(config)
 	if err != nil {
 		return report(stderr, err)
 	}
@@ -245,6 +243,22 @@ func runACPProvider(ctx context.Context, args []string, stdout, stderr io.Writer
 		fmt.Fprintln(stdout, "\nLocal Job conversation saved (not an authorized Job execution)")
 	}
 	return 0
+}
+
+func localJobPrompt(job domain.Job, questionID string) (string, error) {
+	var history strings.Builder
+	fmt.Fprintf(&history, "Original request:\n%s", job.Request)
+	for _, message := range job.JobMessages {
+		if message.Sender.Kind == domain.ActorController && message.Recipient.Kind == domain.ActorOrchestrator {
+			fmt.Fprintf(&history, "\n\nController:\n%s", message.Body)
+		} else if message.Sender.Kind == domain.ActorOrchestrator && message.Recipient.Kind == domain.ActorController {
+			fmt.Fprintf(&history, "\n\nProvider response:\n%s", message.Body)
+		}
+		if message.ID == questionID {
+			return history.String(), nil
+		}
+	}
+	return "", errors.New("saved Job question was not found")
 }
 
 func copilotProfileDirectory() (string, error) {

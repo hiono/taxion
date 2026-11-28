@@ -38,6 +38,7 @@ type ACPConfig struct {
 	WorkingDirectory string
 	HomeDirectory    string
 	Identity         Identity
+	RequiredModel    string
 	// Environment lists non-secret host variables explicitly passed to the CLI.
 	Environment []string
 }
@@ -341,6 +342,24 @@ func (a *ACPAdapter) Start(ctx context.Context, request StartRequest, _ Credenti
 		json.Unmarshal(sessionReply["sessionId"], &peerSessionID) != nil || !validIdentifier(peerSessionID) {
 		closeOnFailure()
 		return StartResult{}, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown}
+	}
+	if a.config.RequiredModel != "" {
+		var options []struct {
+			ID           string `json:"id"`
+			CurrentValue string `json:"currentValue"`
+		}
+		matches := false
+		if json.Unmarshal(sessionReply["configOptions"], &options) == nil {
+			for _, option := range options {
+				if option.ID == "model" && option.CurrentValue == a.config.RequiredModel {
+					matches = true
+				}
+			}
+		}
+		if !matches {
+			closeOnFailure()
+			return StartResult{}, fmt.Errorf("ACP session did not confirm the required model %q; check OpenCode configuration", a.config.RequiredModel)
+		}
 	}
 	sessionID := acpReceiptID("acp-session-", request.RoleExecutionID+":"+request.OperationID)
 	turnGate := make(chan struct{}, 1)
@@ -1136,14 +1155,16 @@ func (p *acpProcess) read(stdout io.Reader) {
 			if message.Method == "session/update" {
 				var notification struct {
 					Update struct {
-						SessionUpdate string `json:"sessionUpdate"`
+						SessionUpdate string                     `json:"sessionUpdate"`
+						Meta          map[string]json.RawMessage `json:"_meta"`
 					} `json:"update"`
 				}
 				if json.Unmarshal(message.Params, &notification) != nil || notification.Update.SessionUpdate == "" {
 					p.fail(errors.New("invalid ACP session update"))
 					return
 				}
-				if notification.Update.SessionUpdate != "agent_message_chunk" {
+				_, childSession := notification.Update.Meta["opencode/child-session"]
+				if notification.Update.SessionUpdate != "agent_message_chunk" && !childSession {
 					continue
 				}
 				lineBytes := int64(len(line))

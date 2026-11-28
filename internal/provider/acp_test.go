@@ -163,7 +163,16 @@ func TestACPHelperProcess(t *testing.T) {
 					"sessionUpdate": "agent_message_chunk",
 					"content":       map[string]string{"type": "text", "text": "fixed ACP response"},
 				}
-				if acpHelperSetting("child") != "" && promptText == "continue" {
+				if acpHelperSetting("child") == "tool" && promptText == "continue" {
+					write(map[string]any{
+						"jsonrpc": "2.0", "method": "session/update",
+						"params": map[string]any{"sessionId": "fake-session", "update": map[string]any{
+							"sessionUpdate": "tool_call",
+							"_meta":         map[string]any{"opencode/child-session": map[string]any{"id": "child-session"}},
+						}},
+					})
+				}
+				if acpHelperSetting("child") == "text" && promptText == "continue" {
 					update["_meta"] = map[string]any{"opencode/child-session": map[string]any{"id": "child-session"}}
 				}
 				write(map[string]any{
@@ -309,7 +318,15 @@ func TestACPAdapterKeepsCompletedOutputWhenUsageIsMissing(t *testing.T) {
 }
 
 func TestACPAdapterFailsClosedWhenChildSessionOutputIsDetected(t *testing.T) {
-	t.Setenv("TAXION_ACP_HELPER", "1;child=1")
+	for _, update := range []string{"text", "tool"} {
+		t.Run(update, func(t *testing.T) {
+			testACPChildSession(t, update)
+		})
+	}
+}
+
+func testACPChildSession(t *testing.T, update string) {
+	t.Setenv("TAXION_ACP_HELPER", "1;child="+update)
 	adapter := newACPTestAdapter(t)
 	defer adapter.Close()
 	started, err := adapter.Start(context.Background(), newACPTestStartRequest("start", "role_execution_child"), nil)

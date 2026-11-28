@@ -1012,7 +1012,8 @@ func fakeOpenCode(t *testing.T) string {
 		t.Fatal(err)
 	}
 	helper := filepath.Join(t.TempDir(), "opencode")
-	script := fmt.Sprintf("#!/bin/sh\n[ \"$1\" = acp ] || exit 1\nTAXION_TEST_CLI_HELPER=1 exec %q -test.run=^TestDevProviderACPHelper$\n", executable)
+	quoted := "'" + strings.ReplaceAll(executable, "'", "'\\''") + "'"
+	script := fmt.Sprintf("#!/bin/sh\n[ \"$1\" = acp ] || exit 1\nTAXION_TEST_CLI_HELPER=1 exec %s -test.run=^TestDevProviderACPHelper$\n", quoted)
 	if err := os.WriteFile(helper, []byte(script), 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -1029,6 +1030,38 @@ func TestDevProviderRunOpenCode(t *testing.T) {
 	if code != 0 || !strings.Contains(stdout.String(), "Provider: opencode") ||
 		!strings.Contains(stdout.String(), "hello from ACP") {
 		t.Fatalf("exit=%d, stdout=%q, stderr=%q", code, stdout.String(), stderr.String())
+	}
+}
+
+func TestDevProviderRunRejectsUnconfirmedModel(t *testing.T) {
+	helper := fakeOpenCode(t)
+	work := t.TempDir()
+	if err := os.WriteFile(filepath.Join(work, "different-model"), nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	code := Run(context.Background(), []string{"dev", "provider", "run", "--provider", "opencode",
+		"--command", helper, "--working-directory", work, "--prompt", "hello"},
+		&stdout, &stderr, VersionInfo{})
+	if code != 1 || !strings.Contains(stderr.String(), "did not confirm the required model") {
+		t.Fatalf("exit=%d, stdout=%q, stderr=%q", code, stdout.String(), stderr.String())
+	}
+	if _, err := os.Stat(filepath.Join(work, "prompt-reached")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("prompt was sent before model confirmation: %v", err)
+	}
+}
+
+func TestLocalJobPromptStopsAtOwnQuestion(t *testing.T) {
+	job := domain.Job{Request: "original", JobMessages: []domain.JobMessage{
+		{ID: "first", Sender: domain.ActorRef{Kind: domain.ActorController}, Recipient: domain.ActorRef{Kind: domain.ActorOrchestrator}, Body: "first question"},
+		{ID: "second", Sender: domain.ActorRef{Kind: domain.ActorController}, Recipient: domain.ActorRef{Kind: domain.ActorOrchestrator}, Body: "later question"},
+	}}
+	prompt, err := localJobPrompt(job, "first")
+	if err != nil || !strings.Contains(prompt, "first question") || strings.Contains(prompt, "later question") {
+		t.Fatalf("prompt=%q, err=%v", prompt, err)
+	}
+	if _, err := localJobPrompt(job, "missing"); err == nil {
+		t.Fatal("missing saved question was accepted")
 	}
 }
 
@@ -1102,6 +1135,7 @@ func TestDevProviderConversationRejectsTrustedJob(t *testing.T) {
 
 func TestDevProviderConversationRetainsInputOnProviderFailure(t *testing.T) {
 	helper := fakeOpenCode(t)
+	work := t.TempDir()
 	path := filepath.Join(t.TempDir(), "jobs.sqlite")
 	var stdout, stderr bytes.Buffer
 	if code := Run(context.Background(), []string{"dev", "job", "create", "--store", path,
@@ -1112,10 +1146,13 @@ func TestDevProviderConversationRetainsInputOnProviderFailure(t *testing.T) {
 	stdout.Reset()
 	stderr.Reset()
 	code := Run(context.Background(), []string{"dev", "provider", "run", "--provider", "opencode",
-		"--command", helper, "--working-directory", t.TempDir(), "--store", path,
+		"--command", helper, "--working-directory", work, "--store", path,
 		"--job", jobID, "--prompt", "simulate provider failure"}, &stdout, &stderr, VersionInfo{})
 	if code != 1 {
 		t.Fatalf("provider failure exit=%d, stdout=%q", code, stdout.String())
+	}
+	if _, err := os.Stat(filepath.Join(work, "prompt-reached")); err != nil {
+		t.Fatalf("provider did not receive the prompt: %v", err)
 	}
 	database, err := store.Open(context.Background(), path)
 	if err != nil {
@@ -1160,9 +1197,18 @@ func TestDevProviderACPHelper(t *testing.T) {
 			_ = writer.Encode(map[string]any{"jsonrpc": "2.0", "id": request.ID,
 				"result": map[string]any{"protocolVersion": 1}})
 		case "session/new":
+			model := "opencode/big-pickle"
+			if _, err := os.Stat("different-model"); err == nil {
+				model = "opencode/other"
+			}
 			_ = writer.Encode(map[string]any{"jsonrpc": "2.0", "id": request.ID,
-				"result": map[string]any{"sessionId": "session_test"}})
+				"result": map[string]any{"sessionId": "session_test", "configOptions": []map[string]string{
+					{"id": "model", "currentValue": model},
+				}}})
 		case "session/prompt":
+			if err := os.WriteFile("prompt-reached", nil, 0600); err != nil {
+				os.Exit(1)
+			}
 			response := "hello from ACP"
 			if len(request.Params.Prompt) > 0 {
 				prompt := request.Params.Prompt[0].Text

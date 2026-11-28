@@ -472,8 +472,9 @@ Load Job
   -> Verify E4 Send idempotency or Send lookup capability
   -> Persist TurnIntent + CommandReceipt
   -> Confirm commit / reload Job / revalidate authority
-  -> Lookup same OperationID / TurnID when recovery is required
-  -> Runtime.Send only for a new intent or verified Send idempotency
+  -> Claim first dispatch by persisting an UNKNOWN observation
+  -> For an existing UNKNOWN, Lookup same OperationID / TurnID if supported
+  -> Runtime.Send only for the claim owner or verified Send idempotency after recovery
   -> Persist terminal or UNKNOWN PlanningTurnObservation
   -> Retrieve Usage and require Complete=true before reconciling a terminal Lookup result
   -> Retrieve Result / Usage as separate append-only facts
