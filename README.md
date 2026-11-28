@@ -38,7 +38,7 @@ Taxion は、最初から完全な要求仕様や実装手順を利用者へ要�
 - `taxion dev provider run --provider opencode --prompt "..."`：OpenCodeの`opencode/big-pickle`を一時プロファイルで起動するスモークテストです。Jobには接続されません。
 - `taxion dev provider run --provider opencode --job <local-job-id> --prompt "..."`：未認証のローカルDRAFT Jobに限り、依頼と過去の会話を自然言語でProviderへ渡し、Controller / Orchestrator間の記録として同じJobへ保存します。各実行は新しいSessionを開始し、履歴のコピーで文脈を再構成します。Provider失敗時も送信前に保存した入力は残ります。取得した応答は保存してからProviderを終了します。認可済みJob実行やAgent間自動配送ではありません。
 - 上記に `--consult` を付けると、主Agentの質問を別Sessionへ渡し、その回答を同じ主Agent Sessionへ戻します。質問・回答はOrchestratorによる記録として返信関係をつけて順に保存し、失敗時も保存済みの内容は残ります。質問を必ず一回求める開発用の実験であり、RoleExecution間の配送や終了後のSession再開ではありません。
-- 上記に `--review` を付けると、Plannerの計画をCoderへ、CoderのテキストをReviewerへ渡し、指摘を同じCoder Sessionへ戻した後、同じReviewer Sessionで再レビューします。各応答はOrchestratorの記録として順に保存します。Coderの出力を作業ファイルに適用する機能はありません。ツール権限要求は拒否しますが、OS隔離は保証せず、正式なRoleExecution間の配送でもありません。`--consult` と同時には使えません。
+- 上記に `--review` を付けると、Plannerの計画をCoderへ、CoderのテキストをReviewerへ渡し、指摘を同じCoder Sessionへ戻した後、同じReviewer Sessionで再レビューします。`--consult` も付けると、Coderに質問を一つ求め、同じPlanner Sessionの回答を同じCoder Sessionへ戻してから作業を続けます。各応答はOrchestratorの記録として順に保存します。Coderの出力を作業ファイルに適用する機能はありません。ツール権限要求は拒否しますが、OS隔離は保証せず、正式なRoleExecution間の配送でもありません。
 - `taxion job show <job-id>`：Jobの現在の内容をJSONで表示します。
 - `taxion job list`：保存済みJobを一覧表示します。
 

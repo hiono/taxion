@@ -1237,12 +1237,22 @@ func TestDevProviderConsultRequiresLocalJob(t *testing.T) {
 }
 
 func TestDevProviderReviewCycle(t *testing.T) {
-	for _, fail := range []bool{false, true} {
-		t.Run(fmt.Sprintf("review-fails=%v", fail), func(t *testing.T) {
+	for _, test := range []struct {
+		name         string
+		consult      bool
+		fail         string
+		messageCount int
+	}{
+		{name: "review", messageCount: 6},
+		{name: "review-fails", fail: "review-fail", messageCount: 3},
+		{name: "consult-and-review", consult: true, messageCount: 8},
+		{name: "planner-fails", consult: true, fail: "planner-fail", messageCount: 3},
+	} {
+		t.Run(test.name, func(t *testing.T) {
 			helper := fakeOpenCode(t)
 			work := t.TempDir()
-			if fail {
-				if err := os.WriteFile(filepath.Join(work, "review-fail"), nil, 0600); err != nil {
+			if test.fail != "" {
+				if err := os.WriteFile(filepath.Join(work, test.fail), nil, 0600); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -1255,13 +1265,17 @@ func TestDevProviderReviewCycle(t *testing.T) {
 			jobID := strings.TrimPrefix(strings.Split(stdout.String(), "\n")[1], "ID: ")
 			stdout.Reset()
 			stderr.Reset()
-			code := Run(context.Background(), []string{"dev", "provider", "run", "--provider", "opencode",
+			args := []string{"dev", "provider", "run", "--provider", "opencode",
 				"--command", helper, "--working-directory", work, "--store", path, "--job", jobID,
-				"--prompt", "test review cycle", "--review"}, &stdout, &stderr, VersionInfo{})
-			if (!fail && code != 0) || (fail && code != 1) {
+				"--prompt", "test review cycle", "--review"}
+			if test.consult {
+				args = append(args, "--consult")
+			}
+			code := Run(context.Background(), args, &stdout, &stderr, VersionInfo{})
+			if (test.fail == "" && code != 0) || (test.fail != "" && code != 1) {
 				t.Fatalf("exit=%d, stdout=%q, stderr=%q", code, stdout.String(), stderr.String())
 			}
-			if !fail && !strings.Contains(stdout.String(), "Reviewer re-review:\nreview complete") {
+			if test.fail == "" && !strings.Contains(stdout.String(), "Reviewer re-review:\nreview complete") {
 				t.Fatalf("missing final review in output: %q", stdout.String())
 			}
 			database, err := store.Open(context.Background(), path)
@@ -1273,11 +1287,13 @@ func TestDevProviderReviewCycle(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			want := []string{"test review cycle", "Planner plan:\nplan", "Coder work:\ndraft",
-				"Reviewer feedback:\nfeedback", "Coder revision:\nrevision", "Reviewer re-review:\nreview complete"}
-			if fail {
-				want = want[:3]
+			want := []string{"test review cycle", "Planner plan:\nplan"}
+			if test.consult {
+				want = append(want, "Coder question:\ncoder question", "Planner answer:\nplanner answer")
 			}
+			want = append(want, "Coder work:\ndraft", "Reviewer feedback:\nfeedback",
+				"Coder revision:\nrevision", "Reviewer re-review:\nreview complete")
+			want = want[:test.messageCount]
 			if len(job.JobMessages) != len(want) {
 				t.Fatalf("messages=%#v", job.JobMessages)
 			}
@@ -1293,10 +1309,10 @@ func TestDevProviderReviewCycle(t *testing.T) {
 	}
 }
 
-func TestDevProviderReviewRequiresLocalJobAndExcludesConsult(t *testing.T) {
+func TestDevProviderReviewRequiresLocalJob(t *testing.T) {
 	for _, args := range [][]string{
 		{"dev", "provider", "run", "--prompt", "test", "--review"},
-		{"dev", "provider", "run", "--prompt", "test", "--job", "job_test", "--review", "--consult"},
+		{"dev", "provider", "run", "--prompt", "test", "--review", "--consult"},
 	} {
 		var stdout, stderr bytes.Buffer
 		if code := Run(context.Background(), args, &stdout, &stderr, VersionInfo{}); code != 2 {
@@ -1512,6 +1528,22 @@ func TestDevProviderACPHelper(t *testing.T) {
 						os.Exit(1)
 					}
 					workflowRole = "coder"
+					response = "draft"
+					if strings.Contains(prompt, "Before working, write one question") {
+						response = "coder question"
+					}
+				} else if strings.Contains(prompt, "Answer the coder's question about the request and your plan:") {
+					if workflowRole != "planner" || !strings.Contains(prompt, "coder question") {
+						os.Exit(1)
+					}
+					if _, err := os.Stat("planner-fail"); err == nil {
+						os.Exit(1)
+					}
+					response = "planner answer"
+				} else if strings.Contains(prompt, "The planner answered your question:") {
+					if workflowRole != "coder" || !strings.Contains(prompt, "planner answer") {
+						os.Exit(1)
+					}
 					response = "draft"
 				} else if strings.Contains(prompt, "Act as the reviewer.") {
 					if _, err := os.Stat("review-fail"); err == nil {
