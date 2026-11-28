@@ -720,7 +720,7 @@ func TestProviderControllerReconcilesUnknownTurnWithLookupAndCompleteUsage(t *te
 	if err != nil || receipt.Revision == 0 || reconciledTurn.ID != turn.ID ||
 		completed.Status != domain.PlanningTurnCompleted || !completed.ReconcilesUnknown ||
 		result.Status != domain.PlanningTurnCompleted || result.TokensUsed != 18 ||
-		runtime.sendCalls != 1 || runtime.lookupCalls != 2 || runtime.usageCalls != 1 {
+		runtime.sendCalls != 1 || runtime.lookupCalls != 1 || runtime.usageCalls != 1 {
 		t.Fatalf("same-Turn reconciliation failed: %#v %#v %#v calls(send=%d lookup=%d usage=%d) err=%v",
 			receipt, reconciledTurn, completed, runtime.sendCalls, runtime.lookupCalls, runtime.usageCalls, err)
 	}
@@ -733,8 +733,10 @@ func TestProviderControllerReconcilesUnknownTurnWithLookupAndCompleteUsage(t *te
 	}
 }
 
-func TestProviderControllerRejectsSendWithoutSafeCapability(t *testing.T) {
-	runtime := &fakePlanningProviderRuntime{}
+func TestProviderControllerAllowsOneShotSendButNeverRetriesUnknownWithoutProof(t *testing.T) {
+	runtime := &fakePlanningProviderRuntime{
+		sendErr: &provider.OperationError{Class: provider.FailureAmbiguous, Code: provider.OperationCodeTimeout},
+	}
 	controller, database, principal, jobID, grantID, documents := newProviderControllerFixture(t, runtime)
 	_, execution, _, _, err := controller.StartPlanning(
 		context.Background(), jobID, grantID, "cmd_22222222222222222222222222222222", documents, principal,
@@ -742,15 +744,27 @@ func TestProviderControllerRejectsSendWithoutSafeCapability(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartPlanning: %v", err)
 	}
+	commandID := "cmd_23232323232323232323232323232323"
+	_, turn, observation, _, err := controller.SendPlanning(
+		context.Background(), jobID, execution.ID, "session_1",
+		commandID, "inspect the accepted repository snapshot", 100, principal,
+	)
+	if err == nil || observation.Status != domain.PlanningTurnUnknown || runtime.sendCalls != 1 {
+		t.Fatalf("initial Send was not attempted exactly once and recorded UNKNOWN: turn=%#v observation=%#v calls=%d err=%v",
+			turn, observation, runtime.sendCalls, err)
+	}
+	runtime.capabilities = provider.Capabilities{Identity: runtime.identity}
 	if _, _, _, _, err := controller.SendPlanning(
 		context.Background(), jobID, execution.ID, "session_1",
-		"cmd_23232323232323232323232323232323", "inspect the accepted repository snapshot", 100, principal,
+		commandID, "inspect the accepted repository snapshot", 100, principal,
 	); !errors.Is(err, provider.ErrUnsupportedCapability) {
-		t.Fatalf("SendPlanning error = %v, want ErrUnsupportedCapability", err)
+		t.Fatalf("UNKNOWN retry error = %v, want ErrUnsupportedCapability", err)
 	}
 	job, err := database.GetJob(context.Background(), jobID)
-	if err != nil || len(job.PlanningTurnIntents) != 0 || runtime.sendCalls != 0 {
-		t.Fatalf("unsupported Send created intent or called Runtime: %#v calls=%d err=%v", job.PlanningTurnIntents, runtime.sendCalls, err)
+	if err != nil || len(job.PlanningTurnIntents) != 1 || len(job.PlanningTurnObservations) != 1 ||
+		runtime.sendCalls != 1 || runtime.lookupCalls != 0 {
+		t.Fatalf("unsafe retry or missing lifecycle facts: intents=%d observations=%d sends=%d lookups=%d err=%v",
+			len(job.PlanningTurnIntents), len(job.PlanningTurnObservations), runtime.sendCalls, runtime.lookupCalls, err)
 	}
 }
 
@@ -1205,6 +1219,48 @@ func TestProviderControllerTreatsExistingStopIntentWithoutObservationAsUnknown(t
 	}
 }
 
+type providerTestWorktreeStore interface {
+	GetJob(context.Context, string) (domain.Job, error)
+}
+
+func bindProviderTestWorktree(
+	t *testing.T,
+	database providerTestWorktreeStore,
+	executionController *ExecutionController,
+	jobID, commandID, repositoryID string,
+	execution domain.RoleExecution,
+) (domain.RoleExecution, domain.ProviderStartIntent) {
+	t.Helper()
+	assignment := domain.WorktreeAssignment{
+		ID:    domain.WorktreeAssignmentID(jobID, execution.TaskID, repositoryID),
+		JobID: jobID, TaskID: execution.TaskID, RepositoryID: repositoryID,
+		RepositoryPath: t.TempDir(), WorktreePath: t.TempDir(),
+		BaselineCommit: strings.Repeat("a", 40), OwnerRoleExecutionID: execution.ID,
+	}
+	if _, _, err := executionController.BindWorktree(context.Background(), execution.ID, commandID, assignment); err != nil {
+		t.Fatalf("BindWorktree: %v", err)
+	}
+	job, err := database.GetJob(context.Background(), jobID)
+	if err != nil {
+		t.Fatalf("GetJob after Worktree binding: %v", err)
+	}
+	var updatedExecution domain.RoleExecution
+	var intent domain.ProviderStartIntent
+	for _, candidate := range job.RoleExecutions {
+		if candidate.ID == execution.ID {
+			updatedExecution = candidate
+			break
+		}
+	}
+	for _, candidate := range job.ProviderStartIntents {
+		if candidate.RoleExecutionID == execution.ID {
+			intent = candidate
+			break
+		}
+	}
+	return updatedExecution, intent
+}
+
 func TestProviderControllerDispatchesTaskCoderStartWithDurableIntentAndReconcilesUnknown(t *testing.T) {
 	database, jobID, revision, task := approvedExecutionPermissionControllerFixture(t)
 	ctx := context.Background()
@@ -1234,6 +1290,10 @@ func TestProviderControllerDispatchesTaskCoderStartWithDurableIntentAndReconcile
 	if err != nil {
 		t.Fatalf("StartTaskExecution: %v", err)
 	}
+	execution, intent = bindProviderTestWorktree(
+		t, database, executionController, jobID, "cmd_c1111111111111111111111111111111",
+		revision.Contract.TargetRepositories[0], execution,
+	)
 	runtime := &fakePlanningProviderRuntime{
 		identity: provider.Identity{
 			ProviderID: permission.ProviderID, AccountID: permission.AccountID,
@@ -1242,15 +1302,6 @@ func TestProviderControllerDispatchesTaskCoderStartWithDurableIntentAndReconcile
 		lookupResult: provider.LookupResult{
 			Found: false, OperationID: intent.ID, Status: provider.LookupStatusNotFound,
 			EvidenceSHA256: strings.Repeat("f", 64),
-		},
-	}
-	runtime.capabilities = provider.Capabilities{
-		Identity: runtime.identity, StartLookup: true, StartIdempotency: true,
-		Evidence: []provider.CapabilityEvidence{
-			{Capability: provider.CapabilityStartLookup, Identity: runtime.identity, TestID: "task-start-test",
-				EvidenceSHA256: strings.Repeat("a", 64), EvidenceLevel: provider.EvidenceSynthetic, VerifiedAt: now},
-			{Capability: provider.CapabilityStartIdempotency, Identity: runtime.identity, TestID: "task-start-test",
-				EvidenceSHA256: strings.Repeat("b", 64), EvidenceLevel: provider.EvidenceSynthetic, VerifiedAt: now},
 		},
 	}
 	controller, err := NewProviderControllerWithExecution(database, runtime, executionController)
@@ -1266,6 +1317,10 @@ func TestProviderControllerDispatchesTaskCoderStartWithDurableIntentAndReconcile
 			persisted.ProviderStartIntents[len(persisted.ProviderStartIntents)-1].ID != request.OperationID {
 			return errors.New("Task Provider Start was called before intent persistence")
 		}
+		attempt, found := latestStartObservation(persisted, request.OperationID)
+		if !found || attempt.Status != domain.ProviderStartUnknown || attempt.ReconcilesUnknown {
+			return errors.New("Task Provider Start was called before its one-shot attempt marker was persisted")
+		}
 		if request.RoleExecutionID != execution.ID || request.RequestSHA256 != permission.RequestSHA256 ||
 			request.PromptSHA256 != sha256String(request.Prompt) || !strings.Contains(request.Prompt, task.Title) {
 			return errors.New("Task Provider Start request is not derived from the persisted Task and permission")
@@ -1276,14 +1331,14 @@ func TestProviderControllerDispatchesTaskCoderStartWithDurableIntentAndReconcile
 	if err != nil {
 		t.Fatalf("DispatchTaskExecution: %v", err)
 	}
-	if observation.Status != domain.ProviderStartAccepted || result.OperationID != intent.ID ||
-		result.SessionID == "" || runtime.lookupCalls != 1 || runtime.startCalls != 1 {
+	if observation.Status != domain.ProviderStartAccepted || !observation.ReconcilesUnknown ||
+		result.OperationID != intent.ID || result.SessionID == "" || runtime.lookupCalls != 0 || runtime.startCalls != 1 {
 		t.Fatalf("Task Provider Start was not accepted exactly once: observation=%#v result=%#v lookups=%d starts=%d",
 			observation, result, runtime.lookupCalls, runtime.startCalls)
 	}
 	retryObservation, retryResult, err := controller.DispatchTaskExecution(ctx, jobID, execution.ID, permission.ID, permissionRequest)
 	if err != nil || retryObservation.ID != observation.ID || retryResult != result ||
-		runtime.lookupCalls != 1 || runtime.startCalls != 1 {
+		runtime.lookupCalls != 0 || runtime.startCalls != 1 {
 		t.Fatalf("exact Task Start replay changed terminal evidence or redispatched: %#v %#v %v", retryObservation, retryResult, err)
 	}
 }
@@ -1317,6 +1372,10 @@ func TestProviderControllerReconcilesTaskCoderStartUnknownBySameOperationID(t *t
 	if err != nil {
 		t.Fatalf("StartTaskExecution: %v", err)
 	}
+	execution, intent = bindProviderTestWorktree(
+		t, database, executionController, jobID, "cmd_c4444444444444444444444444444444",
+		revision.Contract.TargetRepositories[0], execution,
+	)
 	runtime := &fakePlanningProviderRuntime{
 		identity: provider.Identity{
 			ProviderID: permission.ProviderID, AccountID: permission.AccountID,
@@ -1328,6 +1387,24 @@ func TestProviderControllerReconcilesTaskCoderStartUnknownBySameOperationID(t *t
 		},
 		startErr: &provider.OperationError{Class: provider.FailureAmbiguous, Code: provider.OperationCodeTimeout},
 	}
+	runtime.capabilities = provider.Capabilities{Identity: runtime.identity}
+	controller, err := NewProviderControllerWithExecution(database, runtime, executionController)
+	if err != nil {
+		t.Fatalf("NewProviderControllerWithExecution: %v", err)
+	}
+	// Simulate a process exit after the durable attempt marker but before the
+	// Provider call. Without Lookup or idempotency evidence, replay must not Start.
+	if _, err := controller.recordTaskStartObservation(
+		ctx, jobID, intent.ID, domain.ProviderStartUnknown, "", "", "", false,
+	); err != nil {
+		t.Fatalf("persist simulated pre-dispatch attempt marker: %v", err)
+	}
+	blocked, _, err := controller.DispatchTaskExecution(ctx, jobID, execution.ID, permission.ID, request)
+	if !errors.Is(err, provider.ErrUnsupportedCapability) || blocked.Status != domain.ProviderStartUnknown ||
+		runtime.startCalls != 0 || runtime.lookupCalls != 0 {
+		t.Fatalf("replay without recovery evidence repeated Task Start: %#v starts=%d lookups=%d err=%v",
+			blocked, runtime.startCalls, runtime.lookupCalls, err)
+	}
 	runtime.capabilities = provider.Capabilities{
 		Identity: runtime.identity, StartLookup: true,
 		Evidence: []provider.CapabilityEvidence{{
@@ -1335,10 +1412,6 @@ func TestProviderControllerReconcilesTaskCoderStartUnknownBySameOperationID(t *t
 			TestID: "task-start-test", EvidenceSHA256: strings.Repeat("d", 64),
 			EvidenceLevel: provider.EvidenceSynthetic, VerifiedAt: now,
 		}},
-	}
-	controller, err := NewProviderControllerWithExecution(database, runtime, executionController)
-	if err != nil {
-		t.Fatalf("NewProviderControllerWithExecution: %v", err)
 	}
 	unknown, _, err := controller.DispatchTaskExecution(ctx, jobID, execution.ID, permission.ID, request)
 	if err == nil || unknown.Status != domain.ProviderStartUnknown || runtime.startCalls != 1 {
@@ -1357,6 +1430,77 @@ func TestProviderControllerReconcilesTaskCoderStartUnknownBySameOperationID(t *t
 		result.OperationID != intent.ID || runtime.startCalls != 1 || runtime.lookupCalls != 2 {
 		t.Fatalf("UNKNOWN Task Start was not reconciled by same OperationID Lookup: %#v %#v starts=%d lookups=%d err=%v",
 			accepted, result, runtime.startCalls, runtime.lookupCalls, err)
+	}
+}
+
+func TestProviderControllerReconcilesUnboundTaskCoderStartByReadOnlyLookup(t *testing.T) {
+	database, jobID, revision, task := approvedExecutionPermissionControllerFixture(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Round(0)
+	assessor := &fakeExecutionEffectAssessor{assessment: domain.ExecutionEffectAssessment{
+		Reversible: true, Mutating: true, ValidUntil: now.Add(45 * time.Minute),
+	}}
+	executionController, err := NewExecutionController(database, assessor)
+	if err != nil {
+		t.Fatalf("NewExecutionController: %v", err)
+	}
+	executionController.now = func() time.Time { return now }
+	request := domain.ExecutionPermissionRequest{
+		JobID: jobID, TaskID: task.ID, CommandID: "cmd_b7777777777777777777777777777777",
+		Role: domain.RoleCoder, Effect: "repository.write", Resource: revision.Contract.TargetRepositories[0],
+		ProviderID: "provider.test", AccountID: "account.primary",
+		ConfigurationSHA256: revision.Contract.ConfigurationSHA256,
+		ReservedTurns:       2, ReservedTokens: 500, ExpiresAt: now.Add(30 * time.Minute),
+	}
+	_, permission, err := executionController.Authorize(ctx, request)
+	if err != nil {
+		t.Fatalf("Authorize: %v", err)
+	}
+	_, execution, intent, err := executionController.StartTaskExecution(
+		ctx, permission.ID, "cmd_b8888888888888888888888888888888", request,
+	)
+	if err != nil {
+		t.Fatalf("StartTaskExecution without Worktree: %v", err)
+	}
+	job, err := database.GetJob(ctx, jobID)
+	if err != nil {
+		t.Fatalf("GetJob: %v", err)
+	}
+	if execution.WorktreeAssignmentID != "" || execution.WorktreePath != "" || len(job.WorktreeAssignments) != 0 {
+		t.Fatalf("fixture unexpectedly has a Worktree binding: execution=%#v assignments=%#v", execution, job.WorktreeAssignments)
+	}
+	runtime := &fakePlanningProviderRuntime{
+		identity: provider.Identity{
+			ProviderID: permission.ProviderID, AccountID: permission.AccountID,
+			SDKVersion: "test-sdk/1", ConfigurationSHA256: permission.ConfigurationSHA256,
+		},
+		lookupResult: provider.LookupResult{
+			Found: true, OperationID: intent.ID, Status: "RUNNING",
+			ReceiptID: "receipt_unbound", SessionID: "session_unbound", EvidenceSHA256: strings.Repeat("a", 64),
+		},
+	}
+	runtime.capabilities = provider.Capabilities{
+		Identity: runtime.identity, StartLookup: true,
+		Evidence: []provider.CapabilityEvidence{{
+			Capability: provider.CapabilityStartLookup, Identity: runtime.identity,
+			TestID: "unbound-start-lookup", EvidenceSHA256: strings.Repeat("b", 64),
+			EvidenceLevel: provider.EvidenceSynthetic, VerifiedAt: now,
+		}},
+	}
+	controller, err := NewProviderControllerWithExecution(database, runtime, executionController)
+	if err != nil {
+		t.Fatalf("NewProviderControllerWithExecution: %v", err)
+	}
+	unknown, err := controller.recordTaskStartObservation(ctx, jobID, intent.ID, domain.ProviderStartUnknown, "", "", "", false)
+	if err != nil || unknown.Status != domain.ProviderStartUnknown {
+		t.Fatalf("record UNKNOWN Start observation: %#v err=%v", unknown, err)
+	}
+	accepted, result, err := controller.DispatchTaskExecution(ctx, jobID, execution.ID, permission.ID, request)
+	if err != nil || accepted.Status != domain.ProviderStartAccepted || !accepted.ReconcilesUnknown ||
+		result.OperationID != intent.ID || result.SessionID != "session_unbound" ||
+		runtime.lookupCalls != 1 || runtime.startCalls != 0 {
+		t.Fatalf("unbound Start was not recovered by read-only Lookup: %#v %#v lookups=%d starts=%d err=%v",
+			accepted, result, runtime.lookupCalls, runtime.startCalls, err)
 	}
 }
 
