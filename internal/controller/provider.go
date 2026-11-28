@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -579,11 +580,20 @@ func (c *ProviderController) DispatchTaskExecution(
 	// Persist the dispatch attempt before crossing the Provider boundary. If the
 	// process exits after this write, replay must reconcile UNKNOWN rather than
 	// issuing a second Start with no evidence that the first attempt did not run.
-	attempt, err := c.recordTaskStartObservation(
-		ctx, job.ID, intent.ID, domain.ProviderStartUnknown, "", "", "", false,
-	)
+	var attempt domain.ProviderStartObservation
+	if previousFound {
+		attempt, err = c.recordTaskStartObservation(
+			ctx, job.ID, intent.ID, domain.ProviderStartUnknown, "", "", "", false,
+		)
+	} else {
+		var claimed bool
+		attempt, claimed, err = c.claimTaskStartDispatch(ctx, job.ID, intent.ID)
+		if err == nil && !claimed {
+			return attempt, provider.StartResult{}, errors.New("Task Provider Start dispatch is already claimed; reconcile the same OperationID")
+		}
+	}
 	if err != nil {
-		return domain.ProviderStartObservation{}, provider.StartResult{}, fmt.Errorf("persist Task Provider Start attempt: %w", err)
+		return domain.ProviderStartObservation{}, provider.StartResult{}, fmt.Errorf("persist Task Provider Start dispatch claim: %w", err)
 	}
 	if _, err := c.execution.ValidatePermission(ctx, permissionID, permissionRequest); err != nil {
 		return attempt, provider.StartResult{}, err
@@ -640,6 +650,31 @@ func buildTaskProviderStartPrompt(job domain.Job, task domain.Task, contract dom
 		return "", fmt.Errorf("encode immutable Task Provider prompt: %w", err)
 	}
 	return string(prompt), nil
+}
+
+func (c *ProviderController) claimTaskStartDispatch(
+	ctx context.Context,
+	jobID, operationID string,
+) (domain.ProviderStartObservation, bool, error) {
+	job, err := c.store.GetJob(ctx, jobID)
+	if err != nil {
+		return domain.ProviderStartObservation{}, false, err
+	}
+	if previous, found := latestStartObservation(job, operationID); found {
+		return previous, false, nil
+	}
+	commandID, err := newProviderDispatchCommandID()
+	if err != nil {
+		return domain.ProviderStartObservation{}, false, err
+	}
+	_, observation, err := c.store.AddTaskProviderStartObservation(
+		ctx, jobID, job.Revision, operationID, commandID, domain.ProviderStartUnknown,
+		"", "", "", false,
+	)
+	if err != nil {
+		return domain.ProviderStartObservation{}, false, err
+	}
+	return observation, true, nil
 }
 
 func (c *ProviderController) recordTaskStartObservation(
@@ -1450,7 +1485,22 @@ func (c *ProviderController) reconcileTurn(
 	if previousFound && previous.Status != domain.PlanningTurnUnknown {
 		return receipt, turn, previous, turnResultFromObservation(previous), nil
 	}
-	if previousFound {
+	dispatchOwner := false
+	if !previousFound {
+		var claimed bool
+		var claimErr error
+		previous, claimed, claimErr = c.claimPlanningTurnDispatch(ctx, job.ID, turn.ID, principal)
+		if claimErr != nil {
+			return receipt, turn, domain.PlanningTurnObservation{}, provider.TurnResult{}, claimErr
+		}
+		if !claimed {
+			previousFound = true
+		} else {
+			previousFound = true
+			dispatchOwner = true
+		}
+	}
+	if previousFound && !dispatchOwner {
 		capabilities, err := c.runtime.Capabilities(ctx)
 		if err != nil {
 			return receipt, turn, domain.PlanningTurnObservation{}, provider.TurnResult{}, err
@@ -1625,6 +1675,39 @@ func (c *ProviderController) recordTurnObservation(
 		ctx, job.ID, job.Revision, turnID, commandID, status, tokensUsed, evidenceSHA256, reconcilesUnknown, principal,
 	)
 	return observation, err
+}
+
+func (c *ProviderController) claimPlanningTurnDispatch(
+	ctx context.Context,
+	jobID, turnID string,
+	principal auth.AuthenticatedPrincipal,
+) (domain.PlanningTurnObservation, bool, error) {
+	job, err := c.store.GetJob(ctx, jobID)
+	if err != nil {
+		return domain.PlanningTurnObservation{}, false, err
+	}
+	if previous, found := latestProviderTurnObservation(job, turnID); found {
+		return previous, false, nil
+	}
+	commandID, err := newProviderDispatchCommandID()
+	if err != nil {
+		return domain.PlanningTurnObservation{}, false, err
+	}
+	_, observation, err := c.store.AddPlanningTurnObservation(
+		ctx, job.ID, job.Revision, turnID, commandID, domain.PlanningTurnUnknown, 0, "", false, principal,
+	)
+	if err != nil {
+		return domain.PlanningTurnObservation{}, false, err
+	}
+	return observation, true, nil
+}
+
+func newProviderDispatchCommandID() (string, error) {
+	var random [16]byte
+	if _, err := rand.Read(random[:]); err != nil {
+		return "", fmt.Errorf("generate Provider dispatch claim identity: %w", err)
+	}
+	return "cmd_" + hex.EncodeToString(random[:]), nil
 }
 
 func latestProviderTurnObservation(job domain.Job, turnID string) (domain.PlanningTurnObservation, bool) {
