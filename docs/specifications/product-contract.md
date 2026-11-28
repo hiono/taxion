@@ -2,7 +2,7 @@
 
 Version: 1.0
 Date: 2026-11-20
-Normative decisions: ADR-001, ADR-100, ADR-101, ADR-200, ADR-201, ADR-202, ADR-300, ADR-301, ADR-302, ADR-400, ADR-408, ADR-409, ADR-500, ADR-501, ADR-502, ADR-503, ADR-504, ADR-505, ADR-506, ADR-507, ADR-700, ADR-701, ADR-800, ADR-801, ADR-802, ADR-811
+Normative decisions: ADR-001, ADR-100, ADR-101, ADR-200, ADR-201, ADR-202, ADR-300, ADR-301, ADR-302, ADR-400, ADR-408, ADR-409, ADR-500, ADR-501, ADR-502, ADR-503, ADR-504, ADR-505, ADR-507, ADR-700, ADR-701, ADR-800, ADR-801, ADR-802, ADR-811
 
 ## 1. Purpose and scope
 
@@ -22,7 +22,7 @@ Taxionは、人間の曖昧な思考を対話で整理し、実行可能な計�
 8. 実行状態不明を成功・失敗へ推測変換しない。安全な照合なしにblind resendしない。
 9. 製品受入れは検証可能な成果と実Job完遂で判断する。
 10. Agent Harnessの能力要求H1〜H8を満たす。能力をProvider / Runtimeへ委譲する場合も、対応構成と実動作の証拠を確認する。
-11. 承認済みJob内のTaskless PLANNERへの個別質問実行にはJobQuestionAuthorizationを使用できます。JobMessageやQUESTION種別だけでは認可を発行しません。
+11. Agent間の質問・回答は通常のJobMessageとして扱い、通信専用の認可を要求しません。
 12. Jobの依頼主体は認証済みHUMAN Principalとし、Ingress Clientは人間の依頼を伝達します。Execution AgentはJobの目的と要求能力に基づいてTaxionが選択します。
 
 ## 3. Actors and responsibilities
@@ -88,10 +88,6 @@ Provider Adapterの実装要求は[Provider Adapter 実行境界 要求仕様書
 
 詳細なrevision、canonicalization、approval transactionの契約は [Job Contract Requirements](job-contract-requirements.md) と [Job Contract Detailed Design](../design/job-contract-detailed-design.md) を参照する。
 
-### 4.3.1 JobQuestionAuthorization
-
-承認済みJob内でRoleからTaskless PLANNERへ質問し、回答のために追加のbounded read-only Provider executionが必要な場合は、元のQuestionと実行範囲に束縛したJobQuestionAuthorizationを発行できます。自然言語の質問・回答、JobMessageの保存・参照・転送、既に利用可能なContextだけを参照し新たなProvider Send / Turnを伴わない応答にはgrantを要求しません。新たなProvider Send / Turnを伴う応答には、該当するJobQuestionAuthorizationまたはExecution Permissionを要求します。質問本文や宛先だけからgrantを発行しません。grantはJobApproval、Planner RoleExecution、元Question、Provider / account / configuration、read-only context、deadlineへ束縛し、JobApprovalやExecutionPermissionを拡張しません。
-
 ### 4.4 Execution and collaboration
 
 Taskの作成・scope narrowing・parent / dependency・deadlineの要件は[Task Requirements](task-requirements.md)、Domain / Storeの設計は[Task Detailed Design](../design/task-detailed-design.md)、境界テストは[Task Test Specification](../test-specs/task-test-specification.md)を参照します。
@@ -151,7 +147,9 @@ Provider Adapterのoperation・credential・recovery検証項目は[Provider Ada
 
 永続化に必要な最小情報としてMessageID、JobID、認証済みSender、Recipient、作成時刻、provenanceを保持します。Senderは認証済みHUMAN Principal、Taxion管理のCONTROLLER / ORCHESTRATOR identity、またはRoleExecutionへ結び付いたPLANNER / CODER / REVIEWER identityからControllerが確定します。本文の自己申告でidentityや宛先を決めません。Thread、Reply、Task、RoleExecution等の参照は、元Contextへの復帰や対象特定に必要な場合だけ保持します。
 
-質問・回答・依頼・通知・レビュー指摘は通常の自然言語メッセージです。情報交換だけではTask assignment、JobApproval、Execution Permission、Worktree ownershipを変更しません。実行責任の移転は独立したHandoff操作とします。回答のために追加Provider実行が必要な場合だけ§4.3.1およびADR-506に従い、外部副作用はADR-507に従って認可します。
+質問・回答・依頼・通知・レビュー指摘は通常の自然言語メッセージです。情報交換だけではTask assignment、JobApproval、Execution Permission、Worktree ownershipを変更しません。実行責任の移転は独立したHandoff操作とします。Provider実行はADR-301、ADR-505およびADR-507に従い、メッセージの保存・転送とは別に扱います。
+
+承認済みJobでTaskless PlannerがProvider turnを行う実行権限は未定義であり、現在はそのturnを実行できません。Execution PermissionはTaskに束縛されたCoder / Reviewerを対象とし、DRAFT用のPlanningAuthorizationは承認済みJobに適用できないためです。この未定義部分はJobMessageの保存・転送を妨げません。
 
 JobMessageの保存とProvider Send / Turnの実行を分離します。Provider operationの受理・結果・UNKNOWN・再試行はProvider operationの事実として管理し、メッセージ専用のRecipient状態機械を重複して設けません。通常の情報交換にFan-out BatchIDやDeliveryObservationの状態機械を必須化しません。
 
@@ -169,7 +167,6 @@ A2A Task / Message / Artifact / Agent Card / stateはTaxionのJob、RoleExecutio
 | IntakeProvenance | 認証済みPrincipal、Ingress source、受信時刻、request identity、原文依頼digest |
 | JobApproval | 承認者と正確なJobContract revisionの束縛 |
 | PlanningAuthorization | DRAFT planningの限定的read-only grant |
-| JobQuestionAuthorization | 承認済みJob内でTaskless PLANNERへ質問する個別のbounded read-only grant |
 | JobProgressNote | Job内の進捗・再開に必要な要点とprovenance |
 | Task | Job内の作業分解と明示的dependency |
 | RoleExecution | Roleの個々の実行とprovenance |
@@ -221,7 +218,6 @@ Provider / Runtimeへの委譲は許容しますが、APIの存在やProviderの
 | Job authorityの基本方針 | ADR-500 |
 | JobApproval | ADR-504 |
 | DRAFT PlanningAuthorization | ADR-505 |
-| JobQuestionAuthorization | ADR-506 |
 | Operation-scoped Execution Permission / Admission separation | ADR-507 |
 | Provider operation lifecycle | ADR-409 |
 | 全経路の不変条件 | ADR-202 |
