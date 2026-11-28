@@ -70,8 +70,8 @@ func runACPProvider(ctx context.Context, args []string, stdout, stderr io.Writer
 	}
 	if flags.NArg() != 0 || strings.TrimSpace(*prompt) == "" || *timeout <= 0 ||
 		(*backend != "copilot" && *backend != "opencode") ||
-		((*consult || *review) && *localJobID == "") || (*consult && *review) {
-		fmt.Fprintln(stderr, "usage: taxion dev provider run --prompt \"...\" [--provider copilot|opencode] [--job <local-job-id> [--consult|--review]] [--timeout 10m]")
+		((*consult || *review) && *localJobID == "") {
+		fmt.Fprintln(stderr, "usage: taxion dev provider run --prompt \"...\" [--provider copilot|opencode] [--job <local-job-id> [--consult] [--review]] [--timeout 10m]")
 		return 2
 	}
 	cliName, providerID := "Copilot CLI", "copilot-cli"
@@ -172,11 +172,14 @@ func runACPProvider(ctx context.Context, args []string, stdout, stderr io.Writer
 
 	conversationContext := promptText
 	maxTurns := uint32(1)
-	if *consult {
-		promptText += "\n\nBefore answering, write one question for another agent to help with this request. Return only the question."
-		maxTurns = 2
-	} else if *review {
+	if *review {
 		promptText += "\n\nAct as the planner. Give the coder a concise plan for this request. Return only the plan."
+		maxTurns = 2
+		if *consult {
+			maxTurns = 3
+		}
+	} else if *consult {
+		promptText += "\n\nBefore answering, write one question for another agent to help with this request. Return only the question."
 		maxTurns = 2
 	}
 	requestHash := sha256Hex(promptText)
@@ -259,7 +262,7 @@ func runACPProvider(ctx context.Context, args []string, stdout, stderr io.Writer
 				_ = adapter.Close()
 				return report(stderr, err)
 			}
-			if err := reviewLocalJob(ctx, adapter, request, conversationContext, result.Content, record); err != nil {
+			if err := reviewLocalJob(ctx, adapter, request, start.SessionID, conversationContext, result.Content, *consult, record); err != nil {
 				_ = adapter.Close()
 				return report(stderr, err)
 			}
@@ -318,11 +321,30 @@ func runACPProvider(ctx context.Context, args []string, stdout, stderr io.Writer
 	return 0
 }
 
-func reviewLocalJob(ctx context.Context, adapter *provider.ACPAdapter, request provider.StartRequest, jobContext, plan string, record func(string, string) error) error {
-	coder, draft, err := startLocalAgent(ctx, adapter, request, "Act as the coder. Work on this request using the plan; provide your complete work as text.\n\n"+
-		jobContext+"\n\nPlanner plan:\n"+plan)
+func reviewLocalJob(ctx context.Context, adapter *provider.ACPAdapter, request provider.StartRequest, planner, jobContext, plan string, consult bool, record func(string, string) error) error {
+	prompt := "Act as the coder. Work on this request using the plan; provide your complete work as text."
+	if consult {
+		prompt = "Act as the coder. Before working, write one question for the planner about this request and plan. Return only the question."
+	}
+	coder, draft, err := startLocalAgent(ctx, adapter, request, prompt+"\n\n"+jobContext+"\n\nPlanner plan:\n"+plan)
 	if err != nil {
 		return err
+	}
+	if consult {
+		if err := record("Coder question:", draft); err != nil {
+			return err
+		}
+		answer, err := sendLocalAgent(ctx, adapter, request, planner, "Answer the coder's question about the request and your plan:\n\n"+draft)
+		if err != nil {
+			return err
+		}
+		if err := record("Planner answer:", answer); err != nil {
+			return err
+		}
+		draft, err = sendLocalAgent(ctx, adapter, request, coder, "The planner answered your question:\n"+answer+"\n\nContinue and provide your complete work as text.")
+		if err != nil {
+			return err
+		}
 	}
 	if err := record("Coder work:", draft); err != nil {
 		return err
