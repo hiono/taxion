@@ -26,7 +26,7 @@ Taxion内部の協調は同じJobの文脈で追跡する必要があります�
 
 - 質問・回答・依頼・通知・レビュー指摘は通常の自然言語メッセージです。種類ごとの通信認可、方向別ACL、専用grantを設けません。
 - メッセージの保存・参照・受け渡しはProvider実行や外部副作用の許可を意味しません。一方で、情報交換そのものにProvider実行grantを要求しません。
-- 回答のために新たなProvider実行やbounded read-only context acquisitionが必要な場合だけ、ADR-507のoperation単位の実行認可を別途検証します。
+- 既存Contextだけで完結するメッセージ応答にはProvider実行grantを要求しません。DRAFT Plannerがbounded read-only Provider turnを必要とする場合はADR-505 PlanningAuthorizationを検証します。JobApproval後のProvider実行はADR-507のoperation単位Execution Permissionを検証します。
 - 実行責任やWorktree所有権の移転は通常メッセージに含めず、停止・結果・成果・所有権の条件を検証する独立したHandoff操作とします。
 
 ### Persistence and provider operations
