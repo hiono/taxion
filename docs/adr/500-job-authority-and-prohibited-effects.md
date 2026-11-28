@@ -18,8 +18,8 @@ Agentへ静的な操作許可一覧だけを与えると、承認済みJob内の
 
 ## Consequences
 
-Agentの作業上の自由と、人間が定める承認境界を両立します。個別のauthority契約はADR-501およびADR-503〜507で定義し、実装・テストの詳細は製品仕様と詳細設計へ配置します。
+Agentの作業上の自由と、人間が定める承認境界を両立します。個別のauthority契約はADR-501およびADR-503〜505 / ADR-507で定義し、実装・テストの詳細は製品仕様と詳細設計へ配置します。
 
 ## Relationship to other ADRs
 
-ADR-400はExecution & Runtimeの基本方針、ADR-201はJob内のauthority facts、ADR-202はドメイン不変条件、ADR-408はWorktree境界、ADR-501はHUMAN Principal、ADR-503はACTIVE Jobの契約変更、ADR-504〜507は個別の認可判断を定義します。
+ADR-400はExecution & Runtimeの基本方針、ADR-201はJob内のauthority facts、ADR-202はドメイン不変条件、ADR-408はWorktree境界、ADR-501はHUMAN Principal、ADR-503はACTIVE Jobの契約変更、ADR-504 / ADR-505 / ADR-507は個別の認可判断を定義します。
