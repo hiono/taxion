@@ -19,14 +19,19 @@ type PlannerProposalOutcome struct {
 }
 
 type PlannerWorkflowController struct {
-	provider *ProviderController
+	provider    *ProviderController
+	jobContract *JobContractController
 }
 
 func NewPlannerWorkflowController(providerController *ProviderController) (*PlannerWorkflowController, error) {
-	if providerController == nil || providerController.store == nil || providerController.planning == nil {
+	if providerController == nil || providerController.store == nil {
 		return nil, errors.New("ProviderController with planning lifecycle is required")
 	}
-	return &PlannerWorkflowController{provider: providerController}, nil
+	jobContract, err := NewJobContractController(providerController.store)
+	if err != nil {
+		return nil, err
+	}
+	return &PlannerWorkflowController{provider: providerController, jobContract: jobContract}, nil
 }
 
 // ProposeJobContract sequences terminal Turn / complete Usage verification,
@@ -164,7 +169,7 @@ func (c *PlannerWorkflowController) ProposeJobContract(
 		return outcome, errors.New("final Planner Result was not found in the JobAggregate after persistence")
 	}
 
-	receipt, revision, err := c.provider.planning.ProposeJobContract(
+	receipt, revision, err := c.jobContract.Propose(
 		ctx, jobID, execution.ID, outcome.Result.ID, commandID, principal,
 	)
 	if err != nil {

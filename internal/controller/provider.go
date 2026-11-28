@@ -20,6 +20,7 @@ import (
 
 type ProviderExecutionStore interface {
 	PlanningLifecycleStore
+	JobContractProposalStore
 	StartTasklessPlanner(context.Context, string, uint64, string, string, auth.AuthenticatedPrincipal) (store.CommandReceipt, domain.RoleExecution, domain.ProviderStartIntent, error)
 	AddProviderEventObservation(context.Context, string, uint64, string, string, string, string, string, string, string, string, string, time.Time, auth.AuthenticatedPrincipal) (store.CommandReceipt, domain.ProviderEventObservation, error)
 	AddProviderStopIntent(context.Context, string, uint64, string, string, string, domain.ProviderStopReason, auth.AuthenticatedPrincipal) (store.CommandReceipt, domain.ProviderStopIntent, error)
@@ -178,7 +179,6 @@ func (a *ACPExecutionPermissionAuthorizer) Authorize(ctx context.Context, reques
 type ProviderController struct {
 	store     ProviderExecutionStore
 	runtime   PlanningProviderRuntime
-	planning  *PlanningController
 	execution *ExecutionController
 	now       func() time.Time
 }
@@ -187,12 +187,8 @@ func NewProviderController(lifecycleStore ProviderExecutionStore, runtime Planni
 	if lifecycleStore == nil || runtime == nil {
 		return nil, errors.New("ProviderExecutionStore and Provider Runtime are required")
 	}
-	planning, err := NewPlanningController(lifecycleStore)
-	if err != nil {
-		return nil, err
-	}
 	return &ProviderController{
-		store: lifecycleStore, runtime: runtime, planning: planning,
+		store: lifecycleStore, runtime: runtime,
 		now: func() time.Time { return time.Now().UTC().Round(0) },
 	}, nil
 }

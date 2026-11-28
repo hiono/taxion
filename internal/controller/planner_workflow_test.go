@@ -242,8 +242,8 @@ func TestPlannerWorkflowRejectsIncompleteTurnOrUsageBeforeResultRetrieval(t *tes
 func TestPlannerWorkflowRetainsPersistedResultWhenProposalStoreFails(t *testing.T) {
 	fixture := newPlannerWorkflowFixture(t, domain.PlanningTurnCompleted, true, true)
 	workflow := fixture.workflow(t)
-	originalStore := fixture.controller.planning.jobContract.store
-	fixture.controller.planning.jobContract.store = &failingJobContractProposalStore{
+	originalStore := workflow.jobContract.store
+	workflow.jobContract.store = &failingJobContractProposalStore{
 		JobContractProposalStore: originalStore,
 		failure:                  errors.New("injected JobContract persistence failure"),
 	}
@@ -263,7 +263,7 @@ func TestPlannerWorkflowRetainsPersistedResultWhenProposalStoreFails(t *testing.
 			job.ProviderResultObservations, job.JobContractRevisions)
 	}
 
-	fixture.controller.planning.jobContract.store = originalStore
+	workflow.jobContract.store = originalStore
 	retried, err := workflow.ProposeJobContract(
 		context.Background(), fixture.jobID, fixture.executionID, fixture.sessionID, fixture.turnID,
 		"cmd_38383838383838383838383838383838", fixture.principal,

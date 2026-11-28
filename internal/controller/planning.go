@@ -11,7 +11,7 @@ import (
 )
 
 type PlanningLifecycleStore interface {
-	JobContractProposalStore
+	GetJob(context.Context, string) (domain.Job, error)
 	AddProviderStartObservation(context.Context, string, uint64, string, string, string, string, string, string, bool, auth.AuthenticatedPrincipal) (store.CommandReceipt, domain.ProviderStartObservation, error)
 	AddPlanningTurnIntent(context.Context, string, uint64, string, string, string, string, uint64, auth.AuthenticatedPrincipal) (store.CommandReceipt, domain.PlanningTurnIntent, error)
 	AddPlanningTurnObservation(context.Context, string, uint64, string, string, string, uint64, string, bool, auth.AuthenticatedPrincipal) (store.CommandReceipt, domain.PlanningTurnObservation, error)
@@ -22,27 +22,14 @@ type PlanningLifecycleStore interface {
 }
 
 type PlanningController struct {
-	store       PlanningLifecycleStore
-	jobContract *JobContractController
+	store PlanningLifecycleStore
 }
 
 func NewPlanningController(lifecycleStore PlanningLifecycleStore) (*PlanningController, error) {
 	if lifecycleStore == nil {
 		return nil, errors.New("PlanningLifecycleStore is required")
 	}
-	jobContract, err := NewJobContractController(lifecycleStore)
-	if err != nil {
-		return nil, err
-	}
-	return &PlanningController{store: lifecycleStore, jobContract: jobContract}, nil
-}
-
-func (c *PlanningController) ProposeJobContract(
-	ctx context.Context,
-	jobID, roleExecutionID, sourceResultObservationID, commandID string,
-	principal auth.AuthenticatedPrincipal,
-) (store.CommandReceipt, domain.JobContractRevision, error) {
-	return c.jobContract.Propose(ctx, jobID, roleExecutionID, sourceResultObservationID, commandID, principal)
+	return &PlanningController{store: lifecycleStore}, nil
 }
 
 func (c *PlanningController) RecordStartObservation(
