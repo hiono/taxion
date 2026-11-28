@@ -1255,7 +1255,7 @@ func (c *ProviderController) savePlannerTurnMessage(ctx context.Context, turn do
 	}
 	communication := CommunicationController{store: c.store}
 	_, err := communication.SendFromRole(ctx, RoleMessageRequest{
-		JobID: turn.JobID, RoleExecutionID: turn.RoleExecutionID, ProviderSessionID: turn.ProviderSessionID,
+		JobID: turn.JobID, RoleExecutionID: turn.RoleExecutionID,
 		CommandID: providerTurnMessageCommandID(turn.ID),
 		Recipient: domain.ActorRef{Kind: domain.ActorOrchestrator, ID: domain.OrchestratorActorID},
 		Body:      body,

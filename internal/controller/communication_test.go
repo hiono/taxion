@@ -117,19 +117,6 @@ func TestCommunicationControllerPersistsCoderPlannerQuestionAndAnswer(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	// This fixture represents a recorded Coder session, not a Provider execution.
-	_, coderStart, err := database.AddTaskProviderStartObservation(
-		context.Background(), jobID, job.Revision, permission.OperationID,
-		domain.ProviderStartObservationCommandID(permission.OperationID, domain.ProviderStartAccepted, "session_coder", "receipt_coder", strings.Repeat("f", 64), false),
-		domain.ProviderStartAccepted, "session_coder", "receipt_coder", strings.Repeat("f", 64), false,
-	)
-	if err != nil {
-		t.Fatalf("record simulated Coder session: %v", err)
-	}
-	job, err = database.GetJob(context.Background(), jobID)
-	if err != nil {
-		t.Fatal(err)
-	}
 	var plannerExecution domain.RoleExecution
 	for _, execution := range job.RoleExecutions {
 		if execution.Role == domain.RolePlanner {
@@ -140,23 +127,12 @@ func TestCommunicationControllerPersistsCoderPlannerQuestionAndAnswer(t *testing
 	if plannerExecution.ID == "" {
 		t.Fatal("Planner RoleExecution was not found")
 	}
-	var plannerSession string
-	for _, observation := range job.ProviderStartObservations {
-		if observation.RoleExecutionID == plannerExecution.ID &&
-			observation.Status == domain.ProviderStartAccepted {
-			plannerSession = observation.ProviderSessionID
-		}
-	}
-	if plannerSession == "" {
-		t.Fatal("accepted Planner Provider Session was not found")
-	}
-
 	communication, err := NewCommunicationController(database)
 	if err != nil {
 		t.Fatalf("NewCommunicationController: %v", err)
 	}
 	question, err := communication.SendFromRole(context.Background(), RoleMessageRequest{
-		JobID: jobID, RoleExecutionID: coderExecution.ID, ProviderSessionID: coderStart.ProviderSessionID,
+		JobID: jobID, RoleExecutionID: coderExecution.ID,
 		CommandID: "cmd_44444444444444444444444444444444",
 		Recipient: domain.ActorRef{Kind: domain.ActorPlanner, ID: plannerExecution.ID},
 		Body:      "この制約の優先順位を確認してください。\\n元のTaskとContextは維持してください。",
@@ -171,7 +147,7 @@ func TestCommunicationControllerPersistsCoderPlannerQuestionAndAnswer(t *testing
 	}
 
 	answer, err := communication.SendFromRole(context.Background(), RoleMessageRequest{
-		JobID: jobID, RoleExecutionID: plannerExecution.ID, ProviderSessionID: plannerSession,
+		JobID: jobID, RoleExecutionID: plannerExecution.ID,
 		CommandID:        "cmd_55555555555555555555555555555555",
 		Recipient:        domain.ActorRef{Kind: domain.ActorCoder, ID: coderExecution.ID},
 		ReplyToMessageID: question.Message.ID,
@@ -207,10 +183,10 @@ func TestCommunicationControllerPersistsCoderPlannerQuestionAndAnswer(t *testing
 	}
 }
 
-func TestCommunicationControllerRejectsUnboundRoleSession(t *testing.T) {
+func TestCommunicationControllerRejectsUnknownRole(t *testing.T) {
 	runtime := &fakePlanningProviderRuntime{}
 	providerController, database, principal, jobID, grantID, documents := newProviderControllerFixture(t, runtime)
-	_, execution, _, _, err := providerController.StartPlanning(
+	_, _, _, _, err := providerController.StartPlanning(
 		context.Background(), jobID, grantID, "cmd_66666666666666666666666666666666", documents, principal,
 	)
 	if err != nil {
@@ -221,13 +197,13 @@ func TestCommunicationControllerRejectsUnboundRoleSession(t *testing.T) {
 		t.Fatalf("NewCommunicationController: %v", err)
 	}
 	_, err = communication.SendFromRole(context.Background(), RoleMessageRequest{
-		JobID: jobID, RoleExecutionID: execution.ID, ProviderSessionID: "session_forged",
+		JobID: jobID, RoleExecutionID: "role_unknown",
 		CommandID: "cmd_77777777777777777777777777777777",
 		Recipient: domain.ActorRef{Kind: domain.ActorHuman, ID: principal.PrincipalID()},
 		Body:      "must be rejected",
 	})
 	if err == nil {
-		t.Fatal("CommunicationController accepted an unbound Provider Session")
+		t.Fatal("CommunicationController accepted an unknown role")
 	}
 }
 

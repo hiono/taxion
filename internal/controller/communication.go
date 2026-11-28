@@ -16,13 +16,12 @@ type CommunicationStore interface {
 }
 
 type RoleMessageRequest struct {
-	JobID             string
-	RoleExecutionID   string
-	ProviderSessionID string
-	CommandID         string
-	Recipient         domain.ActorRef
-	ReplyToMessageID  string
-	Body              string
+	JobID            string
+	RoleExecutionID  string
+	CommandID        string
+	Recipient        domain.ActorRef
+	ReplyToMessageID string
+	Body             string
 }
 
 type HumanMessageRequest struct {
@@ -59,9 +58,8 @@ func NewCommunicationController(communicationStore CommunicationStore) (*Communi
 
 func (c *CommunicationController) SendFromRole(ctx context.Context, request RoleMessageRequest) (CommunicationOutcome, error) {
 	var outcome CommunicationOutcome
-	if ctx == nil || request.JobID == "" || request.RoleExecutionID == "" ||
-		request.ProviderSessionID == "" || request.CommandID == "" {
-		return outcome, errors.New("Role message requires Job, RoleExecution, Session, and Command identities")
+	if ctx == nil || request.JobID == "" || request.RoleExecutionID == "" || request.CommandID == "" {
+		return outcome, errors.New("Role message requires Job, RoleExecution, and Command identities")
 	}
 	job, err := c.store.GetJob(ctx, request.JobID)
 	if err != nil {
@@ -73,9 +71,6 @@ func (c *CommunicationController) SendFromRole(ctx context.Context, request Role
 	execution, found := findRoleExecution(job, request.RoleExecutionID)
 	if !found {
 		return outcome, errors.New("message sender RoleExecution was not found in the Job")
-	}
-	if !hasAcceptedRoleSession(job, execution, request.ProviderSessionID) {
-		return outcome, errors.New("message sender Session is not the accepted Session for the RoleExecution")
 	}
 	actorKind, err := actorKindForRole(execution.Role)
 	if err != nil {
@@ -202,19 +197,6 @@ func findRoleExecution(job domain.Job, roleExecutionID string) (domain.RoleExecu
 		}
 	}
 	return domain.RoleExecution{}, false
-}
-
-func hasAcceptedRoleSession(job domain.Job, execution domain.RoleExecution, sessionID string) bool {
-	var latest *domain.ProviderStartObservation
-	for i := range job.ProviderStartObservations {
-		observation := &job.ProviderStartObservations[i]
-		if observation.OperationID == execution.ProviderStartOperationID &&
-			(latest == nil || observation.CreatedRevision > latest.CreatedRevision) {
-			latest = observation
-		}
-	}
-	return latest != nil && latest.Status == domain.ProviderStartAccepted &&
-		latest.ProviderSessionID == sessionID
 }
 
 func actorKindForRole(role string) (domain.ActorKind, error) {
