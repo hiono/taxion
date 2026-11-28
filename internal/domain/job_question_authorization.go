@@ -86,6 +86,11 @@ func NewJobQuestionAuthorization(job Job, request JobQuestionAuthorizationReques
 		request.Budget.MaxTokens > latest.Contract.Budget.MaxTokens {
 		return JobQuestionAuthorization{}, errors.New("JobQuestionAuthorization exceeds the approved JobContract budget or deadline")
 	}
+	if count := len(job.JobQuestionAuthorizations); count > 0 &&
+		now.Before(job.JobQuestionAuthorizations[count-1].CreatedAt) {
+		return JobQuestionAuthorization{}, errors.New("JobQuestionAuthorization timestamp precedes the previous grant")
+	}
+
 	usedTurns, usedTokens, err := jobQuestionAuthorizationBudgetUsed(job, latest.Revision)
 	if err != nil {
 		return JobQuestionAuthorization{}, err
@@ -135,10 +140,6 @@ func NewJobQuestionAuthorization(job Job, request JobQuestionAuthorizationReques
 		if existing.QuestionMessageID == question.ID {
 			return JobQuestionAuthorization{}, errors.New("QUESTION already has a JobQuestionAuthorization")
 		}
-	}
-	if count := len(job.JobQuestionAuthorizations); count > 0 &&
-		now.Before(job.JobQuestionAuthorizations[count-1].CreatedAt) {
-		return JobQuestionAuthorization{}, errors.New("JobQuestionAuthorization timestamp precedes the previous grant")
 	}
 	if job.Revision >= uint64(^uint64(0)>>1) {
 		return JobQuestionAuthorization{}, errors.New("Job revision exhausted")
