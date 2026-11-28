@@ -732,7 +732,7 @@ Usage:
   taxion init [--dir <project-directory>]
   taxion ready
   taxion doctor
-  taxion run --request "..." --allow-coder-tools [--consult] [--working-directory .]
+  taxion run --request "..." --allow-coder-tools [--consult] [--review-source <tracked-path> ...] [--working-directory .]
   taxion provider login
   taxion auth login
   taxion job create --request "Trusted OIDC-authenticated DRAFT"
@@ -742,7 +742,7 @@ Usage:
   taxion job approve --revision <n> --canonical-hash <sha256> --canonicalization-version <n> --reason <text> <job-id>
   taxion dev job create --request "Local untrusted DRAFT only"
   taxion dev provider login
-  taxion dev provider run [--prompt "..."] [--provider copilot|opencode] [--job <local-job-id> [--consult] [--review [--allow-coder-tools]]]
+  taxion dev provider run [--prompt "..."] [--provider copilot|opencode] [--job <local-job-id> [--consult] [--review [--review-source <tracked-path> ...] [--allow-coder-tools]]]
   taxion job show <job-id>
   taxion job list
   taxion version
