@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/hiono/taxion/internal/auth"
@@ -37,6 +38,9 @@ const addPlanningAuthorizationCommandType = "AddPlanningAuthorization"
 const startTasklessPlannerCommandType = "StartTasklessPlanner"
 const addProviderResultObservationCommandType = "AddProviderResultObservation"
 const addProviderUsageObservationCommandType = "AddProviderUsageObservation"
+
+// ponytail: serialize file preparation globally; use per-path locking only if concurrent opens become a bottleneck.
+var sqliteFilePreparation sync.Mutex
 
 type Store struct {
 	db *sql.DB
@@ -68,6 +72,11 @@ func Open(ctx context.Context, path string) (*Store, error) {
 			return nil, fmt.Errorf("inspect database path: %w", err)
 		}
 		path = absolute
+		if runtime.GOOS != "windows" {
+			if err := restrictSQLiteFiles(path); err != nil {
+				return nil, fmt.Errorf("restrict SQLite file permissions: %w", err)
+			}
+		}
 	}
 
 	db, err := sql.Open("sqlite", path)
@@ -82,13 +91,46 @@ func Open(ctx context.Context, path string) (*Store, error) {
 		_ = db.Close()
 		return nil, err
 	}
-	if path != ":memory:" && runtime.GOOS != "windows" {
-		if err := os.Chmod(path, 0o600); err != nil {
-			_ = db.Close()
-			return nil, fmt.Errorf("restrict database permissions: %w", err)
+	return store, nil
+}
+
+func restrictSQLiteFiles(path string) error {
+	sqliteFilePreparation.Lock()
+	defer sqliteFilePreparation.Unlock()
+	for _, name := range []string{path, path + "-wal", path + "-shm", path + "-journal"} {
+		if err := restrictSQLiteFile(name, name == path); err != nil {
+			return err
 		}
 	}
-	return store, nil
+	return nil
+}
+
+func restrictSQLiteFile(path string, create bool) error {
+	if create {
+		file, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o600)
+		if err == nil {
+			if err := file.Close(); err != nil {
+				return err
+			}
+		} else if !errors.Is(err, os.ErrExist) {
+			return err
+		}
+	}
+	info, err := os.Lstat(path)
+	if errors.Is(err, os.ErrNotExist) && !create {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("%s is not a regular file", path)
+	}
+	err = os.Chmod(path, 0o600)
+	if errors.Is(err, os.ErrNotExist) && !create {
+		return nil
+	}
+	return err
 }
 
 func (s *Store) initialize(ctx context.Context) error {
