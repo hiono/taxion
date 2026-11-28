@@ -821,8 +821,10 @@ func TestProviderControllerPersistsTurnIntentBeforeSend(t *testing.T) {
 		for _, intent := range job.PlanningTurnIntents {
 			if intent.ID == request.TurnID && intent.OperationID == request.OperationID {
 				intentSeen = true
-				if len(job.PlanningTurnObservations) != 0 {
-					return errors.New("Turn observation was written before Runtime.Send")
+				if len(job.PlanningTurnObservations) != 1 ||
+					job.PlanningTurnObservations[0].TurnID != request.TurnID ||
+					job.PlanningTurnObservations[0].Status != domain.PlanningTurnUnknown {
+					return errors.New("exclusive UNKNOWN dispatch claim was not persisted before Runtime.Send")
 				}
 				return nil
 			}
