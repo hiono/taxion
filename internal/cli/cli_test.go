@@ -1003,6 +1003,7 @@ func TestRunRequiresRequestAndCoderOptIn(t *testing.T) {
 		{"run", "--allow-coder-tools"},
 		{"run", "--request", "edit a file", "--allow-coder-tools", "--job", "job_existing"},
 		{"run", "--request", "edit a file", "--allow-coder-tools", "--provider", "opencode"},
+		{"run", "--request", "edit a file", "--allow-coder-tools", "--command", "/tmp/other-acp"},
 	} {
 		var stdout, stderr bytes.Buffer
 		if code := Run(context.Background(), args, &stdout, &stderr, VersionInfo{}); code != 2 {
@@ -1018,6 +1019,7 @@ func TestRunCollaboratesAndSavesLocalJob(t *testing.T) {
 	for _, consult := range []bool{false, true} {
 		t.Run(fmt.Sprintf("consult=%t", consult), func(t *testing.T) {
 			helper := fakeCopilot(t)
+			t.Setenv("PATH", filepath.Dir(helper)+string(os.PathListSeparator)+os.Getenv("PATH"))
 			t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 			work := testGitWorkspace(t)
 			for _, file := range []string{"test-tool-permission", "require-workspace-diff"} {
@@ -1028,7 +1030,7 @@ func TestRunCollaboratesAndSavesLocalJob(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "jobs.sqlite")
 			var stdout, stderr bytes.Buffer
 			args := []string{"run",
-				"--command", helper, "--working-directory", work, "--store", path,
+				"--working-directory", work, "--store", path,
 				"--request", "Original task: test review cycle; product text-only review", "--allow-coder-tools"}
 			if consult {
 				args = append(args, "--consult")
@@ -1071,11 +1073,12 @@ func TestRunPreservesRequestWhenProviderFails(t *testing.T) {
 		t.Skip("taxion run currently supports Linux only")
 	}
 	helper := fakeCopilot(t)
+	t.Setenv("PATH", filepath.Dir(helper)+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	path := filepath.Join(t.TempDir(), "jobs.sqlite")
 	var stdout, stderr bytes.Buffer
 	code := Run(context.Background(), []string{"run",
-		"--command", helper, "--working-directory", t.TempDir(), "--store", path,
+		"--working-directory", t.TempDir(), "--store", path,
 		"--request", "simulate provider failure", "--allow-coder-tools"},
 		&stdout, &stderr, VersionInfo{})
 	if code != 1 || !strings.Contains(stdout.String(), "Local Job ID:") {

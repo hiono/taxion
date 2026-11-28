@@ -77,7 +77,7 @@ func runACPProvider(ctx context.Context, args []string, stdout, stderr io.Writer
 	}
 	if product {
 		if flags.NArg() != 0 || strings.TrimSpace(*requestText) == "" || *localJobID != "" ||
-			*prompt != "" || *review || !*allowTools || *timeout <= 0 ||
+			*prompt != "" || *command != "" || *review || !*allowTools || *timeout <= 0 ||
 			*backend != "copilot" {
 			fmt.Fprintln(stderr, "usage: taxion run --request \"...\" --allow-coder-tools [--consult] [--provider copilot] [--working-directory .]")
 			return 2
