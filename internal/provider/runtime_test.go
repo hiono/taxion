@@ -85,6 +85,7 @@ type testAdapter struct {
 	sendOutput     string
 	sendResult     TurnResult
 	resultContent  string
+	resultTurnID   string
 	lookupResult   LookupResult
 }
 
@@ -163,8 +164,12 @@ func (a *testAdapter) Result(_ context.Context, request ResultRequest, _ Credent
 	if content == "" {
 		content = "result"
 	}
+	turnID := request.TurnID
+	if a.resultTurnID != "" {
+		turnID = a.resultTurnID
+	}
 	return Result{
-		OperationID: request.OperationID, SessionID: request.SessionID, TurnID: request.TurnID,
+		OperationID: request.OperationID, SessionID: request.SessionID, TurnID: turnID,
 		Content: content, ResultSHA256: sha256Hex(content), Final: a.resultFinal, EvidenceSHA256: strings.Repeat("1", 64),
 	}, nil
 }
@@ -361,18 +366,24 @@ func TestRuntimeClosesCredentialAndReturnsUnknownWhenAdapterPanics(t *testing.T)
 	}
 }
 
-func TestRuntimeRejectsSyntheticCapabilityBeforeCredentialAcquisition(t *testing.T) {
+func TestRuntimeAllowsOneShotStartAndSendWithoutRetryEvidence(t *testing.T) {
 	adapter := newTestAdapter(CapabilityStartIdempotency)
 	broker := &testBroker{secret: []byte("runtime-test-secret")}
 	runtime, err := NewRuntime(adapter, broker, runtimeTestVerifier{})
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
 	}
-	if _, err := runtime.Start(context.Background(), validStartRequest()); !errors.Is(err, ErrUnsupportedCapability) {
-		t.Fatalf("Start error = %v", err)
+	start, err := runtime.Start(context.Background(), validStartRequest())
+	if err != nil || start.SessionID != "session_1" {
+		t.Fatalf("one-shot Start: %#v %v", start, err)
 	}
-	if adapter.startCalls != 0 || broker.acquires != 0 {
-		t.Fatalf("unsupported capability caused side effects: adapter=%d broker=%d", adapter.startCalls, broker.acquires)
+	turn, err := runtime.Send(context.Background(), validTurnRequest())
+	if err != nil || turn.Status != "COMPLETED" {
+		t.Fatalf("one-shot Send: %#v %v", turn, err)
+	}
+	if adapter.startCalls != 1 || adapter.sendCalls != 1 || broker.acquires != 2 || broker.closed != 2 {
+		t.Fatalf("one-shot dispatch / credential lifecycle: start=%d send=%d acquired=%d closed=%d",
+			adapter.startCalls, adapter.sendCalls, broker.acquires, broker.closed)
 	}
 }
 
@@ -487,6 +498,26 @@ func TestRuntimeSendPreservesUnknownAndRejectsCredentialBearingOutput(t *testing
 	}
 }
 
+func TestRuntimePreservesReportedUsageWhenTurnExceedsBudget(t *testing.T) {
+	adapter := newTestAdapter(CapabilitySendIdempotency)
+	adapter.sendResult = TurnResult{
+		Status: "FAILED", TokensUsed: 25, ReceiptID: "receipt_2",
+		EvidenceSHA256: strings.Repeat("b", 64),
+	}
+	broker := &testBroker{secret: []byte("runtime-test-secret")}
+	runtime, err := newTestRuntime(adapter, broker)
+	if err != nil {
+		t.Fatalf("NewRuntime: %v", err)
+	}
+	result, err := runtime.Send(context.Background(), validTurnRequest())
+	if err != nil {
+		t.Fatalf("Send over-budget FAILED result: %v", err)
+	}
+	if result.Status != "FAILED" || result.TokensUsed != 25 || result.Output != "" {
+		t.Fatalf("over-budget usage was not preserved safely: %#v", result)
+	}
+}
+
 func TestRuntimeRejectsCredentialInFinalResultAsUnknown(t *testing.T) {
 	adapter := newTestAdapter(CapabilityFinalOutput)
 	adapter.resultContent = "final result included runtime-test-secret"
@@ -575,6 +606,38 @@ func TestRuntimeDoesNotTreatStoppedWithoutQuiescenceAsConfirmed(t *testing.T) {
 	}
 	if adapter.stopCalls != 1 || broker.closed != 1 {
 		t.Fatalf("Stop calls / lease close: calls=%d closed=%d", adapter.stopCalls, broker.closed)
+	}
+}
+
+func TestRuntimeResultAllowsOmittedTurnIDForInitialTurn(t *testing.T) {
+	adapter := newTestAdapter(CapabilityFinalOutput)
+	adapter.resultTurnID = "turn_initial"
+	broker := &testBroker{secret: []byte("runtime-test-secret")}
+	runtime, err := newTestRuntime(adapter, broker)
+	if err != nil {
+		t.Fatalf("NewRuntime: %v", err)
+	}
+	request := validResultRequest()
+	request.TurnID = ""
+	result, err := runtime.Result(context.Background(), request)
+	if err != nil {
+		t.Fatalf("Result with omitted TurnID: %v", err)
+	}
+	if result.TurnID != "turn_initial" || result.OperationID != request.OperationID {
+		t.Fatalf("Result = %#v; want initial turn for the operation", result)
+	}
+}
+
+func TestRuntimeResultRejectsMismatchedNonemptyTurnID(t *testing.T) {
+	adapter := newTestAdapter(CapabilityFinalOutput)
+	adapter.resultTurnID = "turn_other"
+	broker := &testBroker{secret: []byte("runtime-test-secret")}
+	runtime, err := newTestRuntime(adapter, broker)
+	if err != nil {
+		t.Fatalf("NewRuntime: %v", err)
+	}
+	if _, err := runtime.Result(context.Background(), validResultRequest()); !errors.Is(err, ErrProviderInvalidResult) {
+		t.Fatalf("Result with mismatched nonempty TurnID = %v; want ErrProviderInvalidResult", err)
 	}
 }
 
