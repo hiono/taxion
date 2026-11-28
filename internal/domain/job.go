@@ -378,7 +378,6 @@ type ProviderStartIntent struct {
 	ReadOnlyBoundary        PlanningReadOnlyBoundary `json:"read_only_boundary"`
 	Deadline                time.Time                `json:"deadline"`
 	RequestSHA256           string                   `json:"request_sha256"`
-	ClaimBeforeDispatch     bool                     `json:"claim_before_dispatch,omitempty"`
 	CreatedAt               time.Time                `json:"created_at"`
 	CreatedRevision         uint64                   `json:"created_revision"`
 }
@@ -455,7 +454,6 @@ func NewTasklessPlannerStart(job Job, authorizationID, principalID, commandID, r
 		ReadOnlyBoundary:        grant.ReadOnlyBoundary,
 		Deadline:                grant.Deadline,
 		RequestSHA256:           requestSHA256,
-		ClaimBeforeDispatch:     true,
 		CreatedAt:               createdAt,
 		CreatedRevision:         createdRevision,
 	}
