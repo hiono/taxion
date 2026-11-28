@@ -1153,6 +1153,38 @@ func TestDevProviderConsultRequiresLocalJob(t *testing.T) {
 	}
 }
 
+func TestDevProviderConsultPreservesLongAnswer(t *testing.T) {
+	helper := fakeOpenCode(t)
+	path := filepath.Join(t.TempDir(), "jobs.sqlite")
+	var stdout, stderr bytes.Buffer
+	if code := Run(context.Background(), []string{"dev", "job", "create", "--store", path,
+		"--request", "Original task"}, &stdout, &stderr, VersionInfo{}); code != 0 {
+		t.Fatalf("create exit=%d, stderr=%q", code, stderr.String())
+	}
+	jobID := strings.TrimPrefix(strings.Split(stdout.String(), "\n")[1], "ID: ")
+	stdout.Reset()
+	stderr.Reset()
+	code := Run(context.Background(), []string{"dev", "provider", "run", "--provider", "opencode",
+		"--command", helper, "--working-directory", t.TempDir(), "--store", path, "--job", jobID,
+		"--prompt", "test long consultation", "--consult"}, &stdout, &stderr, VersionInfo{})
+	if code != 0 || !strings.Contains(stdout.String(), "final answer with consultation") {
+		t.Fatalf("consult exit=%d, stderr=%q", code, stderr.String())
+	}
+	database, err := store.Open(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	job, err := database.GetJob(context.Background(), jobID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "Consulting agent answer:\n" + strings.Repeat("あ", 22000)
+	if len(job.JobMessages) != 4 || job.JobMessages[2].Body != want {
+		t.Fatalf("long answer was not preserved")
+	}
+}
+
 func TestDevProviderConsultPreservesPartialConversation(t *testing.T) {
 	for _, failure := range []struct {
 		marker string
@@ -1273,6 +1305,7 @@ func TestDevProviderACPHelper(t *testing.T) {
 		os.Exit(1)
 	}
 	scanner := bufio.NewScanner(os.Stdin)
+	scanner.Buffer(make([]byte, 64*1024), 8*1024*1024)
 	writer := json.NewEncoder(os.Stdout)
 	primaryStarted := false
 	for scanner.Scan() {
@@ -1321,11 +1354,14 @@ func TestDevProviderACPHelper(t *testing.T) {
 						os.Exit(1)
 					}
 					response = "consultation answer"
+					if strings.Contains(prompt, "test long consultation") {
+						response = strings.Repeat("あ", 22000)
+					}
 				} else if strings.Contains(prompt, "The other agent answered your question:") {
 					if _, err := os.Stat("resume-fail"); err == nil {
 						os.Exit(1)
 					}
-					if !primaryStarted || !strings.Contains(prompt, "consultation answer") {
+					if !primaryStarted || (!strings.Contains(prompt, "consultation answer") && !strings.Contains(prompt, strings.Repeat("あ", 22000))) {
 						os.Exit(1)
 					}
 					response = "final answer with consultation"

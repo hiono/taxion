@@ -22,7 +22,7 @@ const (
 const (
 	ControllerActorID      = "taxion.controller"
 	OrchestratorActorID    = "taxion.orchestrator"
-	maxJobMessageBodyBytes = 64 * 1024
+	maxJobMessageBodyBytes = 8 * 1024 * 1024
 )
 
 type ActorRef struct {
