@@ -256,7 +256,7 @@ func (r *Runtime) Lookup(ctx context.Context, request LookupRequest) (LookupResu
 			return LookupResult{}, err
 		}
 		leaked, err := containsCredential(lease, result.OperationID, result.Status, result.ReceiptID,
-			result.SessionID, result.TurnID, result.ResultSHA256, result.UsageID, result.EvidenceSHA256)
+			result.SessionID, result.TurnID, result.ResultSHA256, result.EvidenceSHA256)
 		if err != nil {
 			return LookupResult{}, err
 		}
@@ -307,43 +307,6 @@ func (r *Runtime) Result(ctx context.Context, request ResultRequest) (Result, er
 		(request.TurnID != "" && result.TurnID != request.TurnID) || !result.Final || sha256Hex(result.Content) != result.ResultSHA256 ||
 		!validSHA256(result.EvidenceSHA256) {
 		return Result{}, errors.Join(ErrProviderInvalidResult, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown})
-	}
-	return result, nil
-}
-
-func (r *Runtime) Usage(ctx context.Context, request UsageRequest) (Usage, error) {
-	if err := request.Validate(); err != nil {
-		return Usage{}, ErrProviderInvalidRequest
-	}
-	capabilities, err := r.verifiedCapabilities(ctx)
-	if err != nil {
-		return Usage{}, err
-	}
-	if !capabilities.HasEvidenceAtLeast(CapabilityUsageIdentity, r.minimumEvidence) ||
-		!capabilities.HasEvidenceAtLeast(CapabilityUsageCompleteness, r.minimumEvidence) {
-		return Usage{}, ErrUnsupportedCapability
-	}
-	result, err := withCredential(ctx, r.broker, r.identity, func(lease CredentialLease) (Usage, error) {
-		result, err := r.adapter.Usage(ctx, request, lease)
-		if err != nil {
-			return Usage{}, err
-		}
-		leaked, err := containsCredential(lease, result.OperationID, result.SessionID, result.TurnID, result.UsageID, result.EvidenceSHA256)
-		if err != nil {
-			return Usage{}, err
-		}
-		if leaked {
-			return Usage{}, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown}
-		}
-		return result, nil
-	})
-	if err != nil {
-		return Usage{}, safeAdapterError(err)
-	}
-	if result.OperationID != request.OperationID || result.SessionID != request.SessionID ||
-		result.TurnID != request.TurnID || !validIdentifier(result.UsageID) ||
-		!validSHA256(result.EvidenceSHA256) {
-		return Usage{}, errors.Join(ErrProviderInvalidResult, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown})
 	}
 	return result, nil
 }

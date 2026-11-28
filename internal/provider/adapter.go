@@ -40,8 +40,6 @@ const (
 	CapabilityEventReplay                Capability = "event.replay"
 	CapabilityStopProof                  Capability = "stop.proof"
 	CapabilityFinalOutput                Capability = "result.final_output_retrieval"
-	CapabilityUsageIdentity              Capability = "usage.identity"
-	CapabilityUsageCompleteness          Capability = "usage.completeness"
 )
 
 type EvidenceLevel string
@@ -73,8 +71,6 @@ type Capabilities struct {
 	EventReplay                 bool
 	StopProof                   bool
 	FinalOutputRetrieval        bool
-	UsageIdentity               bool
-	UsageCompleteness           bool
 	Evidence                    []CapabilityEvidence
 }
 
@@ -138,10 +134,6 @@ func (c Capabilities) Has(capability Capability) bool {
 		return c.StopProof
 	case CapabilityFinalOutput:
 		return c.FinalOutputRetrieval
-	case CapabilityUsageIdentity:
-		return c.UsageIdentity
-	case CapabilityUsageCompleteness:
-		return c.UsageCompleteness
 	default:
 		return false
 	}
@@ -232,10 +224,6 @@ func setCapability(capabilities *Capabilities, capability Capability) {
 		capabilities.StopProof = true
 	case CapabilityFinalOutput:
 		capabilities.FinalOutputRetrieval = true
-	case CapabilityUsageIdentity:
-		capabilities.UsageIdentity = true
-	case CapabilityUsageCompleteness:
-		capabilities.UsageCompleteness = true
 	}
 }
 
@@ -300,7 +288,6 @@ var allCapabilities = []Capability{
 	CapabilitySendIdempotency, CapabilitySendLookup, CapabilityReadOnlyContextEnforcement,
 	CapabilitySessionReattach, CapabilityEventReplay,
 	CapabilityStopProof, CapabilityFinalOutput,
-	CapabilityUsageIdentity, CapabilityUsageCompleteness,
 }
 
 type ContextDocument struct {
@@ -459,7 +446,6 @@ type LookupResult struct {
 	SessionID      string
 	TurnID         string
 	ResultSHA256   string
-	UsageID        string
 	EvidenceSHA256 string
 }
 
@@ -468,7 +454,7 @@ func (r LookupResult) Validate(request LookupRequest) error {
 		return errors.New("Provider Lookup result identity or evidence is invalid")
 	}
 	if !r.Found {
-		if r.Status != LookupStatusNotFound || r.ReceiptID != "" || r.ResultSHA256 != "" || r.UsageID != "" ||
+		if r.Status != LookupStatusNotFound || r.ReceiptID != "" || r.ResultSHA256 != "" ||
 			(request.SessionID == "" && r.SessionID != "") ||
 			(request.SessionID != "" && r.SessionID != request.SessionID) ||
 			(request.TurnID == "" && r.TurnID != "") ||
@@ -479,7 +465,6 @@ func (r LookupResult) Validate(request LookupRequest) error {
 	}
 	if !validLookupFoundStatus(r.Status) || !validIdentifier(r.SessionID) || !validIdentifier(r.ReceiptID) ||
 		(r.ResultSHA256 != "" && !validSHA256(r.ResultSHA256)) ||
-		(r.UsageID != "" && !validIdentifier(r.UsageID)) ||
 		(request.SessionID != "" && r.SessionID != request.SessionID) ||
 		r.TurnID != request.TurnID {
 		return errors.New("Provider Lookup found result does not match the requested operation")
@@ -517,30 +502,6 @@ type Result struct {
 	Content        string
 	ResultSHA256   string
 	Final          bool
-	EvidenceSHA256 string
-}
-
-type UsageRequest struct {
-	OperationID string
-	SessionID   string
-	TurnID      string
-}
-
-func (r UsageRequest) Validate() error {
-	if !validIdentifier(r.OperationID) || !validIdentifier(r.SessionID) ||
-		(r.TurnID != "" && !validIdentifier(r.TurnID)) {
-		return errors.New("Provider Usage request identity is invalid")
-	}
-	return nil
-}
-
-type Usage struct {
-	OperationID    string
-	SessionID      string
-	TurnID         string
-	UsageID        string
-	Tokens         uint64
-	Complete       bool
 	EvidenceSHA256 string
 }
 
@@ -658,7 +619,6 @@ type Adapter interface {
 	Resume(context.Context, ResumeRequest, CredentialLease) (ResumeResult, error)
 	Lookup(context.Context, LookupRequest, CredentialLease) (LookupResult, error)
 	Result(context.Context, ResultRequest, CredentialLease) (Result, error)
-	Usage(context.Context, UsageRequest, CredentialLease) (Usage, error)
 	ReplayEvents(context.Context, ReplayEventsRequest, CredentialLease) (EventPage, error)
 }
 

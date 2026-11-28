@@ -106,6 +106,8 @@ taxion job list --store ./taxion.sqlite
 
 SQLite databaseとWALファイルは秘密情報を含む可能性があるため、Gitへ追加しないでください。
 
+保存形式はschema version 3です。Taxionのversion 1・2のデータベースは変更せず拒否し、移行は行いません。以前のデータを残す場合は別の`--store`を指定してください。
+
 ## 現在の制限
 
 本段階ではOIDC認証済みCLIからのDRAFT Job作成、PlanningAuthorizationの発行・永続化、Taskless PLANNER RoleExecutionとProvider Start intentの永続化までを提供します。HTTP ingress、Provider Adapterによる実起動、turn / effect / resume、JobApproval、Job完了は未実装です。grant発行の成功をplanning実行やJob完遂の証拠として扱いません。

@@ -896,10 +896,6 @@ func (a *ACPAdapter) Result(ctx context.Context, request ResultRequest, _ Creden
 	return Result{}, ErrUnsupportedCapability
 }
 
-func (a *ACPAdapter) Usage(context.Context, UsageRequest, CredentialLease) (Usage, error) {
-	return Usage{}, ErrUnsupportedCapability
-}
-
 func (a *ACPAdapter) ReplayEvents(context.Context, ReplayEventsRequest, CredentialLease) (EventPage, error) {
 	return EventPage{}, ErrUnsupportedCapability
 }

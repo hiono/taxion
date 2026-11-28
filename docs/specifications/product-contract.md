@@ -135,7 +135,7 @@ Job完了は明示的なJobAggregate Commandでのみ成立する。少なくと
 - UNKNOWNを成功・失敗・未送信へ推測変換しない。
 - 同じOperationIDでのProvider照会または実証されたidempotencyがない限りblind replayしない。
 - Provider停止・Worktree状態が不明な場合は所有権を保持し、Worktreeをquarantineする。
-- Provider AdapterはProvider / SDK versionとconfiguration identityに対応するcapabilityを宣言し、Start / Sendのidempotencyまたはlookup、cross-process Session reattachment、event replay / cursor continuity、Stop proof、final output retrieval、Usage identity / completenessを個別に検証します。未対応・未検証の能力を推定で補いません。
+- Provider AdapterはProvider / SDK versionとconfiguration identityに対応するcapabilityを宣言し、Start / Sendのidempotencyまたはlookup、cross-process Session reattachment、event replay / cursor continuity、Stop proof、final output retrievalを個別に検証します。未対応・未検証の能力を推定で補いません。
 - 同じRoleExecutionの再開では、保存済みの正確なProvider Session identity、Provider / account identity、configuration digestが一致し、Adapterがcross-process reattachmentを明示的にサポートする場合だけ再接続します。新しいSessionを同じRoleExecutionへ付け替えてResumeしたことにしません。
 - reattachmentできない場合は元のoperationをUNKNOWN / unresolvedのまま保持し、Stop proofとfinal resultを照合します。新しいRoleExecutionによる継続は、旧Providerのquiescence、result reconciliation、Worktree release後に限り、現在のJobApproval・Task scope・deadlineを再検証して別実行として開始します。
 - Start / Sendの結果が不明な場合は、同じOperationID / turn identityによるlookup、またはそのidentityに対して実証されたidempotencyがある場合だけ再試行します。
@@ -153,7 +153,7 @@ Provider Adapterのoperation・credential・recovery検証項目は[Provider Ada
 
 質問・回答・依頼・通知・レビュー指摘は通常の自然言語メッセージです。情報交換だけではTask assignment、JobApproval、Execution Permission、Worktree ownershipを変更しません。実行責任の移転は独立したHandoff操作とします。回答のために追加Provider実行が必要な場合だけ§4.3.1およびADR-506に従い、外部副作用はADR-507に従って認可します。
 
-JobMessageの保存とProvider Send / Turnの実行を分離します。Provider operationの受理・結果・Usage・UNKNOWN・再試行はProvider operationの事実として管理し、メッセージ専用のRecipient状態機械を重複して設けません。通常の情報交換にFan-out BatchIDやDeliveryObservationの状態機械を必須化しません。
+JobMessageの保存とProvider Send / Turnの実行を分離します。Provider operationの受理・結果・UNKNOWN・再試行はProvider operationの事実として管理し、メッセージ専用のRecipient状態機械を重複して設けません。通常の情報交換にFan-out BatchIDやDeliveryObservationの状態機械を必須化しません。
 
 ### 5.2 External Agent A2A
 
@@ -175,11 +175,10 @@ A2A Task / Message / Artifact / Agent Card / stateはTaxionのJob、RoleExecutio
 | RoleExecution | Roleの個々の実行とprovenance |
 | JobMessage | Job内協調のappend-only facts |
 | ProviderOperation | 外部副作用のintentとOperationID |
-| ProviderObservation | Providerの受理、turn、result、usage、stop等の観測事実 |
+| ProviderObservation | Providerの受理、turn、result、stop等の観測事実 |
 | WorktreeOwnership | Task単位の排他的所有状態 |
 | JobOutput | immutable成果identityとproducer provenance |
 | JobEvidence | 受入条件、証拠identity、producer、独立verifier、判定 |
-| JobUsage | Provider operation / turnに相関する利用量 |
 
 JobAggregateの変更はexpected revisionとstable idempotency identityを持つCommandを通す。同じCommand IDと同じ内容は同じreceiptへ収束し、同じIDで異なる内容は拒否する。関連レコードはJob単位のtransactionで原子的に確定する。
 

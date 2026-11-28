@@ -17,7 +17,7 @@ Detailed Provider Adapter tests: [Provider Adapter テスト仕様書](provider-
 | E1 | Static / unit | 局所ロジック・型・不変条件 | ProviderやJob E2E |
 | E2 | Synthetic integration | fake Provider / in-memory契約・順序・異常系 | 実Providerの挙動 |
 | E3 | SDK compatibility | 実SDK API / 型 / handshake | 実モデル実行・実Job完遂 |
-| E4 | Live Provider | 実Provider callback、identity、turn、usage、stop | process crash後のdurable recovery |
+| E4 | Live Provider | 実Provider callback、identity、turn、stop | process crash後のdurable recovery |
 | E5 | Durable recovery | crash / restart後のJob facts・Provider operation・Worktree照合 | 人間のJob完遂能力全体 |
 | E6 | Product E2E | 曖昧な依頼から成果確認・Job完了までの実シナリオ | 未試験Provider / OS / configuration |
 
@@ -117,11 +117,10 @@ Domain / Store検証ケースは [Job Contract Test Specification](job-contract-
 - ambiguous resultはUNKNOWNとなる。
 - Provider照会または実証されたidempotencyがない限りblind replayしない。
 - restart後にin-process completionを復元したことにしない。
-- Adapter capabilityはProvider / SDK versionとconfiguration identityに対応付け、Start / Sendのidempotencyまたはlookup、cross-process Session reattachment、event replay / cursor continuity、Stop proof、final output retrieval、Usage identity / completenessを個別に宣言・検証する。
+- Adapter capabilityはProvider / SDK versionとconfiguration identityに対応付け、Start / Sendのidempotencyまたはlookup、cross-process Session reattachment、event replay / cursor continuity、Stop proof、final output retrievalを個別に宣言・検証する。
 - 同じRoleExecutionのSession再接続は、保存済みの正確なSession / Provider / account / configuration identityが一致し、Adapterがcross-process reattachmentを明示的にサポートする場合だけ成功する。
 - Start / SendのUNKNOWNを、新しいOperationID / turn identityで再送しない。照合または同じidentityに対する実証済みidempotencyを要求する。
-- Stop notificationだけでは停止を認定しない。Stop proofとterminal resultを照合する。Usageは任意とする。
-- Usageのidentityとcompletenessを別々に検証し、確定していない利用量をfinalとして扱わない。
+- Stop notificationだけでは停止を認定しない。Stop proofとterminal resultを照合する。
 
 ### AT-009: Worktree ownership and concurrency
 

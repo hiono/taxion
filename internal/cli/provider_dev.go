@@ -305,7 +305,7 @@ func runACPProvider(ctx context.Context, args []string, stdout, stderr io.Writer
 	if closeErr != nil {
 		closeErr = fmt.Errorf("%s process did not close cleanly", cliName)
 	}
-	fmt.Fprintf(stdout, "Provider: %s\nSession: %s\nToken usage: not reported by ACP\n\n%s\n", identity.ProviderID, start.SessionID, result.Content)
+	fmt.Fprintf(stdout, "Provider: %s\nSession: %s\n\n%s\n", identity.ProviderID, start.SessionID, result.Content)
 	if saveErr != nil {
 		return report(stderr, errors.Join(saveErr, closeErr))
 	}

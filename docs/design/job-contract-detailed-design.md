@@ -192,7 +192,7 @@ Duplicate-key detection runs before struct decoding because the standard Go JSON
 
 ### 7.2 Upper-level Planner workflow
 
-This workflow is not connected or implemented yet. Usage reporting is optional and does not block a proposal.
+This workflow is not connected or implemented yet. Taxion does not collect usage, and it does not block a proposal.
 
 The upper-level workflow is responsible for sequencing Provider completion, Result persistence, and JobContract proposal. It does not reconstruct contract data or bypass the proposal Controller.
 

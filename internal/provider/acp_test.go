@@ -307,13 +307,6 @@ func TestACPAdapterKeepsCompletedOutputWhenUsageIsMissing(t *testing.T) {
 	if turn.Status != "COMPLETED" || turn.Output != "fixed ACP response" {
 		t.Fatalf("Turn = %#v, want completed output without usage", turn)
 	}
-	capabilities, err := adapter.Capabilities(context.Background())
-	if err != nil {
-		t.Fatalf("Capabilities: %v", err)
-	}
-	if capabilities.Has(CapabilityUsageIdentity) || capabilities.Has(CapabilityUsageCompleteness) {
-		t.Fatal("ACP adapter claimed usage capabilities without Provider evidence")
-	}
 }
 
 func TestACPAdapterFailsClosedWhenChildSessionOutputIsDetected(t *testing.T) {
@@ -1675,7 +1668,7 @@ func TestACPAdapterDeclaresOnlySyntheticReadOnlyEnforcement(t *testing.T) {
 	for _, capability := range []Capability{
 		CapabilityStartIdempotency, CapabilityStartLookup, CapabilitySendIdempotency,
 		CapabilitySendLookup, CapabilitySessionReattach, CapabilityEventReplay,
-		CapabilityStopProof, CapabilityFinalOutput, CapabilityUsageIdentity, CapabilityUsageCompleteness,
+		CapabilityStopProof, CapabilityFinalOutput,
 	} {
 		if capabilities.Has(capability) {
 			t.Fatalf("ACP adapter declared unverified capability %q", capability)

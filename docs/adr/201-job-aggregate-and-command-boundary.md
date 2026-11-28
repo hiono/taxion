@@ -20,7 +20,7 @@ Job、Task、RoleExecution、通信、Provider実行、Worktree、成果・証�
 - TaskはJob内の任意の作業分解であり、必ずJobIDを持ちます。
 - RoleExecutionはRoleによる個々の実行であり、JobIDを持ちます。Taskless PlannerはTaskIDを持ちません。
 - Taskの親子包含、Task間の前提条件、Role間の協調は別の関係として扱います。Role間協調はappend-only JobMessageで記録します。
-- IntakeProvenance、JobContractRevision、JobApproval、PlanningAuthorization、JobProgressNote、JobMessage、Provider operation / observation、Worktree ownership、JobOutput、JobEvidence、JobUsage、Effect decisionはJobAggregateに属します。
+- IntakeProvenance、JobContractRevision、JobApproval、PlanningAuthorization、JobProgressNote、JobMessage、Provider operation / observation、Worktree ownership、JobOutput、JobEvidence、Effect decisionはJobAggregateに属します。
 - IntakeProvenanceは認証済みPrincipal、server-derived ingress source、受信時刻、request identity、原文依頼digestを保持するappend-only factです。認証境界はADR-501に従います。
 - GoalはJobContractRevisionに含め、承認前に確定します。Goal未設定のDRAFT Jobは実装Taskを開始しません。
 
@@ -29,7 +29,7 @@ Job、Task、RoleExecution、通信、Provider実行、Worktree、成果・証�
 - JobAggregateの変更はexpected revisionと安定したidempotency identityを持つ明示的Commandで実行します。
 - 一つのJobに属するCommandと関連factsは一つのtransactionで確定します。同じCommand ID・同じ内容の再送は同じreceiptへ収束させ、異なる内容の再利用は拒否します。
 - SQLiteの保存形式は現在のJobAggregate契約に合わせます。未対応のschema versionは変更前に拒否します。旧processとの並行稼働、旧schemaとの互換性維持、旧データ移行のためのtrigger・fallbackは設けません。
-- Job、Task、RoleExecution、Message、Provider operation、Worktree ownership、Output、Evidence、Usage、Effect decisionに独立したproduction write pathを設けません。
+- Job、Task、RoleExecution、Message、Provider operation、Worktree ownership、Output、Evidence、Effect decisionに独立したproduction write pathを設けません。
 - Coreはドメイン整合性を検証し、Controllerは認証・承認・Provider等の外部事実を検証します。
 
 ### Authorization and collaboration
@@ -41,7 +41,7 @@ Job、Task、RoleExecution、通信、Provider実行、Worktree、成果・証�
 ### Provider operations
 
 - Provider operationのintentと観測事実はJobAggregateに属し、RoleExecutionの状態とは区別します。
-- 外部呼出し前にintentを確定し、Provider result、usage、stop等の観測を対応するoperation identityへ束縛します。
+- 外部呼出し前にintentを確定し、Provider result、stop等の観測を対応するoperation identityへ束縛します。
 - 不明な結果を成功・失敗と推定せず、照合されるまで実行資源の所有権を維持します。Provider operationの設計判断はADR-409に従います。
 
 ### Outputs and completion

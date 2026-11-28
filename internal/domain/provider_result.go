@@ -4,7 +4,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
-	"strconv"
 	"time"
 	"unicode/utf8"
 )
@@ -27,22 +26,6 @@ type ProviderResultObservation struct {
 	CreatedRevision uint64    `json:"created_revision"`
 }
 
-type ProviderUsageObservation struct {
-	ID              string    `json:"id"`
-	CommandID       string    `json:"command_id"`
-	JobID           string    `json:"job_id"`
-	RoleExecutionID string    `json:"role_execution_id"`
-	OperationID     string    `json:"operation_id"`
-	TurnID          string    `json:"turn_id,omitempty"`
-	SessionID       string    `json:"session_id"`
-	UsageID         string    `json:"usage_id"`
-	Tokens          uint64    `json:"tokens"`
-	Complete        bool      `json:"complete"`
-	EvidenceSHA256  string    `json:"evidence_sha256"`
-	CreatedAt       time.Time `json:"created_at"`
-	CreatedRevision uint64    `json:"created_revision"`
-}
-
 func ProviderResultObservationCommandID(operationID, turnID, contentSHA256, evidenceSHA256 string) string {
 	material := operationID + "\x00" + turnID + "\x00" + contentSHA256 + "\x00" + evidenceSHA256
 	sum := sha256.Sum256([]byte("taxion:provider-result-observation-command:" + material))
@@ -51,22 +34,6 @@ func ProviderResultObservationCommandID(operationID, turnID, contentSHA256, evid
 
 func ProviderResultObservationID(commandID string) string {
 	return planningOperationID("provider_result_observation", commandID)
-}
-
-func ProviderUsageObservationCommandID(operationID, turnID, sessionID, usageID string, tokens uint64, complete bool, evidenceSHA256 string) string {
-	material := operationID + "\x00" + turnID + "\x00" + sessionID + "\x00" + usageID +
-		"\x00" + strconv.FormatUint(tokens, 10) + "\x00" + evidenceSHA256
-	if complete {
-		material += "\x00complete"
-	} else {
-		material += "\x00partial"
-	}
-	sum := sha256.Sum256([]byte("taxion:provider-usage-observation-command:" + material))
-	return "cmd_" + hex.EncodeToString(sum[:16])
-}
-
-func ProviderUsageObservationID(commandID string) string {
-	return planningOperationID("provider_usage_observation", commandID)
 }
 
 func NewProviderResultObservation(
@@ -80,7 +47,7 @@ func NewProviderResultObservation(
 	if err := job.Validate(); err != nil {
 		return ProviderResultObservation{}, err
 	}
-	grant, _, err := providerResultUsageExecution(job, roleExecutionID)
+	grant, _, err := providerResultExecution(job, roleExecutionID)
 	if err != nil {
 		return ProviderResultObservation{}, err
 	}
@@ -121,7 +88,7 @@ func (o ProviderResultObservation) Validate(job Job) error {
 		!validSHA256(o.EvidenceSHA256) || o.CreatedAt.IsZero() || o.CreatedRevision == 0 {
 		return errors.New("Provider Result observation identity, finality, content, or evidence is invalid")
 	}
-	_, _, minimumRevision, minimumTime, err := providerResultUsageBinding(
+	_, _, minimumRevision, minimumTime, err := providerResultBinding(
 		job, o.RoleExecutionID, o.OperationID, o.TurnID, o.SessionID,
 	)
 	if err != nil {
@@ -133,75 +100,7 @@ func (o ProviderResultObservation) Validate(job Job) error {
 	return nil
 }
 
-func NewProviderUsageObservation(
-	job Job,
-	roleExecutionID, principalID, operationID, turnID, sessionID, usageID string,
-	tokens uint64,
-	complete bool,
-	evidenceSHA256 string,
-	now time.Time,
-) (ProviderUsageObservation, error) {
-	if err := job.Validate(); err != nil {
-		return ProviderUsageObservation{}, err
-	}
-	grant, _, err := providerResultUsageExecution(job, roleExecutionID)
-	if err != nil {
-		return ProviderUsageObservation{}, err
-	}
-	if grant.PrincipalID != principalID {
-		return ProviderUsageObservation{}, errors.New("Provider Usage Principal does not match PlanningAuthorization")
-	}
-	now = now.UTC().Round(0)
-	if now.IsZero() || job.Revision >= uint64(^uint64(0)>>1) {
-		return ProviderUsageObservation{}, errors.New("Provider Usage observation timestamp or Job revision is invalid")
-	}
-	commandID := ProviderUsageObservationCommandID(operationID, turnID, sessionID, usageID, tokens, complete, evidenceSHA256)
-	observation := ProviderUsageObservation{
-		ID: ProviderUsageObservationID(commandID), CommandID: commandID, JobID: job.ID,
-		RoleExecutionID: roleExecutionID, OperationID: operationID, TurnID: turnID, SessionID: sessionID,
-		UsageID: usageID, Tokens: tokens, Complete: complete, EvidenceSHA256: evidenceSHA256,
-		CreatedAt: now, CreatedRevision: job.Revision + 1,
-	}
-	if err := observation.Validate(job); err != nil {
-		return ProviderUsageObservation{}, err
-	}
-	for _, existing := range job.ProviderUsageObservations {
-		if existing.SessionID == sessionID && existing.UsageID == usageID {
-			if existing.OperationID != operationID || existing.TurnID != turnID {
-				return ProviderUsageObservation{}, errors.New("Provider Usage identity is already bound to another operation")
-			}
-			if existing.Complete {
-				return ProviderUsageObservation{}, errors.New("Provider Usage is already complete")
-			}
-		}
-	}
-	return observation, nil
-}
-
-func (o ProviderUsageObservation) Validate(job Job) error {
-	if !validPlanningIdentity(o.ID) || !validCommandID(o.CommandID) ||
-		o.ID != ProviderUsageObservationID(o.CommandID) ||
-		o.CommandID != ProviderUsageObservationCommandID(o.OperationID, o.TurnID, o.SessionID, o.UsageID, o.Tokens, o.Complete, o.EvidenceSHA256) ||
-		o.JobID != job.ID || !validPlanningIdentity(o.RoleExecutionID) ||
-		!validPlanningIdentity(o.OperationID) || !validPlanningIdentity(o.SessionID) ||
-		(o.TurnID != "" && !validPlanningIdentity(o.TurnID)) ||
-		!validPlanningIdentity(o.UsageID) || !validSHA256(o.EvidenceSHA256) ||
-		o.CreatedAt.IsZero() || o.CreatedRevision == 0 {
-		return errors.New("Provider Usage observation identity or evidence is invalid")
-	}
-	_, _, minimumRevision, minimumTime, err := providerResultUsageBinding(
-		job, o.RoleExecutionID, o.OperationID, o.TurnID, o.SessionID,
-	)
-	if err != nil {
-		return err
-	}
-	if o.CreatedRevision <= minimumRevision || o.CreatedAt.Before(minimumTime) {
-		return errors.New("Provider Usage observation does not follow its accepted Provider operation")
-	}
-	return nil
-}
-
-func providerResultUsageExecution(job Job, roleExecutionID string) (PlanningAuthorization, RoleExecution, error) {
+func providerResultExecution(job Job, roleExecutionID string) (PlanningAuthorization, RoleExecution, error) {
 	var execution RoleExecution
 	foundExecution := false
 	for _, candidate := range job.RoleExecutions {
@@ -225,8 +124,8 @@ func providerResultUsageExecution(job Job, roleExecutionID string) (PlanningAuth
 	return PlanningAuthorization{}, RoleExecution{}, errors.New("Provider observation PlanningAuthorization was not found")
 }
 
-func providerResultUsageBinding(job Job, roleExecutionID, operationID, turnID, sessionID string) (ProviderStartIntent, *ProviderStartObservation, uint64, time.Time, error) {
-	_, _, err := providerResultUsageExecution(job, roleExecutionID)
+func providerResultBinding(job Job, roleExecutionID, operationID, turnID, sessionID string) (ProviderStartIntent, *ProviderStartObservation, uint64, time.Time, error) {
+	_, _, err := providerResultExecution(job, roleExecutionID)
 	if err != nil {
 		return ProviderStartIntent{}, nil, 0, time.Time{}, err
 	}

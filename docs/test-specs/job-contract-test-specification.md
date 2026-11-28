@@ -93,7 +93,7 @@ These are acceptance scenarios for an unimplemented workflow, not evidence of a 
 | JC-239 | Completed Planner workflow | Exact Taskless PLANNER Turn is COMPLETED and no Result is persisted | Persist final Result first, then append JobContractRevision bound to that Result |
 | JC-240 | Existing final Result | Exact final Result observation already exists for the same Job / RoleExecution / Session / Turn | Reuse the persisted Result; do not call Provider Result again |
 | JC-241 | Turn not completed | Turn observation is missing, UNKNOWN, or FAILED | Reject before Provider Result retrieval; no JobContract mutation |
-| JC-242 | Usage incomplete | Usage is missing or latest observation has Complete=false | Do not block Result retrieval or JobContract proposal |
+| JC-242 | Usage unavailable | Provider does not report usage | Do not block Result retrieval or JobContract proposal |
 | JC-243 | Turn identity mismatch | Turn, RoleExecution, Session, or operation differs | Reject without Provider call or JobContract mutation |
 | JC-244 | Proposal persistence failure | Final Result append succeeds but JobContract Store command fails | Keep the Result observation; no partial JobContract revision |
 | JC-245 | Retry after proposal failure | Retry with the same CommandID after Result persistence | Reuse the exact Result observation and append at most one revision |

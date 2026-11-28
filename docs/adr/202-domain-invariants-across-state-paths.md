@@ -21,7 +21,7 @@ Accepted
 - 検証不能または不整合の場合はfail-closedとし、部分的な状態変更を残しません。
 - 正常系、違反系、拒否後の状態不変性をテストし、実際の入口と呼出し経路を確認します。
 
-本決定はJob、Task、RoleExecution、承認、通信、Provider operation、Worktree、成果、証拠、利用量および今後追加するドメインモデルに適用します。
+本決定はJob、Task、RoleExecution、承認、通信、Provider operation、Worktree、成果、証拠および今後追加するドメインモデルに適用します。
 
 ## Consequences
 

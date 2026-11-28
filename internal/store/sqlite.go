@@ -30,14 +30,13 @@ var (
 )
 
 // schemaVersion identifies the single supported fresh schema. Older schemas are rejected; no migration path is retained.
-const schemaVersion = 2
+const schemaVersion = 3
 
 const createLocalDraftJobCommandType = "CreateJob"
 const createTrustedDraftJobCommandType = "CreateTrustedDraftJob"
 const addPlanningAuthorizationCommandType = "AddPlanningAuthorization"
 const startTasklessPlannerCommandType = "StartTasklessPlanner"
 const addProviderResultObservationCommandType = "AddProviderResultObservation"
-const addProviderUsageObservationCommandType = "AddProviderUsageObservation"
 
 // ponytail: serialize file preparation globally; use per-path locking only if concurrent opens become a bottleneck.
 var sqliteFilePreparation sync.Mutex

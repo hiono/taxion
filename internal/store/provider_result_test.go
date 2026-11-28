@@ -12,10 +12,10 @@ import (
 	"github.com/hiono/taxion/internal/domain"
 )
 
-func newProviderResultUsageFixture(t *testing.T, database *Store, ctx context.Context) (string, string, string, domain.PlanningTurnIntent, auth.AuthenticatedPrincipal) {
+func newProviderResultFixture(t *testing.T, database *Store, ctx context.Context) (string, string, string, domain.PlanningTurnIntent, auth.AuthenticatedPrincipal) {
 	t.Helper()
 	principal := newAuthenticatedTestPrincipal(t)
-	jobID := "job_provider_result_usage"
+	jobID := "job_provider_result"
 	if _, err := database.CreateTrustedDraftJob(ctx, jobID, "Inspect the repository safely.", "cmd_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", principal.AuthenticatedAt(), principal); err != nil {
 		t.Fatalf("CreateTrustedDraftJob: %v", err)
 	}
@@ -70,10 +70,10 @@ func resultDigest(content string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func TestProviderResultAndUsageFactsPersistAtomicallyAndRestore(t *testing.T) {
+func TestProviderResultFactsPersistAtomicallyAndRestore(t *testing.T) {
 	database, path := newTestStore(t)
 	ctx := context.Background()
-	jobID, roleExecutionID, sessionID, turn, principal := newProviderResultUsageFixture(t, database, ctx)
+	jobID, roleExecutionID, sessionID, turn, principal := newProviderResultFixture(t, database, ctx)
 	content := "Final planning result"
 	contentSHA := resultDigest(content)
 	evidence := strings.Repeat("1", 64)
@@ -94,29 +94,7 @@ func TestProviderResultAndUsageFactsPersistAtomicallyAndRestore(t *testing.T) {
 	}
 	job, err = database.GetJob(ctx, jobID)
 	if err != nil {
-		t.Fatalf("GetJob before partial Usage: %v", err)
-	}
-	partialReceipt, partial, err := database.AddProviderUsageObservation(ctx, jobID, job.Revision,
-		roleExecutionID, turn.OperationID, turn.ID, sessionID, "usage_turn_1", 12, false, evidence, principal)
-	if err != nil || partial.Complete || partial.CreatedRevision != partialReceipt.Revision {
-		t.Fatalf("Add partial Provider Usage: %#v %#v %v", partialReceipt, partial, err)
-	}
-	job, err = database.GetJob(ctx, jobID)
-	if err != nil {
-		t.Fatalf("GetJob before complete Usage: %v", err)
-	}
-	completeReceipt, complete, err := database.AddProviderUsageObservation(ctx, jobID, job.Revision,
-		roleExecutionID, turn.OperationID, turn.ID, sessionID, "usage_turn_1", 20, true, strings.Repeat("2", 64), principal)
-	if err != nil || !complete.Complete || complete.CreatedRevision != completeReceipt.Revision {
-		t.Fatalf("Add complete Provider Usage: %#v %#v %v", completeReceipt, complete, err)
-	}
-	job, err = database.GetJob(ctx, jobID)
-	if err != nil {
-		t.Fatalf("GetJob before invalid Usage: %v", err)
-	}
-	if _, _, err := database.AddProviderUsageObservation(ctx, jobID, job.Revision,
-		roleExecutionID, turn.OperationID, turn.ID, sessionID, "usage_turn_1", 21, false, evidence, principal); err == nil {
-		t.Fatal("Provider Usage accepted an observation after Complete=true")
+		t.Fatalf("GetJob before duplicate Result: %v", err)
 	}
 	if _, _, err := database.AddProviderResultObservation(ctx, jobID, job.Revision,
 		roleExecutionID, turn.OperationID, turn.ID, sessionID, "different final", resultDigest("different final"), true, evidence, principal); err == nil {
@@ -130,8 +108,8 @@ func TestProviderResultAndUsageFactsPersistAtomicallyAndRestore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetJob before restart: %v", err)
 	}
-	if len(job.ProviderResultObservations) != 1 || len(job.ProviderUsageObservations) != 2 {
-		t.Fatalf("unexpected persisted Result / Usage facts: %d / %d", len(job.ProviderResultObservations), len(job.ProviderUsageObservations))
+	if len(job.ProviderResultObservations) != 1 {
+		t.Fatalf("unexpected persisted Result facts: %d", len(job.ProviderResultObservations))
 	}
 	if err := database.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
@@ -145,17 +123,16 @@ func TestProviderResultAndUsageFactsPersistAtomicallyAndRestore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetJob after restart: %v", err)
 	}
-	if len(restored.ProviderResultObservations) != 1 || len(restored.ProviderUsageObservations) != 2 ||
-		!restored.ProviderUsageObservations[1].Complete || restored.ProviderUsageObservations[1].Tokens != 20 {
-		t.Fatalf("restored Provider Result / Usage facts: %#v %#v", restored.ProviderResultObservations, restored.ProviderUsageObservations)
+	if len(restored.ProviderResultObservations) != 1 || restored.ProviderResultObservations[0] != result {
+		t.Fatalf("restored Provider Result facts: %#v", restored.ProviderResultObservations)
 	}
 }
 
-func TestProviderResultAndUsageReceiptFailuresRollbackAggregate(t *testing.T) {
+func TestProviderResultReceiptFailuresRollbackAggregate(t *testing.T) {
 	database, _ := newTestStore(t)
 	defer database.Close()
 	ctx := context.Background()
-	jobID, roleExecutionID, sessionID, turn, principal := newProviderResultUsageFixture(t, database, ctx)
+	jobID, roleExecutionID, sessionID, turn, principal := newProviderResultFixture(t, database, ctx)
 	content := "Receipt rollback"
 	contentSHA := resultDigest(content)
 	evidence := strings.Repeat("3", 64)
@@ -184,39 +161,13 @@ func TestProviderResultAndUsageReceiptFailuresRollbackAggregate(t *testing.T) {
 		roleExecutionID, turn.OperationID, turn.ID, sessionID, content, contentSHA, true, evidence, principal); err != nil {
 		t.Fatalf("retry Result after rollback: %v", err)
 	}
-	usageEvidence := strings.Repeat("4", 64)
-	usageCommandID := domain.ProviderUsageObservationCommandID(turn.OperationID, turn.ID, sessionID, "usage_rollback", 7, true, usageEvidence)
-	if _, err := database.db.ExecContext(ctx, `CREATE TRIGGER fail_provider_usage_receipt
-		BEFORE INSERT ON job_commands WHEN NEW.command_id = '`+usageCommandID+`'
-		BEGIN SELECT RAISE(ABORT, 'forced Provider Usage receipt failure'); END;`); err != nil {
-		t.Fatalf("create Usage rollback trigger: %v", err)
-	}
-	job, err = database.GetJob(ctx, jobID)
-	if err != nil {
-		t.Fatalf("GetJob before Usage rollback: %v", err)
-	}
-	if _, _, err := database.AddProviderUsageObservation(ctx, jobID, job.Revision,
-		roleExecutionID, turn.OperationID, turn.ID, sessionID, "usage_rollback", 7, true, usageEvidence, principal); err == nil {
-		t.Fatal("Provider Usage succeeded despite forced receipt failure")
-	}
-	afterUsageRollback, err := database.GetJob(ctx, jobID)
-	if err != nil || afterUsageRollback.Revision != job.Revision || len(afterUsageRollback.ProviderUsageObservations) != 0 {
-		t.Fatalf("failed Usage partially changed Job: %#v %v", afterUsageRollback, err)
-	}
-	if _, err := database.db.ExecContext(ctx, "DROP TRIGGER fail_provider_usage_receipt"); err != nil {
-		t.Fatalf("drop Usage rollback trigger: %v", err)
-	}
-	if _, _, err := database.AddProviderUsageObservation(ctx, jobID, job.Revision,
-		roleExecutionID, turn.OperationID, turn.ID, sessionID, "usage_rollback", 7, true, usageEvidence, principal); err != nil {
-		t.Fatalf("retry Usage after rollback: %v", err)
-	}
 }
 
-func TestProviderResultUsageRejectsInvalidPayloadAndIdentity(t *testing.T) {
+func TestProviderResultRejectsInvalidPayloadAndIdentity(t *testing.T) {
 	database, _ := newTestStore(t)
 	defer database.Close()
 	ctx := context.Background()
-	jobID, roleExecutionID, sessionID, turn, principal := newProviderResultUsageFixture(t, database, ctx)
+	jobID, roleExecutionID, sessionID, turn, principal := newProviderResultFixture(t, database, ctx)
 	job, err := database.GetJob(ctx, jobID)
 	if err != nil {
 		t.Fatalf("GetJob: %v", err)
@@ -247,35 +198,8 @@ func TestProviderResultUsageRejectsInvalidPayloadAndIdentity(t *testing.T) {
 			}
 		})
 	}
-	invalidUsages := []struct {
-		name, operationID, turnID, sessionID, usageID string
-	}{
-		{name: "wrong operation", operationID: "provider_turn_unknown", turnID: turn.ID, sessionID: sessionID, usageID: "usage_invalid_1"},
-		{name: "wrong Session", operationID: turn.OperationID, turnID: turn.ID, sessionID: "session_other", usageID: "usage_invalid_2"},
-		{name: "invalid UsageID", operationID: turn.OperationID, turnID: turn.ID, sessionID: sessionID, usageID: "usage invalid"},
-	}
-	for _, tc := range invalidUsages {
-		t.Run(tc.name, func(t *testing.T) {
-			if _, _, err := database.AddProviderUsageObservation(ctx, jobID, job.Revision,
-				roleExecutionID, tc.operationID, tc.turnID, tc.sessionID, tc.usageID, 1, false, evidence, principal); err == nil {
-				t.Fatalf("invalid Provider Usage was accepted: %s", tc.name)
-			}
-		})
-	}
-	if _, _, err := database.AddProviderUsageObservation(ctx, jobID, job.Revision,
-		roleExecutionID, turn.OperationID, turn.ID, sessionID, "usage_rebind", 5, false, evidence, principal); err != nil {
-		t.Fatalf("persist initial Usage binding: %v", err)
-	}
-	current, err := database.GetJob(ctx, jobID)
-	if err != nil {
-		t.Fatalf("GetJob before Usage rebind: %v", err)
-	}
-	if _, _, err := database.AddProviderUsageObservation(ctx, jobID, current.Revision,
-		roleExecutionID, startOperationID, "", sessionID, "usage_rebind", 6, true, evidence, principal); err == nil {
-		t.Fatal("Provider UsageID was rebound from a Turn to the Start operation")
-	}
 	after, err := database.GetJob(ctx, jobID)
-	if err != nil || len(after.ProviderResultObservations) != 0 || len(after.ProviderUsageObservations) != 1 {
-		t.Fatalf("invalid Result / Usage input changed Job facts: %#v %v", after, err)
+	if err != nil || len(after.ProviderResultObservations) != 0 {
+		t.Fatalf("invalid Result input changed Job facts: %#v %v", after, err)
 	}
 }
