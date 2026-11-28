@@ -113,7 +113,7 @@ Context Managerは各turnで必要なContextだけを選択し、Skill / Fileを
 
 ### 5.2 After external side effect
 
-- Provider receipt、event、terminal result、usage、stop evidenceをappend-only observationとして保存する。
+- Provider receipt、event、terminal result、stop evidenceをappend-only observationとして保存する。報告されたUsageも記録できる。
 - Provider quiescenceが確定するまで、完了・資源解放を許可しない。Usageの未報告は妨げとしない。
 - DB commitとProvider operation resultを同一の成功状態へまとめない。
 - timeout、connection loss、receipt欠落はUNKNOWNとして保持する。
@@ -124,15 +124,15 @@ Context Managerは各turnで必要なContextだけを選択し、Skill / Fileを
 - JobAggregateをrevisionとschema versionを検証して復元する。
 - 未解決OperationIDをProviderへ照会し、観測結果をappend-onlyで追加する。
 - AdapterがProvider / SDK versionとconfiguration identityに対応して宣言したcapabilityを確認する。Session reattachmentは保存済みの正確なSession / Provider / account / configuration identityに一致する場合だけ許可する。
-- Adapterがcross-process reattachmentをサポートしない場合、同じRoleExecutionへ新しいSessionを作成しない。旧operationの停止・result・usageを照合するまでWorktreeを保持またはquarantineする。
-- Worktree owner、Provider stop proof、result、usage、artifact identityを照合する。
+- Adapterがcross-process reattachmentをサポートしない場合、同じRoleExecutionへ新しいSessionを作成しない。旧operationの停止・resultを照合するまでWorktreeを保持またはquarantineする。
+- Worktree owner、Provider stop proof、result、artifact identityを照合する。Usageが報告されれば記録する。
 - 停止・結果が不明なWorktreeはquarantineし、所有権を解放しない。
 - 旧RoleExecutionを解決した後の継続は、新しいRoleExecutionとしてJobApproval、Task scope、deadlineを再検証して開始する。
 - 復旧不能な破損・矛盾は隔離し、成功へ推測変換しない。
 
 ## 6. Completion boundary
 
-Job完了CommandはControllerだけが実行する。必須受入条件、JobEvidence、Usage finality、未解決Provider operationの不存在、Provider quiescence、Worktree release、未完了RoleExecutionの不存在、認可・安全上の阻害事項を確認する。UI、Role、Provider、A2A GatewayはJob完了状態を直接設定しない。
+Job完了CommandはControllerだけが実行する。必須受入条件、JobEvidence、未解決Provider operationの不存在、Provider quiescence、Worktree release、未完了RoleExecutionの不存在、認可・安全上の阻害事項を確認する。Usageの未報告は妨げとしない。UI、Role、Provider、A2A GatewayはJob完了状態を直接設定しない。
 
 ## 7. Implementation constraints
 

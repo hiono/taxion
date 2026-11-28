@@ -30,36 +30,35 @@ const (
 )
 
 type Job struct {
-	ID                                    string                      `json:"id"`
-	Request                               string                      `json:"request"`
-	Goal                                  string                      `json:"goal,omitempty"`
-	State                                 JobState                    `json:"state"`
-	Revision                              uint64                      `json:"revision"`
-	CreatedAt                             time.Time                   `json:"created_at"`
-	UpdatedAt                             time.Time                   `json:"updated_at"`
-	IntakeProvenance                      *IntakeProvenance           `json:"intake_provenance,omitempty"`
-	PlanningAuthorizations                []PlanningAuthorization     `json:"planning_authorizations,omitempty"`
-	JobContractRevisions                  []JobContractRevision       `json:"job_contract_revisions,omitempty"`
-	JobApprovals                          []JobApproval               `json:"job_approvals,omitempty"`
-	Tasks                                 []Task                      `json:"tasks,omitempty"`
-	ExecutionPermissions                  []ExecutionPermission       `json:"execution_permissions,omitempty"`
-	WorktreeAssignments                   []WorktreeAssignment        `json:"worktree_assignments,omitempty"`
-	RoleExecutions                        []RoleExecution             `json:"role_executions,omitempty"`
-	ProviderStartIntents                  []ProviderStartIntent       `json:"provider_start_intents,omitempty"`
-	ProviderStartObservations             []ProviderStartObservation  `json:"provider_start_observations,omitempty"`
-	ProviderEventObservations             []ProviderEventObservation  `json:"provider_event_observations,omitempty"`
-	ProviderStopIntents                   []ProviderStopIntent        `json:"provider_stop_intents,omitempty"`
-	ProviderStopObservations              []ProviderStopObservation   `json:"provider_stop_observations,omitempty"`
-	ProviderResultObservations            []ProviderResultObservation `json:"provider_result_observations,omitempty"`
-	ProviderUsageObservations             []ProviderUsageObservation  `json:"provider_usage_observations,omitempty"`
-	ProviderLifecycleEnforcedFromRevision uint64                      `json:"provider_lifecycle_enforced_from_revision,omitempty"`
-	PlanningTurnIntents                   []PlanningTurnIntent        `json:"planning_turn_intents,omitempty"`
-	PlanningTurnObservations              []PlanningTurnObservation   `json:"planning_turn_observations,omitempty"`
-	PlanningEffectDecisions               []PlanningEffectDecision    `json:"planning_effect_decisions,omitempty"`
-	PlanningResumeIntents                 []PlanningResumeIntent      `json:"planning_resume_intents,omitempty"`
-	PlanningResumeObservations            []PlanningResumeObservation `json:"planning_resume_observations,omitempty"`
-	PlanningBoundaryDecisions             []PlanningBoundaryDecision  `json:"planning_boundary_decisions,omitempty"`
-	JobMessages                           []JobMessage                `json:"job_messages,omitempty"`
+	ID                         string                      `json:"id"`
+	Request                    string                      `json:"request"`
+	Goal                       string                      `json:"goal,omitempty"`
+	State                      JobState                    `json:"state"`
+	Revision                   uint64                      `json:"revision"`
+	CreatedAt                  time.Time                   `json:"created_at"`
+	UpdatedAt                  time.Time                   `json:"updated_at"`
+	IntakeProvenance           *IntakeProvenance           `json:"intake_provenance,omitempty"`
+	PlanningAuthorizations     []PlanningAuthorization     `json:"planning_authorizations,omitempty"`
+	JobContractRevisions       []JobContractRevision       `json:"job_contract_revisions,omitempty"`
+	JobApprovals               []JobApproval               `json:"job_approvals,omitempty"`
+	Tasks                      []Task                      `json:"tasks,omitempty"`
+	ExecutionPermissions       []ExecutionPermission       `json:"execution_permissions,omitempty"`
+	WorktreeAssignments        []WorktreeAssignment        `json:"worktree_assignments,omitempty"`
+	RoleExecutions             []RoleExecution             `json:"role_executions,omitempty"`
+	ProviderStartIntents       []ProviderStartIntent       `json:"provider_start_intents,omitempty"`
+	ProviderStartObservations  []ProviderStartObservation  `json:"provider_start_observations,omitempty"`
+	ProviderEventObservations  []ProviderEventObservation  `json:"provider_event_observations,omitempty"`
+	ProviderStopIntents        []ProviderStopIntent        `json:"provider_stop_intents,omitempty"`
+	ProviderStopObservations   []ProviderStopObservation   `json:"provider_stop_observations,omitempty"`
+	ProviderResultObservations []ProviderResultObservation `json:"provider_result_observations,omitempty"`
+	ProviderUsageObservations  []ProviderUsageObservation  `json:"provider_usage_observations,omitempty"`
+	PlanningTurnIntents        []PlanningTurnIntent        `json:"planning_turn_intents,omitempty"`
+	PlanningTurnObservations   []PlanningTurnObservation   `json:"planning_turn_observations,omitempty"`
+	PlanningEffectDecisions    []PlanningEffectDecision    `json:"planning_effect_decisions,omitempty"`
+	PlanningResumeIntents      []PlanningResumeIntent      `json:"planning_resume_intents,omitempty"`
+	PlanningResumeObservations []PlanningResumeObservation `json:"planning_resume_observations,omitempty"`
+	PlanningBoundaryDecisions  []PlanningBoundaryDecision  `json:"planning_boundary_decisions,omitempty"`
+	JobMessages                []JobMessage                `json:"job_messages,omitempty"`
 }
 
 type IntakeProvenance struct {
@@ -899,29 +898,6 @@ func (j Job) Validate() error {
 		}
 		seenStartObservationIDs[observation.ID] = struct{}{}
 		startObservationsByOperation[observation.OperationID] = append(startObservationsByOperation[observation.OperationID], observation)
-	}
-	if j.ProviderLifecycleEnforcedFromRevision > j.Revision {
-		return fmt.Errorf("%w: Provider Start observation activation revision exceeds Job revision", ErrInvalidJob)
-	}
-	if j.ProviderLifecycleEnforcedFromRevision > 0 {
-		foundActivationFact := false
-		for _, intent := range j.ProviderStartIntents {
-			if intent.CreatedRevision == j.ProviderLifecycleEnforcedFromRevision {
-				foundActivationFact = true
-				break
-			}
-		}
-		if !foundActivationFact {
-			for _, observation := range j.ProviderStartObservations {
-				if observation.CreatedRevision == j.ProviderLifecycleEnforcedFromRevision {
-					foundActivationFact = true
-					break
-				}
-			}
-		}
-		if !foundActivationFact {
-			return fmt.Errorf("%w: Provider lifecycle activation revision has no matching Start fact", ErrInvalidJob)
-		}
 	}
 	for operationID, observations := range startObservationsByOperation {
 		for i, observation := range observations {

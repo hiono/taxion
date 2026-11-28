@@ -167,7 +167,7 @@ Stop resultは次を持つ。
 - Quiescent（Providerが後続書込みを継続しないことを確認済み）
 - EvidenceSHA256
 
-Stopped=trueだけではWorktree解放やJob完了を許可しない。Quiescent=trueとterminal result、Usageを照合する。
+Stopped=trueだけではWorktree解放やJob完了を許可しない。Quiescent=trueとterminal resultを照合する。Usageは任意とする。
 
 ### 6.5 Event replay
 
@@ -224,7 +224,7 @@ secret bufferのzeroizeはGo runtime / OSの複製まで保証するものでは
 9. 同一OperationIDの再実行ではStart idempotencyまたはLookupを必須とし、UNKNOWN後にblind replayしない。
 10. grant期限後は既存OperationIDのLookupによる照合だけを許可し、NOT_FOUND後の新規Startを拒否する。
 
-Start observationが永続化されるとき、JobはProviderLifecycleEnforcedFromRevisionを記録する。既存Jobの読み取り互換性を維持し、このrevision以降のTurn / Resume intentにaccepted Start observationとSessionIDの一致を要求する。
+Turn / Resume intentにはaccepted Start observationとSessionIDの一致を要求する。
 
 
 ### 8.1.1 Task-bound Coder Start（Controller統合対象）
@@ -251,14 +251,14 @@ Reviewer Startは、ADR-408 / ADR-507に従うimmutable Worktree snapshotとread
 3. immutable Turn intentとCommand receiptを同一transactionで保存する。
 4. commit確認後に最新Jobとauthorityを再検証する。
 5. 同一OperationID / TurnIDを使い、Lookupで未実行を確認した場合またはSend idempotencyが検証済みの場合だけ送信する。
-6. terminal responseはPlanningTurnObservationへ保存し、terminal resultとUsageは別々のObservationとして取得・保存する。
+6. terminal responseはPlanningTurnObservationへ保存し、terminal resultを取得・保存する。Usageは取得できる場合に別のObservationとして保存する。
 7. UNKNOWN中は同じTurnIDで照合し、新しいTurnIDで再送しない。Lookupの証拠と必要な最終出力でterminal statusを確定し、Usageの未報告は妨げとしない。
 
 ACPの`max_tokens` / `max_turn_requests`はProviderによる終了としてFAILEDにし、途中出力を最終結果にしない。初回promptで終了した場合はStart成功を記録しない。
 
 ### 8.3 Stop / Resume（Controller実装済み）
 
-- Stop intentを先に保存し、Runtime.Stopの後にstop proof、quiescence、terminal result、Usageを照合する。
+- Stop intentを先に保存し、Runtime.Stopの後にstop proof、quiescence、terminal resultを照合する。Usageは任意とする。
 - Resume intentとCommand receiptをRuntime.Resumeより先に保存する。
 - E5 SessionReattach capability evidence、Principal / grant / Provider identity、既存accepted Session、configuration identityを検証する。
 - Resumeは同一OperationID / SessionIDで再照合し、Attached=trueとevidenceを得た場合だけATTACHED observationを追加する。曖昧な結果はUNKNOWNとして保存し、UNKNOWN解消時は同じOperationIDのterminal evidenceだけを許可する。

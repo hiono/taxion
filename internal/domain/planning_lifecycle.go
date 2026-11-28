@@ -378,11 +378,8 @@ func (t PlanningTurnIntent) Validate(job Job) error {
 			if t.CreatedRevision <= start.CreatedRevision || t.CreatedAt.Before(start.CreatedAt) {
 				return errors.New("PlanningTurnIntent precedes Provider Start intent")
 			}
-			if job.ProviderLifecycleEnforcedFromRevision > 0 &&
-				t.CreatedRevision >= job.ProviderLifecycleEnforcedFromRevision {
-				if err := validateProviderStartSession(job, start, t.ProviderSessionID, t.CreatedRevision, t.CreatedAt); err != nil {
-					return err
-				}
+			if err := validateProviderStartSession(job, start, t.ProviderSessionID, t.CreatedRevision, t.CreatedAt); err != nil {
+				return err
 			}
 			foundStart = true
 			break
@@ -686,22 +683,19 @@ func (r PlanningResumeIntent) Validate(job Job) error {
 	if providerStopIntentExists(job, r.RoleExecutionID, r.ProviderSessionID, r.CreatedRevision) {
 		return errors.New("Planning Resume cannot be created after a Provider Stop intent")
 	}
-	if job.ProviderLifecycleEnforcedFromRevision > 0 &&
-		r.CreatedRevision >= job.ProviderLifecycleEnforcedFromRevision {
-		var startIntent ProviderStartIntent
-		foundStart := false
-		for _, candidate := range job.ProviderStartIntents {
-			if candidate.RoleExecutionID == r.RoleExecutionID {
-				startIntent, foundStart = candidate, true
-				break
-			}
+	var startIntent ProviderStartIntent
+	foundStart := false
+	for _, candidate := range job.ProviderStartIntents {
+		if candidate.RoleExecutionID == r.RoleExecutionID {
+			startIntent, foundStart = candidate, true
+			break
 		}
-		if !foundStart {
-			return errors.New("PlanningResumeIntent has no Provider Start intent")
-		}
-		if err := validateProviderStartSession(job, startIntent, r.ProviderSessionID, r.CreatedRevision, r.CreatedAt); err != nil {
-			return err
-		}
+	}
+	if !foundStart {
+		return errors.New("PlanningResumeIntent has no Provider Start intent")
+	}
+	if err := validateProviderStartSession(job, startIntent, r.ProviderSessionID, r.CreatedRevision, r.CreatedAt); err != nil {
+		return err
 	}
 	for _, grant := range job.PlanningAuthorizations {
 		if grant.ID != r.PlanningAuthorizationID {

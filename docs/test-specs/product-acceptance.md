@@ -90,7 +90,7 @@ Domain / Store検証ケースは [Job Contract Test Specification](job-contract-
 **When** 別RoleへHANDOFFする。
 **Then**
 - 受信Roleと受信Task scopeが明示される。
-- 送信側Providerの停止証拠、terminal result / usage照合、成果identity固定、Worktree releaseが永続化されるまで受信側はrunnableにならない。
+- 送信側Providerの停止証拠、terminal result照合、成果identity固定、Worktree releaseが永続化されるまで受信側はrunnableにならない。
 - WAITING、SUSPENDED、terminal status、Handoff messageの存在だけで停止を証明しない。
 - 停止や結果がUNKNOWNの場合はWorktreeを保持またはquarantineする。
 
@@ -120,7 +120,7 @@ Domain / Store検証ケースは [Job Contract Test Specification](job-contract-
 - Adapter capabilityはProvider / SDK versionとconfiguration identityに対応付け、Start / Sendのidempotencyまたはlookup、cross-process Session reattachment、event replay / cursor continuity、Stop proof、final output retrieval、Usage identity / completenessを個別に宣言・検証する。
 - 同じRoleExecutionのSession再接続は、保存済みの正確なSession / Provider / account / configuration identityが一致し、Adapterがcross-process reattachmentを明示的にサポートする場合だけ成功する。
 - Start / SendのUNKNOWNを、新しいOperationID / turn identityで再送しない。照合または同じidentityに対する実証済みidempotencyを要求する。
-- Stop notificationだけでは停止を認定しない。Stop proof、terminal result、Usageを照合する。
+- Stop notificationだけでは停止を認定しない。Stop proofとterminal resultを照合する。Usageは任意とする。
 - Usageのidentityとcompletenessを別々に検証し、確定していない利用量をfinalとして扱わない。
 
 ### AT-009: Worktree ownership and concurrency
@@ -167,10 +167,10 @@ Domain / Store検証ケースは [Job Contract Test Specification](job-contract-
 - 保存済みJob factsと現在のProvider / filesystem状態を照合する。
 - 破損、schema不明、provenance不一致、矛盾は安全側で隔離・拒否する。
 - 未確定のProvider resultやstop stateを成功・失敗へ推測変換しない。
-- Worktree ownershipはstop proofとresult / usage reconciliation前に解放しない。
+- Worktree ownershipはstop proofとresult reconciliation前に解放しない。
 - Adapterがcross-process reattachmentをサポートする場合だけ、同一RoleExecutionを保存済みの正確なProvider Sessionへ再接続する。
 - reattachmentが未対応・未検証の場合、同じRoleExecutionへ新しいSessionを作成しない。旧operationを未解決として保持し、Worktreeを保持またはquarantineする。
-- 新しいRoleExecutionによる継続は、旧Providerのquiescence、terminal result、Usage、Worktree releaseを確認した後に限り、現在のJob authorityを再検証して開始する。
+- 新しいRoleExecutionによる継続は、旧Providerのquiescence、terminal result、Worktree releaseを確認した後に限り、現在のJob authorityを再検証して開始する。
 - 古いRoleExecutionやownerの遅延更新はrevision / fencingで拒否する。
 - Provider AdapterのE2 recovery testsはE5 Durable Recoveryの証拠として扱わない。
 
@@ -184,7 +184,7 @@ Domain / Store検証ケースは [Job Contract Test Specification](job-contract-
 - JobContractの正確なrevisionが人間に承認される。
 - Coderの成果を独立Reviewerが固定対象で検証する。
 - 必要な修正と再レビューを同じJobで継続できる。
-- Evidence、Usage、Provider quiescence、Worktree release、未解決operationの不存在を確認してJobを完了する。
+- Evidence、Provider quiescence、Worktree release、未解決operationの不存在を確認してJobを完了する。Usageの未報告は妨げとしない。
 - 中断・再起動後も同じJobを安全に再開できる。
 
 ### AT-014: Agent / Tool execution loop (H1)
@@ -309,7 +309,7 @@ Domain / Store検証ケースは [Job Contract Test Specification](job-contract-
 
 ## 4. Evidence recording
 
-Provider Adapter固有のDomain / Store / Controller / Runtime判定は[Provider Adapter テスト仕様書](provider-adapter-test-specification.md)に従う。既存Jobの読み取り互換性を維持し、Provider Start observationの導入revision以降に作成されたTurn / Resumeだけにaccepted Start observationの厳密なSession bindingを適用する。
+Provider Adapter固有のDomain / Store / Controller / Runtime判定は[Provider Adapter テスト仕様書](provider-adapter-test-specification.md)に従う。Turn / Resumeにはaccepted Start observationのSession bindingを適用する。
 
 各受入れ結果は次の情報を持つ。
 

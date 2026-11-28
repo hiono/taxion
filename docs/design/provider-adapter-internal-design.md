@@ -276,7 +276,7 @@ type ProviderStartObservation struct {
 }
 ```
 
-UNKNOWNは同一OperationIDの照合Observationで追記できる。terminal ACCEPTED / FAILEDは先行UNKNOWNだけを解消できる。ACCEPTED observationのSessionIDと一致しないTurn / Resume intentは新規作成できない。既存Jobの読み取り互換性を維持するため、Job.ProviderLifecycleEnforcedFromRevisionを使用する。新規StartIntent作成時はそのCreatedRevisionを記録する。旧Jobにこの値がない場合は、最初のProviderStartObservationのCreatedRevisionを記録する。そのrevisionより前の既存Turn / Resumeは読み取り可能とし、そのrevision以降の新しいTurn / Resumeにはaccepted Start observationとSessionIDの一致を要求する。
+UNKNOWNは同一OperationIDの照合Observationで追記できる。terminal ACCEPTED / FAILEDは先行UNKNOWNだけを解消できる。Turn / Resume intentはaccepted Start observationのSessionIDと一致しなければならない。
 
 ### 6.2 ProviderEventObservation（Domain / Store / Controller実装済み）
 
@@ -383,7 +383,7 @@ Job.Validateは次を検証する。
 - UNKNOWN解消Observationが同一OperationID / TurnIDを参照すること
 - Complete=falseのUsageを確定利用量として扱わないこと
 - Quiescent=falseのStopをrelease proofとして使用しないこと
-- terminal result / usage / stop proofが揃う前に完了へ進まないこと
+- terminal result / stop proofが揃う前に完了へ進まないこと。Usageは任意とする
 
 ## 7. Store設計
 
@@ -476,7 +476,7 @@ Load Job
   -> Runtime.Send only for the claim owner or verified Send idempotency after recovery
   -> Persist terminal or UNKNOWN PlanningTurnObservation
   -> Reconcile a terminal Lookup result using its evidence and required final output
-  -> Retrieve Result / Usage as separate append-only facts
+  -> Retrieve Result, and optionally Usage, as separate append-only facts
 ```
 
 Sendの結果がAmbiguousの場合は同じTurnIDのUNKNOWNを追加し、新しいTurnIDを生成しない。LookupがNOT_FOUNDでも、実証済みSend idempotencyなしには再送しない。Lookupの証拠と必要な最終出力に基づいてterminal TurnObservationへ遷移し、Usageの未報告は妨げとしない。

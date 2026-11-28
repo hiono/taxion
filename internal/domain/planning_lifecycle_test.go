@@ -34,7 +34,6 @@ func planningLifecycleJob(t *testing.T) (Job, string, string) {
 		t.Fatalf("NewProviderStartObservation: %v", err)
 	}
 	job.ProviderStartObservations = append(job.ProviderStartObservations, startObservation)
-	job.ProviderLifecycleEnforcedFromRevision = startObservation.CreatedRevision
 	job.Revision++
 	job.UpdatedAt = startObservation.CreatedAt
 	return job, principal, execution.ID
@@ -543,7 +542,6 @@ func TestPlanningTurnValidationUsesOnlyPriorResumeObservations(t *testing.T) {
 func TestPlanningTurnRequiresAcceptedStartObservationAndExactSession(t *testing.T) {
 	job, principal, executionID := planningLifecycleJob(t)
 	job.ProviderStartObservations = nil
-	job.ProviderLifecycleEnforcedFromRevision = 0
 	_, err := NewPlanningTurnIntent(job, executionID, principal, "session_1",
 		"cmd_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", strings.Repeat("a", 64), job.UpdatedAt.Add(time.Second))
 	var boundary *PlanningBoundaryError
@@ -559,7 +557,7 @@ func TestPlanningTurnRequiresAcceptedStartObservationAndExactSession(t *testing.
 	}
 }
 
-func TestLegacyPlanningTurnFactsRemainReadableWithoutStartObservation(t *testing.T) {
+func TestPlanningTurnFactsRequireStartObservation(t *testing.T) {
 	job, principal, executionID := planningLifecycleJob(t)
 	turn, err := NewPlanningTurnIntent(job, executionID, principal, "session_1",
 		"cmd_ffffffffffffffffffffffffffffffff", strings.Repeat("f", 64), job.UpdatedAt.Add(time.Second))
@@ -570,9 +568,8 @@ func TestLegacyPlanningTurnFactsRemainReadableWithoutStartObservation(t *testing
 	job.Revision++
 	job.UpdatedAt = turn.CreatedAt
 	job.ProviderStartObservations = nil
-	job.ProviderLifecycleEnforcedFromRevision = 0
-	if err := job.Validate(); err != nil {
-		t.Fatalf("legacy Job with historical Turn intent must remain readable: %v", err)
+	if err := job.Validate(); err == nil {
+		t.Fatal("Job.Validate accepted a Turn without a Start observation")
 	}
 }
 
@@ -587,12 +584,10 @@ func TestNewPlanningResumeRequiresAcceptedStartObservation(t *testing.T) {
 	job.Revision++
 	job.UpdatedAt = turn.CreatedAt
 	job.ProviderStartObservations = nil
-	job.ProviderLifecycleEnforcedFromRevision = 0
 	_, err = NewPlanningResumeIntent(job, executionID, principal, "session_1",
 		"cmd_22222222222222222222222222222222", strings.Repeat("2", 64), true, job.UpdatedAt.Add(time.Second))
-	var boundary *PlanningBoundaryError
-	if !errors.As(err, &boundary) || boundary.ReasonCode != "provider_start_unconfirmed" {
-		t.Fatalf("Resume without accepted Start observation error = %v, want provider_start_unconfirmed", err)
+	if !errors.Is(err, ErrInvalidJob) {
+		t.Fatalf("Resume without accepted Start observation error = %v, want invalid Job", err)
 	}
 }
 
@@ -600,7 +595,6 @@ func TestProviderStartUnknownEvidenceIsAppendOnlyUntilTerminalResolution(t *test
 	job, principal, executionID := planningLifecycleJob(t)
 	startID := job.ProviderStartIntents[0].ID
 	job.ProviderStartObservations = nil
-	job.ProviderLifecycleEnforcedFromRevision = 0
 
 	first, err := NewProviderStartObservation(job, startID, principal,
 		"cmd_33333333333333333333333333333333", ProviderStartUnknown, "", "", "", false,
@@ -609,7 +603,6 @@ func TestProviderStartUnknownEvidenceIsAppendOnlyUntilTerminalResolution(t *test
 		t.Fatalf("first UNKNOWN observation: %v", err)
 	}
 	job.ProviderStartObservations = append(job.ProviderStartObservations, first)
-	job.ProviderLifecycleEnforcedFromRevision = first.CreatedRevision
 	job.Revision++
 	job.UpdatedAt = first.CreatedAt
 
