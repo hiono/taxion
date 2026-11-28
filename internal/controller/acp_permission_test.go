@@ -177,14 +177,22 @@ func TestACPExecutionPermissionAuthorizerRevalidatesExactTaskAuthority(t *testin
 	if err := withoutPersistedAssignment.Validate(); err == nil {
 		t.Fatal("Job.Validate accepted a RoleExecution binding without its persisted WorktreeAssignment")
 	}
+	if err := persistedJob.Validate(); err != nil {
+		t.Fatalf("original persisted Worktree aggregate is invalid: %v", err)
+	}
 	for _, field := range []string{"repository", "worktree"} {
 		candidate := assignment
 		candidateJob := persistedJob
+		candidateJob.WorktreeAssignments = append([]domain.WorktreeAssignment(nil), persistedJob.WorktreeAssignments...)
 		if field == "repository" {
 			candidate.RepositoryPath = invalidPath
+			for i := range candidateJob.WorktreeAssignments {
+				if candidateJob.WorktreeAssignments[i].ID == assignment.ID {
+					candidateJob.WorktreeAssignments[i].RepositoryPath = invalidPath
+				}
+			}
 		} else {
 			candidate.WorktreePath = invalidPath
-			candidateJob.WorktreeAssignments = append([]domain.WorktreeAssignment(nil), persistedJob.WorktreeAssignments...)
 			candidateJob.RoleExecutions = append([]domain.RoleExecution(nil), persistedJob.RoleExecutions...)
 			candidateJob.ProviderStartIntents = append([]domain.ProviderStartIntent(nil), persistedJob.ProviderStartIntents...)
 			for i := range candidateJob.WorktreeAssignments {
