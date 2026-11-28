@@ -295,6 +295,37 @@ func TestVerifyGitWorktreeChecksRepositoryAndBaseline(t *testing.T) {
 	}
 }
 
+func TestControllerTestGitIgnoresInheritedRepository(t *testing.T) {
+	otherRepository, _, otherHead := newControllerTestGitWorktree(t)
+	otherConfig, err := os.ReadFile(filepath.Join(otherRepository, ".git", "config"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GIT_DIR", filepath.Join(otherRepository, ".git"))
+	t.Setenv("GIT_WORK_TREE", otherRepository)
+	t.Setenv("GIT_INDEX_FILE", filepath.Join(otherRepository, ".git", "index"))
+
+	repository, _, _ := newControllerTestGitWorktree(t)
+	root, err := canonicalGitPath(runControllerTestGit(t, repository, "rev-parse", "--show-toplevel"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	expectedRoot, err := canonicalGitPath(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if root != expectedRoot {
+		t.Fatalf("fixture root = %q, want %q", root, repository)
+	}
+	if head := runControllerTestGit(t, otherRepository, "rev-parse", "HEAD"); head != otherHead {
+		t.Fatalf("other repository HEAD changed from %s to %s", otherHead, head)
+	}
+	config, err := os.ReadFile(filepath.Join(otherRepository, ".git", "config"))
+	if err != nil || string(config) != string(otherConfig) {
+		t.Fatalf("other repository config changed: %v", err)
+	}
+}
+
 func newControllerTestGitWorktree(t *testing.T) (string, string, string) {
 	t.Helper()
 	repositoryPath := filepath.Join(t.TempDir(), "repository")
@@ -318,7 +349,14 @@ func newControllerTestGitWorktree(t *testing.T) (string, string, string) {
 func runControllerTestGit(t *testing.T, directory string, args ...string) string {
 	t.Helper()
 	commandArgs := append([]string{"-C", directory}, args...)
-	output, err := exec.Command("git", commandArgs...).CombinedOutput()
+	command := exec.Command("git", commandArgs...)
+	command.Env = []string{}
+	for _, entry := range os.Environ() {
+		if !strings.HasPrefix(strings.ToUpper(entry), "GIT_") {
+			command.Env = append(command.Env, entry)
+		}
+	}
+	output, err := command.CombinedOutput()
 	if err != nil {
 		t.Fatalf("git %s: %v: %s", strings.Join(args, " "), err, output)
 	}
