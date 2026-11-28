@@ -176,6 +176,7 @@ func newProviderTestPrincipal(t *testing.T) auth.AuthenticatedPrincipal {
 type fakePlanningProviderRuntime struct {
 	capabilitiesHook func()
 	startClaimErr    error
+	startMu          sync.Mutex
 
 	identity     provider.Identity
 	capabilities provider.Capabilities
@@ -232,7 +233,9 @@ func (f *fakePlanningProviderRuntime) Start(ctx context.Context, request provide
 	if f.identity.SDKVersion != "test-sdk/1" {
 		return provider.StartResult{}, provider.ErrUnsupportedCapability
 	}
+	f.startMu.Lock()
 	f.startCalls++
+	f.startMu.Unlock()
 	if f.startHook != nil {
 		if err := f.startHook(ctx, request); err != nil {
 			return provider.StartResult{}, err
@@ -546,6 +549,55 @@ func TestProviderControllerDoesNotReplayStartWhileFirstDispatchIsRunning(t *test
 	}
 	if err := <-done; err != nil || runtime.startCalls != 1 {
 		t.Fatalf("first dispatch failed or was replayed: calls=%d err=%v", runtime.startCalls, err)
+	}
+}
+
+func TestProviderControllerKeepsStartUnknownWhileIdempotentRetryIsRunning(t *testing.T) {
+	runtime := &fakePlanningProviderRuntime{}
+	controller, database, principal, jobID, grantID, documents := newProviderControllerFixture(t, runtime)
+	commandID := "cmd_23232323232323232323232323232323"
+	runtime.lookupResult = provider.LookupResult{
+		Found: false, OperationID: domain.ProviderStartOperationID(commandID),
+		Status: provider.LookupStatusNotFound, EvidenceSHA256: strings.Repeat("f", 64),
+	}
+	firstStarted, secondStarted := make(chan struct{}), make(chan struct{})
+	releaseFirst, releaseSecond := make(chan struct{}), make(chan struct{})
+	var mu sync.Mutex
+	starts := 0
+	runtime.startHook = func(context.Context, provider.StartRequest) error {
+		mu.Lock()
+		starts++
+		call := starts
+		mu.Unlock()
+		if call == 1 {
+			close(firstStarted)
+			<-releaseFirst
+			return &provider.OperationError{Class: provider.FailureDefinitive, Code: provider.OperationCodeRateLimited}
+		}
+		close(secondStarted)
+		<-releaseSecond
+		return nil
+	}
+	firstDone, secondDone := make(chan error, 1), make(chan error, 1)
+	go func() {
+		_, _, _, _, err := controller.StartPlanning(context.Background(), jobID, grantID, commandID, documents, principal)
+		firstDone <- err
+	}()
+	<-firstStarted
+	go func() {
+		_, _, _, _, err := controller.StartPlanning(context.Background(), jobID, grantID, commandID, documents, principal)
+		secondDone <- err
+	}()
+	<-secondStarted
+	close(releaseFirst)
+	<-firstDone
+	job, getErr := database.GetJob(context.Background(), jobID)
+	close(releaseSecond)
+	secondErr := <-secondDone
+	if getErr != nil || len(job.ProviderStartObservations) != 1 ||
+		job.ProviderStartObservations[0].Status != domain.ProviderStartUnknown || secondErr != nil {
+		t.Fatalf("concurrent retry was falsely finalized: observations=%#v getErr=%v retryErr=%v",
+			job.ProviderStartObservations, getErr, secondErr)
 	}
 }
 
@@ -1573,7 +1625,7 @@ func TestProviderControllerReconcilesAmbiguousStartWithoutBlindReplay(t *testing
 	}
 }
 
-func TestProviderControllerPersistsDefinitiveStartFailureWithoutLookupOrReplay(t *testing.T) {
+func TestProviderControllerKeepsClaimedDefinitiveStartFailureUnknown(t *testing.T) {
 	runtime := &fakePlanningProviderRuntime{
 		startErr: &provider.OperationError{Class: provider.FailureDefinitive, Code: provider.OperationCodeInvalidRequest},
 	}
@@ -1587,21 +1639,16 @@ func TestProviderControllerPersistsDefinitiveStartFailureWithoutLookupOrReplay(t
 	if err != nil {
 		t.Fatalf("GetJob after definitive Start failure: %v", err)
 	}
-	if len(job.ProviderStartObservations) != 2 ||
-		job.ProviderStartObservations[1].Status != domain.ProviderStartFailed ||
-		job.ProviderStartObservations[1].EvidenceSHA256 == "" {
-		t.Fatalf("definitive Start failure was not persisted as FAILED: %#v", job.ProviderStartObservations)
-	}
-	_, _, _, _, err = controller.StartPlanning(context.Background(), jobID, grantID, commandID, documents, principal)
-	if err == nil || !strings.Contains(err.Error(), "definitively rejected") {
-		t.Fatalf("retry after definitive Start failure = %v", err)
+	if len(job.ProviderStartObservations) != 1 ||
+		job.ProviderStartObservations[0].Status != domain.ProviderStartUnknown {
+		t.Fatalf("claimed Start failure was finalized despite possible concurrent retry: %#v", job.ProviderStartObservations)
 	}
 	if runtime.startCalls != 1 || runtime.lookupCalls != 0 {
 		t.Fatalf("definitive failure was retried or looked up: starts=%d lookups=%d", runtime.startCalls, runtime.lookupCalls)
 	}
 }
 
-func TestProviderControllerReconcilesUnknownToFailedAfterDefinitiveRetry(t *testing.T) {
+func TestProviderControllerKeepsUnknownAfterDefinitiveRetryFailure(t *testing.T) {
 	runtime := &fakePlanningProviderRuntime{
 		startErr: &provider.OperationError{Class: provider.FailureAmbiguous, Code: provider.OperationCodeTimeout},
 	}
@@ -1624,15 +1671,8 @@ func TestProviderControllerReconcilesUnknownToFailedAfterDefinitiveRetry(t *test
 	if err != nil {
 		t.Fatalf("GetJob after definitive retry failure: %v", err)
 	}
-	if len(job.ProviderStartObservations) != 2 ||
-		job.ProviderStartObservations[0].Status != domain.ProviderStartUnknown ||
-		job.ProviderStartObservations[1].Status != domain.ProviderStartFailed ||
-		!job.ProviderStartObservations[1].ReconcilesUnknown {
-		t.Fatalf("UNKNOWN was not terminally reconciled as FAILED: %#v", job.ProviderStartObservations)
-	}
-	_, _, _, _, err = controller.StartPlanning(context.Background(), jobID, grantID, commandID, documents, principal)
-	if err == nil || !strings.Contains(err.Error(), "definitively rejected") {
-		t.Fatalf("retry after terminal FAILED observation = %v", err)
+	if len(job.ProviderStartObservations) != 1 || job.ProviderStartObservations[0].Status != domain.ProviderStartUnknown {
+		t.Fatalf("definitive retry did not preserve UNKNOWN: %#v", job.ProviderStartObservations)
 	}
 	if runtime.startCalls != 2 || runtime.lookupCalls != 1 {
 		t.Fatalf("terminal failure was replayed: starts=%d lookups=%d", runtime.startCalls, runtime.lookupCalls)

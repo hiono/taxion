@@ -200,7 +200,7 @@ func (c *ProviderController) StartPlanning(
 			if persistErr := c.recordStartObservation(ctx, jobID, intent.ID, domain.ProviderStartUnknown, "", "", "", false, principal); persistErr != nil {
 				return receipt, execution, intent, provider.StartResult{}, errors.Join(err, fmt.Errorf("persist UNKNOWN Provider Start observation: %w", persistErr))
 			}
-		} else if evidence, definitive := providerDefinitiveFailureEvidence(intent.ID, err); definitive {
+		} else if evidence, definitive := providerDefinitiveFailureEvidence(intent.ID, err); definitive && !intent.ClaimBeforeDispatch {
 			if persistErr := c.recordStartObservation(ctx, jobID, intent.ID, domain.ProviderStartFailed, "", "", evidence, false, principal); persistErr != nil {
 				return receipt, execution, intent, provider.StartResult{}, errors.Join(err, fmt.Errorf("persist FAILED Provider Start observation: %w", persistErr))
 			}
@@ -579,10 +579,6 @@ func (c *ProviderController) reconcileStart(
 		if providerOperationMayHaveStarted(err) {
 			if persistErr := c.recordStartObservation(ctx, intent.JobID, intent.ID, domain.ProviderStartUnknown, "", "", "", false, principal); persistErr != nil {
 				return receipt, execution, intent, provider.StartResult{}, errors.Join(err, fmt.Errorf("persist UNKNOWN Provider Start observation: %w", persistErr))
-			}
-		} else if evidence, definitive := providerDefinitiveFailureEvidence(intent.ID, err); definitive {
-			if persistErr := c.recordStartObservation(ctx, intent.JobID, intent.ID, domain.ProviderStartFailed, "", "", evidence, false, principal); persistErr != nil {
-				return receipt, execution, intent, provider.StartResult{}, errors.Join(err, fmt.Errorf("persist FAILED Provider Start observation: %w", persistErr))
 			}
 		}
 		return receipt, execution, intent, provider.StartResult{}, err
