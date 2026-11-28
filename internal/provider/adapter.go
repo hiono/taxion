@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 	"unicode"
@@ -30,16 +31,17 @@ func (i Identity) Validate() error {
 type Capability string
 
 const (
-	CapabilityStartIdempotency  Capability = "start.idempotency"
-	CapabilityStartLookup       Capability = "start.lookup"
-	CapabilitySendIdempotency   Capability = "send.idempotency"
-	CapabilitySendLookup        Capability = "send.lookup"
-	CapabilitySessionReattach   Capability = "session.cross_process_reattachment"
-	CapabilityEventReplay       Capability = "event.replay"
-	CapabilityStopProof         Capability = "stop.proof"
-	CapabilityFinalOutput       Capability = "result.final_output_retrieval"
-	CapabilityUsageIdentity     Capability = "usage.identity"
-	CapabilityUsageCompleteness Capability = "usage.completeness"
+	CapabilityStartIdempotency           Capability = "start.idempotency"
+	CapabilityStartLookup                Capability = "start.lookup"
+	CapabilitySendIdempotency            Capability = "send.idempotency"
+	CapabilitySendLookup                 Capability = "send.lookup"
+	CapabilityReadOnlyContextEnforcement Capability = "send.read_only_context_enforcement"
+	CapabilitySessionReattach            Capability = "session.cross_process_reattachment"
+	CapabilityEventReplay                Capability = "event.replay"
+	CapabilityStopProof                  Capability = "stop.proof"
+	CapabilityFinalOutput                Capability = "result.final_output_retrieval"
+	CapabilityUsageIdentity              Capability = "usage.identity"
+	CapabilityUsageCompleteness          Capability = "usage.completeness"
 )
 
 type EvidenceLevel string
@@ -66,6 +68,7 @@ type Capabilities struct {
 	StartLookup                 bool
 	SendIdempotency             bool
 	SendLookup                  bool
+	ReadOnlyContextEnforcement  bool
 	CrossProcessSessionReattach bool
 	EventReplay                 bool
 	StopProof                   bool
@@ -125,6 +128,8 @@ func (c Capabilities) Has(capability Capability) bool {
 		return c.SendIdempotency
 	case CapabilitySendLookup:
 		return c.SendLookup
+	case CapabilityReadOnlyContextEnforcement:
+		return c.ReadOnlyContextEnforcement
 	case CapabilitySessionReattach:
 		return c.CrossProcessSessionReattach
 	case CapabilityEventReplay:
@@ -217,6 +222,8 @@ func setCapability(capabilities *Capabilities, capability Capability) {
 		capabilities.SendIdempotency = true
 	case CapabilitySendLookup:
 		capabilities.SendLookup = true
+	case CapabilityReadOnlyContextEnforcement:
+		capabilities.ReadOnlyContextEnforcement = true
 	case CapabilitySessionReattach:
 		capabilities.CrossProcessSessionReattach = true
 	case CapabilityEventReplay:
@@ -290,7 +297,7 @@ func (c Capabilities) Validate(expected Identity) error {
 
 var allCapabilities = []Capability{
 	CapabilityStartIdempotency, CapabilityStartLookup,
-	CapabilitySendIdempotency, CapabilitySendLookup,
+	CapabilitySendIdempotency, CapabilitySendLookup, CapabilityReadOnlyContextEnforcement,
 	CapabilitySessionReattach, CapabilityEventReplay,
 	CapabilityStopProof, CapabilityFinalOutput,
 	CapabilityUsageIdentity, CapabilityUsageCompleteness,
@@ -310,20 +317,49 @@ func (d ContextDocument) Validate() error {
 }
 
 type StartRequest struct {
-	OperationID     string
-	JobID           string
-	RoleExecutionID string
-	RequestSHA256   string
-	PromptSHA256    string
-	Prompt          string
-	Context         []ContextDocument
-	MaxTurns        uint32
-	MaxTokens       uint64
-	Deadline        time.Time
+	OperationID           string
+	JobID                 string
+	RoleExecutionID       string
+	TaskID                string
+	ExecutionPermissionID string
+	WorktreeAssignmentID  string
+	WorktreePath          string
+	RequestSHA256         string
+	PromptSHA256          string
+	Prompt                string
+	Context               []ContextDocument
+	MaxTurns              uint32
+	MaxTokens             uint64
+	Deadline              time.Time
+}
+
+type ACPToolPermissionRequest struct {
+	OperationID           string
+	JobID                 string
+	RoleExecutionID       string
+	TaskID                string
+	ExecutionPermissionID string
+	WorktreeAssignmentID  string
+	WorktreePath          string
+	SessionID             string
+	RequestSHA256         string
+	ProviderIdentity      Identity
+	ToolCall              []byte
+}
+
+// ACPToolPermissionAuthorizer must validate the current JobApproval and exact
+// Task ExecutionPermission, then classify the requested tool operation.
+// A nil authorizer always results in permission denial.
+type ACPToolPermissionAuthorizer interface {
+	Authorize(context.Context, ACPToolPermissionRequest) error
 }
 
 func (r StartRequest) Validate() error {
 	if !validIdentifier(r.OperationID) || !validIdentifier(r.JobID) || !validIdentifier(r.RoleExecutionID) ||
+		(r.TaskID == "") != (r.ExecutionPermissionID == "") ||
+		(r.TaskID != "" && (!validIdentifier(r.TaskID) || !validIdentifier(r.ExecutionPermissionID) ||
+			!validIdentifier(r.WorktreeAssignmentID) || !filepath.IsAbs(r.WorktreePath) || filepath.Clean(r.WorktreePath) != r.WorktreePath)) ||
+		(r.TaskID == "" && (r.WorktreeAssignmentID != "" || r.WorktreePath != "")) ||
 		!validSHA256(r.RequestSHA256) || !validSHA256(r.PromptSHA256) ||
 		r.Prompt == "" || sha256Hex(r.Prompt) != r.PromptSHA256 ||
 		r.MaxTurns == 0 || r.MaxTokens == 0 || r.Deadline.IsZero() {
