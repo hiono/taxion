@@ -174,6 +174,8 @@ func newProviderTestPrincipal(t *testing.T) auth.AuthenticatedPrincipal {
 }
 
 type fakePlanningProviderRuntime struct {
+	capabilitiesHook func()
+
 	identity     provider.Identity
 	capabilities provider.Capabilities
 	startResult  provider.StartResult
@@ -209,6 +211,9 @@ type fakePlanningProviderRuntime struct {
 func (f *fakePlanningProviderRuntime) Identity() provider.Identity { return f.identity }
 
 func (f *fakePlanningProviderRuntime) Capabilities(context.Context) (provider.Capabilities, error) {
+	if f.capabilitiesHook != nil {
+		f.capabilitiesHook()
+	}
 	return f.capabilities.Clone(), nil
 }
 
@@ -496,6 +501,40 @@ func TestProviderControllerRejectsTurnAfterPlanningBoundaryIsLost(t *testing.T) 
 		"cmd_19191919191919191919191919191919", "continue", 100, principal); err != nil ||
 		observation.Status != domain.PlanningTurnCompleted || runtime.sendCalls != 1 {
 		t.Fatalf("verified turn did not run: observation=%#v sends=%d err=%v", observation, runtime.sendCalls, err)
+	}
+}
+
+func TestProviderControllerCanSendAfterBoundaryFailsBeforeClaim(t *testing.T) {
+	runtime := &fakePlanningProviderRuntime{}
+	controller, database, principal, jobID, grantID, documents := newProviderControllerFixture(t, runtime)
+	_, execution, _, _, err := controller.StartPlanning(context.Background(), jobID, grantID,
+		"cmd_18181818181818181818181818181818", documents, principal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	runtime.capabilitiesHook = func() {
+		calls++
+		if calls == 2 {
+			runtime.capabilities.ReadOnlyContextEnforcement = false
+		}
+	}
+	commandID := "cmd_19191919191919191919191919191919"
+	_, _, _, _, err = controller.SendPlanning(context.Background(), jobID, execution.ID, "session_1",
+		commandID, "continue", 100, principal)
+	if !errors.Is(err, provider.ErrUnsupportedCapability) || runtime.sendCalls != 0 {
+		t.Fatalf("unverified turn sent: sends=%d err=%v", runtime.sendCalls, err)
+	}
+	job, err := database.GetJob(context.Background(), jobID)
+	if err != nil || len(job.PlanningTurnIntents) != 1 || len(job.PlanningTurnObservations) != 0 {
+		t.Fatalf("unattempted turn claimed: intents=%d observations=%d err=%v", len(job.PlanningTurnIntents), len(job.PlanningTurnObservations), err)
+	}
+	runtime.capabilitiesHook = nil
+	runtime.capabilities.ReadOnlyContextEnforcement = true
+	_, _, observation, _, err := controller.SendPlanning(context.Background(), jobID, execution.ID, "session_1",
+		commandID, "continue", 100, principal)
+	if err != nil || observation.Status != domain.PlanningTurnCompleted || runtime.sendCalls != 1 {
+		t.Fatalf("first dispatch after boundary recovery: observation=%#v sends=%d err=%v", observation, runtime.sendCalls, err)
 	}
 }
 

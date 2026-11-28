@@ -987,6 +987,9 @@ func (c *ProviderController) reconcileTurn(
 	}
 	dispatchOwner := false
 	if !previousFound {
+		if err := c.requirePlanningBoundary(ctx); err != nil {
+			return receipt, turn, domain.PlanningTurnObservation{}, provider.TurnResult{}, err
+		}
 		var claimed bool
 		var claimErr error
 		previous, claimed, claimErr = c.claimPlanningTurnDispatch(ctx, job.ID, turn.ID, principal)
@@ -1144,8 +1147,10 @@ func (c *ProviderController) reconcileTurn(
 	if err := grant.ValidateFor(current, principal.PrincipalID(), c.now()); err != nil {
 		return receipt, turn, domain.PlanningTurnObservation{}, provider.TurnResult{}, err
 	}
-	if err := c.requirePlanningBoundary(ctx); err != nil {
-		return receipt, turn, previous, provider.TurnResult{}, err
+	if !dispatchOwner {
+		if err := c.requirePlanningBoundary(ctx); err != nil {
+			return receipt, turn, previous, provider.TurnResult{}, err
+		}
 	}
 	result, err := c.runtime.Send(ctx, request)
 	if err != nil {
