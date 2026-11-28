@@ -942,7 +942,7 @@ func (a *ACPAdapter) Stop(ctx context.Context, request StopRequest, _ Credential
 	}
 	session.promptCancelled = true
 	cancelCtx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
-	_ = session.process.notify(cancelCtx, "session/cancel", map[string]string{"sessionId": request.SessionID})
+	_ = session.process.notify(cancelCtx, "session/cancel", map[string]string{"sessionId": session.peerSessionID})
 	cancel()
 	unlockPrompt()
 	session.process.terminate()
