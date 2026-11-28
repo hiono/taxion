@@ -32,7 +32,7 @@ func TestProviderEventObservationsPersistAtomicallyAndPreserveCursor(t *testing.
 		ReadOnlyBoundary: domain.PlanningReadOnlyBoundary{
 			Mode: domain.PlanningReadOnlyBoundarySnapshot, Reference: "snapshot_1", SHA256: strings.Repeat("c", 64),
 		},
-		Budget: domain.PlanningBudget{MaxTurns: 3, MaxTokens: 1000}, Deadline: now.Add(time.Hour),
+		Deadline: now.Add(time.Hour),
 	}
 	grant, err := domain.NewPlanningAuthorization(job, principal.PrincipalID(), grantCommand, request, now)
 	if err != nil {
@@ -99,7 +99,7 @@ func TestProviderEventObservationsPersistAtomicallyAndPreserveCursor(t *testing.
 	turnCommand := "cmd_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
 	_, turn, err := database.AddPlanningTurnIntent(
 		ctx, jobID, job.Revision, startIntent.RoleExecutionID, "session_1",
-		turnCommand, strings.Repeat("d", 64), 100, principal,
+		turnCommand, strings.Repeat("d", 64), principal,
 	)
 	if err != nil {
 		t.Fatalf("AddPlanningTurnIntent: %v", err)

@@ -20,7 +20,7 @@ func appendTaskForTest(job *Job, task Task) {
 	job.UpdatedAt = task.CreatedAt
 }
 
-func TestNewTaskInheritsApprovedScopeAndBudget(t *testing.T) {
+func TestNewTaskInheritsApprovedScope(t *testing.T) {
 	job, now := approvedJobForExecutionPermission(t)
 	request := taskTestRequest(job, now, "cmd_a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1")
 	task, err := NewTask(job, request, now)
@@ -32,7 +32,7 @@ func TestNewTaskInheritsApprovedScopeAndBudget(t *testing.T) {
 		!equalTaskStrings(task.TargetRepositories, contract.TargetRepositories) ||
 		!equalTaskStrings(task.TargetResources, contract.TargetResources) ||
 		!equalTaskStrings(task.Workspaces, contract.Workspaces) ||
-		task.Budget != contract.Budget || task.ConcurrencyCeiling != contract.ConcurrencyCeiling ||
+		task.ConcurrencyCeiling != contract.ConcurrencyCeiling ||
 		!task.Deadline.Equal(contract.Deadline) ||
 		!equalTaskStrings(task.ProhibitedEffects, contract.ProhibitedEffects) ||
 		!equalTaskStrings(task.ApprovalRequiredEffects, contract.ApprovalRequiredEffects) {
@@ -50,7 +50,6 @@ func TestNewTaskNarrowsScopeAndAddsConstraints(t *testing.T) {
 	request.TargetRepositories = []string{}
 	request.TargetResources = []string{"resource_ci"}
 	request.Workspaces = []string{}
-	request.Budget = JobContractBudget{MaxTurns: 2, MaxTokens: 500}
 	request.ConcurrencyCeiling = 1
 	request.Deadline = now.Add(20 * time.Minute)
 	request.ProhibitedEffects = []string{"external network mutation"}
@@ -61,7 +60,6 @@ func TestNewTaskNarrowsScopeAndAddsConstraints(t *testing.T) {
 	}
 	if len(task.TargetRepositories) != 0 || len(task.Workspaces) != 0 ||
 		!equalTaskStrings(task.TargetResources, []string{"resource_ci"}) ||
-		task.Budget.MaxTurns != 2 || task.Budget.MaxTokens != 500 ||
 		!task.Deadline.Equal(request.Deadline) ||
 		!taskSubset([]string{"production deployment"}, task.ProhibitedEffects) ||
 		!taskSubset([]string{"publish release"}, task.ApprovalRequiredEffects) {
@@ -72,7 +70,6 @@ func TestNewTaskNarrowsScopeAndAddsConstraints(t *testing.T) {
 func TestTaskParentAndDependencyAreSeparateRelations(t *testing.T) {
 	job, now := approvedJobForExecutionPermission(t)
 	parentRequest := taskTestRequest(job, now, "cmd_a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3")
-	parentRequest.Budget = JobContractBudget{MaxTurns: 2, MaxTokens: 600}
 	parentRequest.Deadline = now.Add(30 * time.Minute)
 	parent, err := NewTask(job, parentRequest, now)
 	if err != nil {
@@ -82,7 +79,6 @@ func TestTaskParentAndDependencyAreSeparateRelations(t *testing.T) {
 
 	childRequest := taskTestRequest(job, now.Add(time.Minute), "cmd_a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4")
 	childRequest.ParentTaskID = parent.ID
-	childRequest.Budget = JobContractBudget{MaxTurns: 1, MaxTokens: 200}
 	childRequest.Deadline = now.Add(20 * time.Minute)
 	child, err := NewTask(job, childRequest, now.Add(time.Minute))
 	if err != nil {
@@ -97,15 +93,13 @@ func TestTaskParentAndDependencyAreSeparateRelations(t *testing.T) {
 	}
 }
 
-func TestNewTaskRejectsScopeBudgetDeadlineAndReferenceExpansion(t *testing.T) {
+func TestNewTaskRejectsScopeDeadlineAndReferenceExpansion(t *testing.T) {
 	tests := []struct {
 		name   string
 		mutate func(*TaskRequest, Job)
 	}{
 		{name: "foreign resource", mutate: func(r *TaskRequest, _ Job) { r.TargetResources = []string{"resource_outside"} }},
 		{name: "foreign repository", mutate: func(r *TaskRequest, _ Job) { r.TargetRepositories = []string{"repo_outside"} }},
-		{name: "turn budget expansion", mutate: func(r *TaskRequest, _ Job) { r.Budget.MaxTurns = 4 }},
-		{name: "token budget expansion", mutate: func(r *TaskRequest, _ Job) { r.Budget.MaxTokens = 1001 }},
 		{name: "concurrency expansion", mutate: func(r *TaskRequest, _ Job) { r.ConcurrencyCeiling = 2 }},
 		{name: "deadline expansion", mutate: func(r *TaskRequest, _ Job) { r.Deadline = time.Now().UTC().Add(2 * time.Hour) }},
 		{name: "missing parent", mutate: func(r *TaskRequest, _ Job) { r.ParentTaskID = "task_missing" }},
@@ -182,7 +176,6 @@ func TestChildTaskCannotExpandParentScope(t *testing.T) {
 	parentRequest := taskTestRequest(job, now, "cmd_c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3")
 	parentRequest.TargetRepositories = []string{}
 	parentRequest.TargetResources = []string{"resource_ci"}
-	parentRequest.Budget = JobContractBudget{MaxTurns: 2, MaxTokens: 500}
 	parentRequest.Deadline = now.Add(30 * time.Minute)
 	parent, err := NewTask(job, parentRequest, now)
 	if err != nil {
@@ -193,7 +186,6 @@ func TestChildTaskCannotExpandParentScope(t *testing.T) {
 	childRequest := taskTestRequest(job, now.Add(time.Minute), "cmd_c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4")
 	childRequest.ParentTaskID = parent.ID
 	childRequest.TargetRepositories = []string{"repo_taxion"}
-	childRequest.Budget = JobContractBudget{MaxTurns: 1, MaxTokens: 200}
 	childRequest.Deadline = now.Add(20 * time.Minute)
 	if _, err := NewTask(job, childRequest, now.Add(time.Minute)); err == nil {
 		t.Fatal("child Task expanded its parent's empty repository scope")

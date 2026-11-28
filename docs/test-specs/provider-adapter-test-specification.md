@@ -33,7 +33,7 @@ Provider Adapterの契約、Capability gate、Credential isolation、Controller 
 - Capability evidence: fake verifierがE2 evidenceだけを返す。
 - Credential: テスト専用のランダムな固定byte列を使用する。実credentialを使用しない。
 - Job: DRAFT Job、認証済みHUMAN Principal、IntakeProvenance、PlanningAuthorization、Taskless PLANNER RoleExecutionを用意する。
-- Request: OperationID、TurnID、Prompt digest、Context digest、budget、deadlineを固定する。
+- Request: OperationID、TurnID、Prompt digest、Context digest、deadlineを固定する。
 - Store: 一時SQLite databaseを使用する。
 
 テストfixtureにE4 / E5の自己申告値を設定しない。
@@ -53,7 +53,7 @@ Task-bound Coder Start fixtureはACTIVE Job、最新JobApproval、Task、JobAppr
 | DOM-007 | Append-only | 既存Observationの変更・削除 | 拒否 |
 | DOM-008 | Revision | intentより前のObservation revision | 拒否 |
 | DOM-009 | UNKNOWN | 別OperationIDでUNKNOWNを解消 | 拒否 |
-| DOM-010 | Usage completeness | Complete=falseをfinal budgetへ計上 | 拒否 |
+| DOM-010 | Usage completeness | Complete=falseを確定利用量として扱う | 拒否 |
 | DOM-011 | Stop quiescence | Stopped=true / Quiescent=false | release不可 |
 | DOM-012 | Result finality | Final=falseをterminal resultとして採用 | 拒否 |
 | DOM-013 | Event identity | 重複EventID / cursor | 同一内容のみ再送収束、異なる内容は拒否 |
@@ -80,13 +80,13 @@ Task-bound Coder Start fixtureはACTIVE Job、最新JobApproval、Task、JobAppr
 
 | ID | 観点 | 入力・操作 | 期待結果 |
 |---|---|---|---|
-| ADP-001 | Start request | 有効なidentity / prompt / digest / budget | 受理 |
+| ADP-001 | Start request | 有効なidentity / prompt / digest | 受理 |
 | ADP-002 | Start request | Prompt digest mismatch | 呼出し前に拒否 |
 | ADP-003 | Start request | 重複Context ID | 拒否 |
 | ADP-004 | Start request | deadline未設定・期限切れ | 拒否 |
 | ADP-005 | Turn request | TurnID / SessionID mismatch | 拒否 |
 | ADP-006 | Turn result | OperationID / TurnID / SessionID mismatch | UNKNOWNとして扱う |
-| ADP-007 | Turn result | TokensUsedがMaxTokens超過 | UNKNOWNとして扱う |
+| ADP-007 | Turn result | Usage未報告 | 本文を返す |
 | ADP-008 | Turn result | UNKNOWNにoutput / usageを含む | 不正応答として拒否 |
 | ADP-009 | Lookup | NOT_FOUNDの証拠とidentity一致 | 不在Observationを返す |
 | ADP-010 | Lookup | NOT_FOUNDなのにreceipt / result / usageがある | 拒否 |
@@ -199,7 +199,7 @@ E2 test-only policyはテストコードからのみ利用可能とし、本番c
 | CTR-011 | Resume capability不足 | 新Sessionを作成せず拒否 |
 | CTR-012 | Resume ATTACHED前 | 次Turnを拒否 |
 | CTR-013 | Stop proof不足 | Worktree release / completionを拒否 |
-| CTR-014 | Usage未確定 | budget finalization / completionを拒否 |
+| CTR-014 | Usage未確定 | Usageの未報告だけを理由にTurnの完了を妨げない |
 | CTR-015 | credential leak | resultを保存せずUNKNOWN |
 | CTR-016 | Observation保存失敗 | Provider結果を成功扱いせずUNKNOWN / recovery対象 |
 | CTR-017 | Start intent ordering | Start intent commit前にAdapterを呼び出す | テスト失敗 |
@@ -222,7 +222,7 @@ E2 test-only policyはテストコードからのみ利用可能とし、本番c
 | CTR-034 | Resume capability gate | E5 SessionReattach evidence不足 | Resume intent作成・Runtime.Resume前に拒否 |
 | CTR-035 | Resume session binding | accepted Session不一致、別Sessionへの付け替え | 拒否し、既存Sessionを維持 |
 | CTR-036 | Task Coder Start | exact current approval / Task / permission / RoleExecution / intent / Provider identity | intent永続化後、同一OperationIDでStartしACCEPTEDを保存 |
-| CTR-037 | Task Start permission stale | approval / revision / scope / expiry / budgetがdispatch直前に不一致 | Provider呼出し0回、Job facts不変 |
+| CTR-037 | Task Start permission stale | approval / revision / scope / expiryがdispatch直前に不一致 | Provider呼出し0回、Job facts不変 |
 | CTR-038 | Task Start Provider mismatch | Provider / account / configuration digest mismatch | Lookup / credential / Adapter呼出し前に拒否 |
 | CTR-039 | Task Start retry | 既存intent、observationなし、Start LookupでNOT_FOUND | permission再検証後、同じOperationIDでのみStart |
 | CTR-040 | Task Start ambiguous | StartまたはLookupがambiguous / unclassified error | UNKNOWNをappendし、新しいOperationIDで再送しない |
@@ -233,7 +233,7 @@ E2 test-only policyはテストコードからのみ利用可能とし、本番c
 
 ## 11. Regression tests
 
-- PR #21: PlanningAuthorization発行、identity / scope / budget / deadline
+- PlanningAuthorization発行、identity / scope / deadline
 - PR #25: Taskless PLANNER Start intent、DRAFT維持、idempotency
 - PR #28: turn / effect / resume lifecycle、UNKNOWN、boundary denial、revision順序
 - ADR-201 / ADR-202: JobAggregate唯一正本、append-only、transaction、recovery

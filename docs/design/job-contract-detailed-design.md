@@ -20,7 +20,6 @@ type JobContract struct {
     Workspaces              []string
     AcceptanceCriteria      []string
     RequiredEvidence        []string
-    Budget                  JobContractBudget
     ConcurrencyCeiling      uint32
     Deadline                time.Time
     ProhibitedEffects       []string
@@ -28,13 +27,9 @@ type JobContract struct {
     ConfigurationSHA256     string
 }
 
-type JobContractBudget struct {
-    MaxTurns  uint32
-    MaxTokens uint64
-}
 ```
 
-All list fields are set-valued: trim entries, reject empty / invalid UTF-8 entries and duplicates, then sort lexicographically. Purpose is trimmed and required. At least one target repository or target resource and at least one workspace are required. Acceptance criteria and required evidence must be non-empty. Budget limits and concurrency ceiling must be positive. Deadline must be in the future at proposal time. ConfigurationSHA256 must be a valid SHA-256 digest.
+All list fields are set-valued: trim entries, reject empty / invalid UTF-8 entries and duplicates, then sort lexicographically. Purpose is trimmed and required. At least one target repository or target resource and at least one workspace are required. Acceptance criteria and required evidence must be non-empty. Concurrency ceiling must be positive. Deadline must be in the future at proposal time. ConfigurationSHA256 must be a valid SHA-256 digest.
 
 ### 1.2 JobContractRevision
 
@@ -137,7 +132,7 @@ Fields:
 - JobApprovalID, ContractRevision, CanonicalizationVersion, CanonicalHash
 - ProviderID, AccountID, ConfigurationSHA256
 - RequestSHA256 and the complete trusted effect assessment, including its evidence digest, reversibility, containment, mutability, approval requirement, validity, and canonical AssessmentSHA256
-- ReservedTurns, ReservedTokens, ExpiresAt, CreatedAt, CreatedRevision
+- ExpiresAt, CreatedAt, CreatedRevision
 
 OperationID is deterministically derived from CommandID. A new permission requires a new CommandID. Exact replay returns the original fact; changed request fields under the same CommandID conflict.
 
@@ -150,14 +145,13 @@ OperationID is deterministically derived from CommandID. A new permission requir
 - Resource equals one canonical target repository, target resource, or workspace entry. Prefix, substring, host-only, or path-prefix matches do not grant access.
 - Effects listed in ProhibitedEffects or ApprovalRequiredEffects are not granted by this Controller.
 - A trusted `ExecutionEffectAssessor` evaluates the exact Role / Effect / Resource / Provider / Request digest and returns an evidence digest plus reversibility, containment, and approval-required classification. Unknown effect names are not rejected by name alone; they require an assessable and contained impact. Missing, mismatched, or insufficient assessment fails closed.
-- Each permission reserves explicit ReservedTurns and ReservedTokens at issuance. Reservations are cumulative and are not refunded in this unit; aggregate reserved turns and tokens for the same contract revision must not exceed the approved MaxTurns / MaxTokens. Actual Usage reconciliation is a later execution-lifecycle integration.
 - A permission is valid only for its exact OperationID and RequestSHA256. A newer contract revision, missing / stale approval, Job state change, or expiry invalidates it.
-- Permission creation is a JobAggregate command. Controller preflight is not the integrity boundary; Store revalidates the current approval, scope, resource, budget, deadline, and idempotency in the append transaction.
+- Permission creation is a JobAggregate command. Controller preflight is not the integrity boundary; Store revalidates the current approval, scope, resource, deadline, and idempotency in the append transaction.
 - Permission issuance has no Provider side effect. A Provider execution path must reference and revalidate the exact permission before dispatch. This unit does not claim a Live Provider or OS-level Sandbox implementation.
 
 ### 6.3 Execution Controller
 
-`ExecutionController.Authorize` accepts an explicit request and validated effect assessment. It loads the Job, verifies the exact latest approval, checks the contract boundary and current budget, then calls the Store command with the expected Job revision. The Store repeats aggregate-dependent checks and appends the permission atomically.
+`ExecutionController.Authorize` accepts an explicit request and validated effect assessment. It loads the Job, verifies the exact latest approval and contract boundary, then calls the Store command with the expected Job revision. The Store repeats aggregate-dependent checks and appends the permission atomically.
 
 `ExecutionController.ValidatePermission` receives the actual execution request, recomputes its canonical digest, reloads the JobAggregate, and revalidates the exact permission against current JobApproval, contract revision, derived OperationID, request digest, and expiry immediately before the external side effect. Callers cannot substitute a stored digest while changing the actual effect or resource. It never infers permission from JobState alone.
 
@@ -167,7 +161,7 @@ OperationID is deterministically derived from CommandID. A new permission requir
 
 - `NewTaskRoleExecutionStart` requires the current ACTIVE JobApproval, exact current Task, and an unexpired ExecutionPermission whose TaskID / Role / request digest match.
 - A Coder / Reviewer RoleExecution stores TaskID and ExecutionPermissionID; PlanningAuthorizationID remains empty. The permission can be consumed by at most one RoleExecution.
-- The paired ProviderStartIntent stores the same TaskID / ExecutionPermissionID and uses the permission OperationID as its intent ID. Provider / account / configuration / request digest come from the permission; Budget is the exact ReservedTurns / ReservedTokens grant (bounded by Task budget); Deadline is the earlier of Task deadline and Permission expiry.
+- The paired ProviderStartIntent stores the same TaskID / ExecutionPermissionID and uses the permission OperationID as its intent ID. Provider / account / configuration / request digest come from the permission; Deadline is the earlier of Task deadline and Permission expiry.
 - Store command appends RoleExecution and ProviderStartIntent atomically. Exact replay returns the original pair; a different Start command cannot reuse the consumed permission.
 - This command creates only the immutable Start intent. Provider dispatch and Start observation remain a separate integration step.
 
@@ -183,14 +177,14 @@ The Controller does not call the Provider, change Job authority, issue JobApprov
 
 ### 7.1 Planner Result payload decoding
 
-The Planner's final Result content is exactly one JSON object representing `JobContract`. JSON keys use the struct's lower_snake_case tags; `budget` is a nested object with `max_turns` and `max_tokens`. The object contains no wrapper, Markdown fence, explanatory prose, or trailing value.
+The Planner's final Result content is exactly one JSON object representing `JobContract`. JSON keys use the struct's lower_snake_case tags. The object contains no wrapper, Markdown fence, explanatory prose, or trailing value.
 
 The proposal Controller receives only the persisted Result observation ID. It loads the JobAggregate, resolves the exact final Result, validates its Job / RoleExecution / accepted Start / Session / Turn provenance, and decodes the Result content into JobContract. It does not accept a parallel caller-supplied JobContract value. The Planner workflow calls `JobContractController.Propose` directly with the Job / RoleExecution / Result observation / Command identities and the authenticated Principal.
 
 Decoding rejects:
 - non-object roots and malformed JSON;
 - unknown keys or keys with non-canonical casing;
-- duplicate keys at the root or nested `budget` object;
+- duplicate keys;
 - non-JSON prefixes / suffixes, Markdown fences, or multiple JSON values;
 - type mismatches and values that fail JobContract canonicalization.
 
@@ -198,7 +192,7 @@ Duplicate-key detection runs before struct decoding because the standard Go JSON
 
 ### 7.2 Upper-level Planner workflow
 
-This workflow is not connected or implemented yet. The requirements below remain prerequisites for a future implementation; the proposal Controller alone does not enforce complete Usage.
+This workflow is not connected or implemented yet. Usage reporting is optional and does not block a proposal.
 
 The upper-level workflow is responsible for sequencing Provider completion, Result persistence, and JobContract proposal. It does not reconstruct contract data or bypass the proposal Controller.
 
@@ -206,10 +200,9 @@ For the exact Job / Taskless PLANNER RoleExecution / Session / Turn tuple, the w
 
 1. Loads the JobAggregate and validates the RoleExecution, accepted Start Session, and exact Turn intent.
 2. Resolves the latest Turn observation for that Turn. Only COMPLETED is eligible; UNKNOWN, FAILED, or missing observations stop the workflow.
-3. Resolves the latest Usage observation for the same operation / Session / Turn. Only Complete=true is eligible. A partial or missing Usage observation stops the workflow.
-4. Reuses an already persisted final Result observation for the exact tuple when present. Otherwise it calls ProviderController.RetrieveProviderResult, which validates Provider identity / capability and appends the final Result observation.
-5. Re-reads the JobAggregate and validates the persisted Result observation before calling JobContractController.Propose with its exact observation ID.
-6. Returns both the Result receipt / observation and proposal receipt / revision so callers can distinguish Result persistence from proposal persistence.
+3. Reuses an already persisted final Result observation for the exact tuple when present. Otherwise it calls ProviderController.RetrieveProviderResult, which validates Provider identity / capability and appends the final Result observation.
+4. Re-reads the JobAggregate and validates the persisted Result observation before calling JobContractController.Propose with its exact observation ID.
+5. Returns both the Result receipt / observation and proposal receipt / revision so callers can distinguish Result persistence from proposal persistence.
 
 If Result persistence succeeds but proposal persistence fails, the Result remains immutable. A retry resolves and reuses that same Result observation; it does not retrieve or substitute a later Result. The proposal Store command remains the authoritative atomic mutation and idempotency boundary. An exact retry uses the same proposal CommandID. The workflow creates no JobApproval, ExecutionPermission, or additional Provider operation.
 
@@ -221,7 +214,7 @@ The CLI authenticates through the existing OIDC Authorization Code Flow with PKC
 
 The same CommandID and identical approval request may be retried after the transition to ACTIVE and must return the original receipt. Reusing the CommandID with a different Principal or payload is an idempotency conflict. A new approval command for an already approved revision is rejected.
 
-The approval path does not create ExecutionPermission or start a Provider operation. Execution remains blocked until a separate Controller verifies current JobApproval, approved scope, budget, deadline, Provider identity, resource boundary, and prohibited effects.
+The approval path does not create ExecutionPermission or start a Provider operation. Execution remains blocked until a separate Controller verifies current JobApproval, approved scope, deadline, Provider identity, resource boundary, and prohibited effects.
 
 ### 8.1 ACTIVE Job amendment CLI ingress
 

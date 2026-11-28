@@ -12,20 +12,20 @@ TaskはJobAggregate内のappend-only factとします。TaskIDはCommandIDから
 - effective TargetRepositories / TargetResources / Workspaces
 - additional AcceptanceCriteria / RequiredEvidence
 - effective ProhibitedEffects / ApprovalRequiredEffects
-- effective Budget / ConcurrencyCeiling / Deadline
+- effective ConcurrencyCeiling / Deadline
 - CreatedAt / CreatedRevision
 
 ## 2. Effective scope
 
 Task作成時に最新JobContractまたはParentTaskからeffective scopeを解決してTaskへ保存します。nil / omittedのtarget listは親scopeの継承を意味します。明示listはcanonicalized exact subsetとして保存します。明示的な空配列はそのdimensionを空に固定し、親scopeの値を継承しません。TargetRepositories / TargetResources / Workspacesの全てが空になるTaskは拒否します。
 
-BudgetのMaxTurns / MaxTokens、ConcurrencyCeiling、Deadlineは各次元で0 / zero timeをinherit sentinelとし、保存時には親から解決したeffective valueを記録します。明示値が親の上限を超える場合は拒否します。
+ConcurrencyCeiling、Deadlineはそれぞれ0 / zero timeをinherit sentinelとし、保存時には親から解決したeffective valueを記録します。明示値が親の上限を超える場合は拒否します。
 
 ProhibitedEffects / ApprovalRequiredEffectsは親のeffective valuesとrequestの追加valuesをcanonicalized unionとして保存します。AcceptanceCriteria / RequiredEvidenceはTask固有の追加条件として保存します。
 
 ## 3. Parent and dependency validation
 
-ParentTaskIDは同一Job・同一ContractRevisionの既存Taskを参照します。ParentTaskが存在する場合、子Taskのeffective target / budget / concurrency / deadlineは親の範囲内でなければなりません。
+ParentTaskIDは同一Job・同一ContractRevisionの既存Taskを参照します。ParentTaskが存在する場合、子Taskのeffective target / concurrency / deadlineは親の範囲内でなければなりません。
 
 DependsOnTaskIDsは同一Job・同一ContractRevisionの既存Taskを参照します。ParentTaskIDとdependency edgesは別フィールドです。Job validationではdependency graphを構築し、DFSでcycleを拒否します。Task作成は既存Taskだけを参照するため、新規edgeは既存nodeから新nodeへ逆向きに戻れませんが、restore / tamper検査としてcycle detectionを維持します。
 
@@ -37,7 +37,7 @@ Storeは同一transaction内でJobAggregateを再読込し、Domain.NewTaskとJo
 
 ## 5. Execution boundary
 
-Task creationは実行開始ではありません。ExecutionPermissionはTaskIDとeffective scope / budgetへ束縛します。TaskExecutionStart CommandはPermissionをsingle-useで消費し、Coder / Reviewer RoleExecutionとProviderStartIntentを同一JobAggregate transactionでappendします。ProviderStartIntentのBudgetはTask全体のBudgetではなく、PermissionのReservedTurns / ReservedTokensを使用します。Provider dispatchは別のController境界で行います。
+Task creationは実行開始ではありません。ExecutionPermissionはTaskIDとeffective scopeへ束縛します。TaskExecutionStart CommandはPermissionをsingle-useで消費し、Coder / Reviewer RoleExecutionとProviderStartIntentを同一JobAggregate transactionでappendします。Provider dispatchは別のController境界で行います。
 
 ## 6. Non-goals
 

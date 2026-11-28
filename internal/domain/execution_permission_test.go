@@ -83,7 +83,7 @@ func executionPermissionTestRequest(job Job, now time.Time) ExecutionPermissionR
 		Role: "CODER", Effect: "repository.write", Resource: resource,
 		ProviderID: "provider.test", AccountID: "account.primary",
 		ConfigurationSHA256: revision.Contract.ConfigurationSHA256,
-		ReservedTurns:       1, ReservedTokens: 100, ExpiresAt: now.Add(20 * time.Minute),
+		ExpiresAt:           now.Add(20 * time.Minute),
 	}
 }
 
@@ -169,42 +169,13 @@ func TestExecutionPermissionRejectsApprovalScopeAndEffectBoundaries(t *testing.T
 	}
 }
 
-func TestExecutionPermissionBudgetUsesCumulativeReservations(t *testing.T) {
-	job, _, now := approvedJobWithTaskForExecutionPermission(t)
-	request := executionPermissionTestRequest(job, now)
-	request.ReservedTurns = job.JobContractRevisions[0].Contract.Budget.MaxTurns
-	request.ReservedTokens = job.JobContractRevisions[0].Contract.Budget.MaxTokens
-	requestSHA, _ := ExecutionPermissionRequestSHA256(request)
-	assessment := executionPermissionTestAssessment(request, requestSHA, now)
-	permission, err := NewExecutionPermission(job, request, requestSHA, assessment, now)
-	if err != nil {
-		t.Fatalf("reservation at exact token budget: %v", err)
-	}
-	job.ExecutionPermissions = append(job.ExecutionPermissions, permission)
-	job.Revision++
-	job.UpdatedAt = permission.CreatedAt
-	if err := job.Validate(); err != nil {
-		t.Fatalf("Job with exact budget reservation: %v", err)
-	}
-
-	next := request
-	next.CommandID = "cmd_77777777777777777777777777777777"
-	next.ReservedTurns = 1
-	next.ReservedTokens = 1
-	nextSHA, _ := ExecutionPermissionRequestSHA256(next)
-	nextAssessment := executionPermissionTestAssessment(next, nextSHA, now.Add(time.Minute))
-	if _, err := NewExecutionPermission(job, next, nextSHA, nextAssessment, now.Add(time.Minute)); err == nil {
-		t.Fatal("permission exceeding cumulative token budget was accepted")
-	}
-}
-
-func TestExecutionPermissionCannotExpandTaskScopeOrBudget(t *testing.T) {
+func TestExecutionPermissionCannotExpandTaskScope(t *testing.T) {
 	job, now := approvedJobForExecutionPermission(t)
 	taskRequest := TaskRequest{
 		JobID: job.ID, CommandID: "cmd_82828282828282828282828282828282",
 		Title: "Narrow Task", Purpose: "Restrict execution to one resource",
 		TargetRepositories: []string{"repo_taxion"}, TargetResources: []string{"resource_ci"},
-		Budget:             JobContractBudget{MaxTurns: 1, MaxTokens: 100},
+
 		Deadline:           now.Add(15 * time.Minute),
 		AcceptanceCriteria: []string{"Only the selected resource is changed"},
 	}
@@ -260,15 +231,6 @@ func TestExecutionPermissionCannotExpandTaskScopeOrBudget(t *testing.T) {
 	}
 
 	request.Resource = "repo_taxion"
-	request.ReservedTurns = 2
-	request.ReservedTokens = 101
-	requestSHA, _ = ExecutionPermissionRequestSHA256(request)
-	assessment = executionPermissionTestAssessment(request, requestSHA, now.Add(time.Minute))
-	if _, err := NewExecutionPermission(job, request, requestSHA, assessment, now.Add(time.Minute)); err == nil {
-		t.Fatal("permission exceeding Task budget was accepted")
-	}
-	request.ReservedTurns = 1
-	request.ReservedTokens = 100
 	request.ExpiresAt = task.Deadline.Add(time.Minute)
 	requestSHA, _ = ExecutionPermissionRequestSHA256(request)
 	assessment = executionPermissionTestAssessment(request, requestSHA, now.Add(time.Minute))

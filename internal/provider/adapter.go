@@ -328,8 +328,6 @@ type StartRequest struct {
 	PromptSHA256          string
 	Prompt                string
 	Context               []ContextDocument
-	MaxTurns              uint32
-	MaxTokens             uint64
 	Deadline              time.Time
 }
 
@@ -341,8 +339,8 @@ func (r StartRequest) Validate() error {
 		(r.TaskID == "" && (r.WorktreeAssignmentID != "" || r.WorktreePath != "")) ||
 		!validSHA256(r.RequestSHA256) || !validSHA256(r.PromptSHA256) ||
 		r.Prompt == "" || sha256Hex(r.Prompt) != r.PromptSHA256 ||
-		r.MaxTurns == 0 || r.MaxTokens == 0 || r.Deadline.IsZero() {
-		return errors.New("Provider Start request identity, prompt, budget, or deadline is invalid")
+		r.Deadline.IsZero() {
+		return errors.New("Provider Start request identity, prompt, or deadline is invalid")
 	}
 	seen := make(map[string]struct{}, len(r.Context))
 	for _, document := range r.Context {
@@ -370,15 +368,14 @@ type TurnRequest struct {
 	SessionID    string
 	PromptSHA256 string
 	Prompt       string
-	MaxTokens    uint64
 	Deadline     time.Time
 }
 
 func (r TurnRequest) Validate() error {
 	if !validIdentifier(r.OperationID) || !validIdentifier(r.TurnID) || !validIdentifier(r.SessionID) ||
 		!validSHA256(r.PromptSHA256) || r.Prompt == "" || sha256Hex(r.Prompt) != r.PromptSHA256 ||
-		r.MaxTokens == 0 || r.Deadline.IsZero() {
-		return errors.New("Provider Turn request identity, prompt digest, or token budget is invalid")
+		r.Deadline.IsZero() {
+		return errors.New("Provider Turn request identity, prompt digest, or deadline is invalid")
 	}
 	return nil
 }
@@ -389,7 +386,6 @@ type TurnResult struct {
 	SessionID      string
 	ReceiptID      string
 	Status         string
-	TokensUsed     uint64
 	Output         string
 	EvidenceSHA256 string
 }

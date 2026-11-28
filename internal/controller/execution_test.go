@@ -104,7 +104,7 @@ func TestExecutionControllerAuthorizesAndRevalidatesExactPermission(t *testing.T
 		Resource:   revision.Contract.TargetRepositories[0],
 		ProviderID: "provider.test", AccountID: "account.primary",
 		ConfigurationSHA256: revision.Contract.ConfigurationSHA256,
-		ReservedTurns:       1, ReservedTokens: 100, ExpiresAt: now.Add(30 * time.Minute),
+		ExpiresAt:           now.Add(30 * time.Minute),
 	}
 	receipt, permission, err := controller.Authorize(context.Background(), request)
 	if err != nil {
@@ -217,7 +217,7 @@ func TestExecutionControllerRejectsScopeAndAssessmentFailuresWithoutMutation(t *
 				Resource:   revision.Contract.TargetRepositories[0],
 				ProviderID: "provider.test", AccountID: "account.primary",
 				ConfigurationSHA256: revision.Contract.ConfigurationSHA256,
-				ReservedTurns:       1, ReservedTokens: 100, ExpiresAt: now.Add(30 * time.Minute),
+				ExpiresAt:           now.Add(30 * time.Minute),
 			}
 			test.mutate(&request, assessor)
 			if _, _, err := controller.Authorize(context.Background(), request); err == nil {
@@ -251,7 +251,7 @@ func TestExecutionControllerExactReplayAndCommandConflict(t *testing.T) {
 		Resource:   revision.Contract.TargetRepositories[0],
 		ProviderID: "provider.test", AccountID: "account.primary",
 		ConfigurationSHA256: revision.Contract.ConfigurationSHA256,
-		ReservedTurns:       1, ReservedTokens: 100, ExpiresAt: now.Add(30 * time.Minute),
+		ExpiresAt:           now.Add(30 * time.Minute),
 	}
 	_, first, err := controller.Authorize(context.Background(), request)
 	if err != nil {
@@ -265,7 +265,7 @@ func TestExecutionControllerExactReplayAndCommandConflict(t *testing.T) {
 		t.Fatalf("exact replay changed permission: first=%#v replay=%#v", first, replay)
 	}
 	changed := request
-	changed.ReservedTokens++
+	changed.Effect = "repository.read"
 	if _, _, err := controller.Authorize(context.Background(), changed); !errors.Is(err, store.ErrIdempotencyConflict) {
 		t.Fatalf("changed request under same CommandID error = %v, want idempotency conflict", err)
 	}

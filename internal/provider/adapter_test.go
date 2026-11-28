@@ -240,7 +240,7 @@ func TestStartAndTurnRequestsValidateImmutablePromptAndContextDigests(t *testing
 	start := StartRequest{
 		OperationID: "provider_start_123", JobID: "job_123", RoleExecutionID: "role_exec_123",
 		RequestSHA256: strings.Repeat("a", 64), PromptSHA256: sha256Hex(prompt), Prompt: prompt,
-		Context: []ContextDocument{document}, MaxTurns: 3, MaxTokens: 1000,
+		Context:  []ContextDocument{document},
 		Deadline: time.Date(2026, 11, 22, 0, 0, 0, 0, time.UTC),
 	}
 	if err := start.Validate(); err != nil {
@@ -259,7 +259,7 @@ func TestStartAndTurnRequestsValidateImmutablePromptAndContextDigests(t *testing
 
 	turn := TurnRequest{
 		OperationID: "provider_turn_123", TurnID: "planning_turn_123", SessionID: "session_123",
-		PromptSHA256: sha256Hex(prompt), Prompt: prompt, MaxTokens: 500,
+		PromptSHA256: sha256Hex(prompt), Prompt: prompt,
 		Deadline: time.Now().UTC().Add(time.Hour),
 	}
 	if err := turn.Validate(); err != nil {

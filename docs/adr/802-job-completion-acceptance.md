@@ -8,13 +8,13 @@ Accepted
 
 ## Context
 
-Roleの終了、Providerの成功応答、ReviewerのPASSだけでは、成果の受入れ、利用量の確定、外部実行の停止、資源の解放まで完了したことを証明できません。
+Roleの終了、Providerの成功応答、ReviewerのPASSだけでは、成果の受入れ、外部実行の停止、資源の解放まで完了したことを証明できません。
 
 ## Decision
 
 **Job完了は、承認済み受入条件と検証済みEvidenceを確認したうえで、JobAggregateが明示的に確定する判断とします。**
 
-未解決のProvider operation、未完了のRoleExecution、未確定のUsage、停止未確認のProvider、未解放のWorktree、認証・認可・データ整合性上の未解決問題がある場合は完了を認めません。
+未解決のProvider operation、未完了のRoleExecution、停止未確認のProvider、未解放のWorktree、認証・認可・データ整合性上の未解決問題がある場合は完了を認めません。
 
 ## Consequences
 

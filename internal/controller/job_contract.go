@@ -147,13 +147,9 @@ func (c *JobContractController) Propose(
 
 var plannerJobContractJSONFields = map[string]struct{}{
 	"purpose": {}, "constraints": {}, "target_repositories": {}, "target_resources": {},
-	"workspaces": {}, "acceptance_criteria": {}, "required_evidence": {}, "budget": {},
+	"workspaces": {}, "acceptance_criteria": {}, "required_evidence": {},
 	"concurrency_ceiling": {}, "deadline": {}, "prohibited_effects": {},
 	"approval_required_effects": {}, "configuration_sha256": {},
-}
-
-var plannerJobContractBudgetJSONFields = map[string]struct{}{
-	"max_turns": {}, "max_tokens": {},
 }
 
 func DecodeJobContractJSON(content string) (domain.JobContract, error) {
@@ -215,11 +211,7 @@ func consumePlannerJobContractObject(decoder *json.Decoder, allowed map[string]s
 			return fmt.Errorf("JobContract JSON contains duplicate JSON key %q", key)
 		}
 		seen[key] = struct{}{}
-		var nested map[string]struct{}
-		if key == "budget" {
-			nested = plannerJobContractBudgetJSONFields
-		}
-		if err := consumePlannerJobContractValue(decoder, nested); err != nil {
+		if err := consumePlannerJobContractValue(decoder, nil); err != nil {
 			return err
 		}
 	}

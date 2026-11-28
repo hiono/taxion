@@ -12,12 +12,12 @@ Each JobContract revision records:
 - target repositories and target resources
 - workspaces / work area
 - acceptance criteria and required evidence
-- budget and concurrency ceiling
+- concurrency ceiling
 - deadline
 - prohibited effects and approval-required effects
 - a secret-free configuration reference
 
-The initial budget dimensions are `MaxTurns` and `MaxTokens`, matching the current Planning / Provider usage model. Monetary limits are not represented until Taxion defines a currency and cost-accounting contract; they must not be inferred from token limits.
+Usage limits and stopping at those limits are managed by the Provider, not the JobContract.
 
 The configuration reference is represented by a SHA-256 digest. Secret values, credentials, access tokens, and private configuration contents must not be stored in the contract.
 
@@ -54,7 +54,7 @@ Approving the latest revision transitions the Job from DRAFT to ACTIVE. ACTIVE r
 
 ## 5. Authority boundary
 
-JobApproval is distinct from PlanningAuthorization and from ExecutionPermission. Approval records human acceptance of a contract; it does not by itself grant a provider capability, credential access, or permission for a prohibited / approval-required effect. Execution controllers must later verify the current JobApproval, scope, budget, deadline, Provider identity, and effect boundary.
+JobApproval is distinct from PlanningAuthorization and from ExecutionPermission. Approval records human acceptance of a contract; it does not by itself grant a provider capability, credential access, or permission for a prohibited / approval-required effect. Execution controllers must later verify the current JobApproval, scope, deadline, Provider identity, and effect boundary.
 
 ## 6. ExecutionPermission requirements
 
@@ -65,22 +65,20 @@ The execution request identifies:
 - execution Role (`CODER` or `REVIEWER`)
 - exact effect and resource identity
 - Provider ID, account ID, and configuration SHA-256
-- explicit turn / token reservations and requested expiry
+- requested expiry
 - a canonical request digest
 
 The Controller must:
 - require an ACTIVE Job and the exact latest JobContractRevision / JobApproval pair;
 - verify the approval's Job ID, revision, canonicalization version, canonical hash, and deadline;
-- bind the permission to the exact JobApproval ID, revision, canonical hash, Task ID, OperationID, effect, resource, Role, Provider / account / configuration, request digest, turn / token reservations, and expiry;
+- bind the permission to the exact JobApproval ID, revision, canonical hash, Task ID, OperationID, effect, resource, Role, Provider / account / configuration, request digest, and expiry;
 - require the referenced Task to belong to the same Job and latest approved contract revision;
 - require the resource to be inside both the approved JobContract and the Task's effective exact scope;
-- require ReservedTurns / ReservedTokens not to exceed either the JobContract budget or the Task budget;
 - require the configuration digest to equal the approved JobContract configuration reference;
 - require the resource identity to exactly match one approved target repository, target resource, or workspace;
 - reject effects listed in prohibited effects or approval-required effects;
 - use a trusted effect assessor to evaluate reversibility, containment, and approval requirement. An unknown effect name is not rejected solely because it is unknown; it is denied when its impact cannot be assessed or contained;
-- reserve the explicit turn / token amounts against both JobContract and Task MaxTurns / MaxTokens budgets. Reservations are cumulative in this unit; Usage reconciliation and reservation release are separate lifecycle work;
-- fail closed when approval, scope, provider identity, assessment evidence, deadline, or budget cannot be verified.
+- fail closed when approval, scope, provider identity, assessment evidence, or deadline cannot be verified.
 
 The Store must repeat all JobAggregate-dependent checks in the same transaction that appends the permission. Exact CommandID replay returns the original permission; changed request identity or digest is an idempotency conflict. A permission is valid only for its exact OperationID and request digest. A later contract revision or expired deadline invalidates its use.
 
@@ -104,7 +102,7 @@ An exact retry of an already committed approval may return its original receipt 
 
 A Planner proposal must identify the exact final Provider Result from which its contract was derived. The revision must append the Result observation ID, Result content SHA-256, and producing RoleExecution ID as immutable provenance.
 
-The Planner's final Result content must be exactly one UTF-8 JSON object representing JobContract, using the defined lower_snake_case JSON field names and nested `budget` object. The Controller derives the contract from this persisted Result; callers must not submit a separate contract payload. Reject malformed JSON, non-object roots, unknown or duplicate keys (including nested keys), trailing JSON values, and fenced Markdown / surrounding prose. Apply the normal JobContract canonicalization and validation after decoding.
+The Planner's final Result content must be exactly one UTF-8 JSON object representing JobContract, using the defined lower_snake_case JSON field names. The Controller derives the contract from this persisted Result; callers must not submit a separate contract payload. Reject malformed JSON, non-object roots, unknown or duplicate keys, trailing JSON values, and fenced Markdown / surrounding prose. Apply the normal JobContract canonicalization and validation after decoding.
 
 The Controller must accept only a Result observation already persisted in the same JobAggregate that:
 - is final and passes the Result observation's digest and identity validation;
@@ -120,7 +118,7 @@ Exact proposal replay must preserve the original Result provenance. Reuse of the
 
 The upper-level Planner workflow must invoke the JobContract proposal only after the exact planning Turn is terminal and its final Provider Result has been persisted.
 
-Before proposing, the workflow must verify that the Turn belongs to the same Job, Taskless PLANNER RoleExecution, accepted Provider Start Session, and Provider operation. The latest Turn observation must be COMPLETED, and the latest Usage observation for that same operation / Session / Turn must be Complete=true. UNKNOWN, FAILED, missing, mismatched, or incomplete observations must stop the proposal without creating a JobContract revision.
+Before proposing, the workflow must verify that the Turn belongs to the same Job, Taskless PLANNER RoleExecution, accepted Provider Start Session, and Provider operation. The latest Turn observation must be COMPLETED. UNKNOWN, FAILED, missing, or mismatched Turn observations must stop the proposal without creating a JobContract revision. Missing Usage does not block the proposal.
 
 The workflow must retrieve and persist the final Provider Result when no matching Result observation exists, then call JobContractController.Propose with that exact persisted Result observation ID. If Result persistence succeeds but proposal persistence fails, retain the Result observation. A retry must reuse the same persisted Result identity and must not fetch or substitute a different Result.
 

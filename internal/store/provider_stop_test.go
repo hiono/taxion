@@ -28,7 +28,7 @@ func TestProviderStopIntentAndObservationPersistAtomically(t *testing.T) {
 		ReadOnlyBoundary: domain.PlanningReadOnlyBoundary{
 			Mode: domain.PlanningReadOnlyBoundarySnapshot, Reference: "snapshot_1", SHA256: strings.Repeat("c", 64),
 		},
-		Budget: domain.PlanningBudget{MaxTurns: 3, MaxTokens: 1000}, Deadline: now.Add(time.Hour),
+		Deadline: now.Add(time.Hour),
 	}
 	grant, err := domain.NewPlanningAuthorization(job, principal.PrincipalID(), "cmd_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", request, now)
 	if err != nil {
@@ -59,7 +59,7 @@ func TestProviderStopIntentAndObservationPersistAtomically(t *testing.T) {
 	}
 	_, turn, err := database.AddPlanningTurnIntent(
 		ctx, jobID, job.Revision, startIntent.RoleExecutionID, "session_1",
-		"cmd_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", strings.Repeat("f", 64), 100, principal,
+		"cmd_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", strings.Repeat("f", 64), principal,
 	)
 	if err != nil {
 		t.Fatalf("AddPlanningTurnIntent: %v", err)
@@ -89,7 +89,7 @@ func TestProviderStopIntentAndObservationPersistAtomically(t *testing.T) {
 	}
 	if _, _, err := database.AddPlanningTurnIntent(
 		ctx, jobID, job.Revision, startIntent.RoleExecutionID, "session_1",
-		"cmd_12121212121212121212121212121212", strings.Repeat("f", 64), 100, principal,
+		"cmd_12121212121212121212121212121212", strings.Repeat("f", 64), principal,
 	); err == nil {
 		t.Fatal("Planning Turn intent was accepted after Provider Stop intent")
 	}

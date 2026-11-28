@@ -41,7 +41,7 @@ Detailed Provider Adapter tests: [Provider Adapter テスト仕様書](provider-
 **Given** DRAFT Jobと明示的な利用者起動がある。
 **When** Taskless PlannerへPlanningAuthorizationを発行する。
 **Then**
-- GrantがJob、原文依頼hash、利用者principal、Provider / account / configuration、repository、read-only boundary、permitted effects、budget、deadlineに束縛される。
+- GrantがJob、原文依頼hash、利用者principal、Provider / account / configuration、repository、read-only boundary、permitted effects、deadlineに束縛される。
 - JobはDRAFTのままである。
 - repository write、validation、commit、publish、credential、network、external mutationが拒否される。
 - Provider側read-onlyを強制できない場合はsnapshot / explicit documentsだけを使用し、それもできない場合はrepository readを拒否する。
@@ -65,9 +65,9 @@ Detailed Provider Adapter tests: [Provider Adapter テスト仕様書](provider-
 **When** 利用者が承認する。
 **Then**
 - Approvalが正確なJobID、revision、canonical hash、approver identity / source / reason / timeに束縛される。
-- 対象、scope、budget、deadline、禁止事項、configuration referenceの変更で旧Approvalは無効になる。
+- 対象、scope、deadline、禁止事項、configuration referenceの変更で旧Approvalは無効になる。
 - TaskはJob scopeを狭められるが拡張できない。
-- RoleExecutionのprivileged operation直前にApprovalと現在のscope / budget / deadlineを再検証する。
+- RoleExecutionのprivileged operation直前にApprovalと現在のscope / deadlineを再検証する。
 
 Domain / Store検証ケースは [Job Contract Test Specification](job-contract-test-specification.md) に定義する。
 
@@ -213,7 +213,7 @@ Domain / Store検証ケースは [Job Contract Test Specification](job-contract-
 **When** Sub-agentへ委譲し、並行実行します。
 **Then**
 - Sub-agentは独立Context / Sessionで開始されます。
-- 親Jobのbudget、deadline、scope、concurrency ceilingを超えません。
+- 親Jobのdeadline、scope、concurrency ceilingを超えません。
 - Sub-agentは短いSummaryと成果identityを親Jobへ返します。
 - 重複実行や依存Taskの先行実行を許可しません。
 
@@ -266,7 +266,7 @@ Domain / Store検証ケースは [Job Contract Test Specification](job-contract-
 - 観測可能なすべてのModel / Tool CallをJob、RoleExecution、Operation、Turnへ相関します。
 - Providerが報告しないCallや欠落eventは未観測として明示し、完全追跡済みと表示しません。
 - 同じ失敗した編集の反復を検知し、別Approachを提案できます。
-- 停滞検知は権限、budget、deadline、retry permissionを拡張しません。
+- 停滞検知は権限、deadline、retry permissionを拡張しません。
 
 ### AT-022: Trusted HUMAN identity and intake provenance
 

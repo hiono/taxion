@@ -412,23 +412,15 @@ func (a *ACPAdapter) Start(ctx context.Context, request StartRequest, _ Credenti
 		SessionID:    session.sessionID,
 		PromptSHA256: sha256Hex(initialPrompt),
 		Prompt:       initialPrompt,
-		MaxTokens:    request.MaxTokens,
 		Deadline:     request.Deadline,
 	}
 	initialResult, initialErr := a.send(operationCtx, session, initialTurn, nil)
-	if initialErr != nil {
+	if initialErr != nil || initialResult.Status != "COMPLETED" {
 		// Keep RoleExecution ownership until trackProcess observes process.done.
 		// Detaching here would allow a replacement Start while this CLI is alive.
 		session.stopping.Store(true)
 		session.process.terminate()
 		return StartResult{}, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown}
-	}
-	if initialResult.Status == "FAILED" {
-		// The initial prompt ran but exceeded its token reservation. Do not
-		// publish a successful Start receipt or permit a blind Start retry.
-		session.stopping.Store(true)
-		session.process.terminate()
-		return StartResult{}, &OperationError{Class: FailureDefinitive, Code: OperationCodeBudgetExceeded}
 	}
 	a.mu.Lock()
 	if a.closed || session.stopping.Load() {
@@ -703,21 +695,20 @@ func (a *ACPAdapter) send(ctx context.Context, session *acpSession, request Turn
 	}
 	var promptReply struct {
 		StopReason string `json:"stopReason"`
-		Usage      *struct {
-			InputTokens  uint64 `json:"inputTokens"`
-			OutputTokens uint64 `json:"outputTokens"`
-			TotalTokens  uint64 `json:"totalTokens"`
-		} `json:"usage"`
 	}
-	if json.Unmarshal(response, &promptReply) != nil || promptReply.StopReason != "end_turn" ||
-		output.Len() == 0 || childSessionSeen.Load() {
+	if json.Unmarshal(response, &promptReply) != nil || childSessionSeen.Load() {
 		return TurnResult{}, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown}
 	}
-	// ACP peers may omit usage entirely. Preserve the completed response and
-	// report zero known tokens; this adapter does not claim Usage capability.
-	var tokensUsed uint64
-	if promptReply.Usage != nil {
-		tokensUsed = promptReply.Usage.TotalTokens
+	status := "COMPLETED"
+	switch promptReply.StopReason {
+	case "end_turn":
+		if output.Len() == 0 {
+			return TurnResult{}, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown}
+		}
+	case "max_tokens", "max_turn_requests":
+		status = "FAILED"
+	default:
+		return TurnResult{}, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown}
 	}
 	a.mu.Lock()
 	owned = !a.closed && a.byID[session.sessionID] == session &&
@@ -726,17 +717,14 @@ func (a *ACPAdapter) send(ctx context.Context, session *acpSession, request Turn
 	if !owned || session.stopping.Load() {
 		return TurnResult{}, &OperationError{Class: FailureAmbiguous, Code: OperationCodeUnknown}
 	}
-	status := "COMPLETED"
-	turnOutput := output.String()
-	if tokensUsed > request.MaxTokens {
-		status = "FAILED"
-		turnOutput = ""
-	}
 	result := TurnResult{
 		OperationID: request.OperationID, TurnID: request.TurnID,
 		SessionID: request.SessionID, ReceiptID: acpReceiptID("acp-turn-", request.TurnID),
-		Status: status, TokensUsed: tokensUsed, Output: turnOutput,
+		Status:         status,
 		EvidenceSHA256: sha256Hex(string(response) + "\n" + output.String()),
+	}
+	if status == "COMPLETED" {
+		result.Output = output.String()
 	}
 	a.cacheTurnResult(session, result)
 	return result, nil

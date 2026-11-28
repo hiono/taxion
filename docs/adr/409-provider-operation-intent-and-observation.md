@@ -17,7 +17,7 @@ Providerの実行状態をRoleExecutionやJobの状態だけで表すと、外�
 - Provider呼出しの前にTaxionが発行したoperation identityとintentを確定します。
 - Providerの応答・event・result・usage・stopは、対応するoperation identityへ束縛した独立した事実として保存します。
 - 不明な結果は不明のまま保持し、同じidentityによる照合なしに新しいoperationとして再送しません。
-- Providerの停止、最終結果、利用量が照合されるまで、関連する実行資源の所有権を維持します。
+- Providerの停止と最終結果が照合されるまで、関連する実行資源の所有権を維持します。
 - Provider capabilityはProvider構成と検証証拠に基づいて扱い、実行権限の根拠として使用しません。
 
 ## Consequences

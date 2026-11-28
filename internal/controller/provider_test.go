@@ -283,7 +283,7 @@ func (f *fakePlanningProviderRuntime) Send(ctx context.Context, request provider
 	if result.OperationID == "" {
 		result = provider.TurnResult{
 			OperationID: request.OperationID, TurnID: request.TurnID, SessionID: request.SessionID,
-			ReceiptID: "receipt_turn_1", Status: domain.PlanningTurnCompleted, TokensUsed: 10,
+			ReceiptID: "receipt_turn_1", Status: domain.PlanningTurnCompleted,
 			Output: "turn output", EvidenceSHA256: strings.Repeat("f", 64),
 		}
 	}
@@ -411,7 +411,7 @@ func newProviderControllerFixture(t *testing.T, runtime *fakePlanningProviderRun
 		ReadOnlyBoundary: domain.PlanningReadOnlyBoundary{
 			Mode: domain.PlanningReadOnlyBoundarySnapshot, Reference: "snapshot_1", SHA256: digest,
 		},
-		Budget:   domain.PlanningBudget{MaxTurns: 3, MaxTokens: 1000},
+
 		Deadline: now.Add(time.Hour),
 	}
 	grant, err := domain.NewPlanningAuthorization(job, principal.PrincipalID(), grantCommand, request, now)
@@ -630,7 +630,7 @@ func TestProviderControllerRejectsTurnAfterPlanningBoundaryIsLost(t *testing.T) 
 	}
 	runtime.capabilities.ReadOnlyContextEnforcement = false
 	_, _, _, _, err = controller.SendPlanning(context.Background(), jobID, execution.ID, "session_1",
-		"cmd_19191919191919191919191919191919", "continue", 100, principal)
+		"cmd_19191919191919191919191919191919", "continue", principal)
 	if !errors.Is(err, provider.ErrUnsupportedCapability) || runtime.sendCalls != 0 {
 		t.Fatalf("unverified turn sent: sends=%d err=%v", runtime.sendCalls, err)
 	}
@@ -640,7 +640,7 @@ func TestProviderControllerRejectsTurnAfterPlanningBoundaryIsLost(t *testing.T) 
 	}
 	runtime.capabilities.ReadOnlyContextEnforcement = true
 	if _, _, observation, _, err := controller.SendPlanning(context.Background(), jobID, execution.ID, "session_1",
-		"cmd_19191919191919191919191919191919", "continue", 100, principal); err != nil ||
+		"cmd_19191919191919191919191919191919", "continue", principal); err != nil ||
 		observation.Status != domain.PlanningTurnCompleted || runtime.sendCalls != 1 {
 		t.Fatalf("verified turn did not run: observation=%#v sends=%d err=%v", observation, runtime.sendCalls, err)
 	}
@@ -663,7 +663,7 @@ func TestProviderControllerCanSendAfterBoundaryFailsBeforeClaim(t *testing.T) {
 	}
 	commandID := "cmd_19191919191919191919191919191919"
 	_, _, _, _, err = controller.SendPlanning(context.Background(), jobID, execution.ID, "session_1",
-		commandID, "continue", 100, principal)
+		commandID, "continue", principal)
 	if !errors.Is(err, provider.ErrUnsupportedCapability) || runtime.sendCalls != 0 {
 		t.Fatalf("unverified turn sent: sends=%d err=%v", runtime.sendCalls, err)
 	}
@@ -674,7 +674,7 @@ func TestProviderControllerCanSendAfterBoundaryFailsBeforeClaim(t *testing.T) {
 	runtime.capabilitiesHook = nil
 	runtime.capabilities.ReadOnlyContextEnforcement = true
 	_, _, observation, _, err := controller.SendPlanning(context.Background(), jobID, execution.ID, "session_1",
-		commandID, "continue", 100, principal)
+		commandID, "continue", principal)
 	if err != nil || observation.Status != domain.PlanningTurnCompleted || runtime.sendCalls != 1 {
 		t.Fatalf("first dispatch after boundary recovery: observation=%#v sends=%d err=%v", observation, runtime.sendCalls, err)
 	}
@@ -714,7 +714,7 @@ func TestProviderPlanningTurnDispatchClaimIsExclusive(t *testing.T) {
 	}
 	_, turn, err := database.AddPlanningTurnIntent(
 		context.Background(), jobID, job.Revision, execution.ID, "session_1",
-		"cmd_19191919191919191919191919191919", strings.Repeat("f", 64), 100, principal,
+		"cmd_19191919191919191919191919191919", strings.Repeat("f", 64), principal,
 	)
 	if err != nil {
 		t.Fatalf("AddPlanningTurnIntent: %v", err)
@@ -789,7 +789,7 @@ func TestProviderControllerRejectsInvalidResultAndUsageResponses(t *testing.T) {
 		t.Fatalf("GetJob before Turn intent: %v", err)
 	}
 	_, turn, err := database.AddPlanningTurnIntent(context.Background(), jobID, job.Revision, execution.ID,
-		"session_1", "cmd_17171717171717171717171717171717", strings.Repeat("f", 64), 100, principal)
+		"session_1", "cmd_17171717171717171717171717171717", strings.Repeat("f", 64), principal)
 	if err != nil {
 		t.Fatalf("AddPlanningTurnIntent: %v", err)
 	}
@@ -866,7 +866,7 @@ func TestProviderControllerPersistsResumeIntentBeforeRuntime(t *testing.T) {
 		t.Fatalf("GetJob before Turn intent: %v", err)
 	}
 	if _, _, err := database.AddPlanningTurnIntent(context.Background(), jobID, job.Revision, execution.ID,
-		"session_1", "cmd_25252525252525252525252525252525", strings.Repeat("f", 64), 100, principal); err != nil {
+		"session_1", "cmd_25252525252525252525252525252525", strings.Repeat("f", 64), principal); err != nil {
 		t.Fatalf("AddPlanningTurnIntent: %v", err)
 	}
 	intentSeen := false
@@ -917,7 +917,7 @@ func TestProviderControllerReconcilesUnknownResumeWithSameOperationID(t *testing
 		t.Fatalf("GetJob before Turn intent: %v", err)
 	}
 	if _, _, err := database.AddPlanningTurnIntent(context.Background(), jobID, job.Revision, execution.ID,
-		"session_1", "cmd_28282828282828282828282828282828", strings.Repeat("f", 64), 100, principal); err != nil {
+		"session_1", "cmd_28282828282828282828282828282828", strings.Repeat("f", 64), principal); err != nil {
 		t.Fatalf("AddPlanningTurnIntent: %v", err)
 	}
 	commandID := "cmd_29292929292929292929292929292929"
@@ -963,7 +963,7 @@ func TestProviderControllerRejectsResumeWithoutE5Capability(t *testing.T) {
 		t.Fatalf("GetJob before Turn intent: %v", err)
 	}
 	if _, _, err := database.AddPlanningTurnIntent(context.Background(), jobID, job.Revision, execution.ID,
-		"session_1", "cmd_31313131313131313131313131313131", strings.Repeat("f", 64), 100, principal); err != nil {
+		"session_1", "cmd_31313131313131313131313131313131", strings.Repeat("f", 64), principal); err != nil {
 		t.Fatalf("AddPlanningTurnIntent: %v", err)
 	}
 	if _, _, _, _, err := controller.ResumePlanning(
@@ -1012,7 +1012,7 @@ func TestProviderControllerPersistsTurnIntentBeforeSend(t *testing.T) {
 	}
 	receipt, turn, observation, result, err := controller.SendPlanning(
 		context.Background(), jobID, execution.ID, "session_1",
-		"cmd_19191919191919191919191919191919", "inspect the accepted repository snapshot", 100, principal,
+		"cmd_19191919191919191919191919191919", "inspect the accepted repository snapshot", principal,
 	)
 	if err != nil || !intentSeen || runtime.sendCalls != 1 ||
 		turn.OperationID != result.OperationID || turn.ID != result.TurnID ||
@@ -1035,7 +1035,7 @@ func TestProviderControllerPersistsAndRestoresPlannerResponse(t *testing.T) {
 	}
 	commandID := "cmd_19191919191919191919191919191919"
 	_, _, observation, result, err := controller.SendPlanning(ctx, jobID, execution.ID, "session_1",
-		commandID, "inspect the accepted repository snapshot", 100, principal)
+		commandID, "inspect the accepted repository snapshot", principal)
 	if err != nil || result.Output != "turn output" {
 		t.Fatalf("SendPlanning: result=%#v err=%v", result, err)
 	}
@@ -1062,7 +1062,7 @@ func TestProviderControllerPersistsAndRestoresPlannerResponse(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, _, _, retry, err := controller.SendPlanning(ctx, jobID, execution.ID, "session_1",
-		commandID, "inspect the accepted repository snapshot", 100, principal)
+		commandID, "inspect the accepted repository snapshot", principal)
 	if err != nil || retry.Output != result.Output || runtime.sendCalls != 1 {
 		t.Fatalf("restored response=%#v sends=%d err=%v", retry, runtime.sendCalls, err)
 	}
@@ -1093,12 +1093,12 @@ func TestProviderControllerDoesNotCompleteOrResendWhenSavingResponseFails(t *tes
 	}
 	commandID := "cmd_19191919191919191919191919191919"
 	_, turn, observation, result, err := failing.SendPlanning(ctx, jobID, execution.ID, "session_1",
-		commandID, "inspect the accepted repository snapshot", 100, principal)
+		commandID, "inspect the accepted repository snapshot", principal)
 	if err == nil || result.Output != "turn output" || observation.Status != domain.PlanningTurnUnknown {
 		t.Fatalf("save failure: observation=%#v result=%#v err=%v", observation, result, err)
 	}
 	if _, _, _, _, err := controller.SendPlanning(ctx, jobID, execution.ID, "session_1",
-		commandID, "inspect the accepted repository snapshot", 100, principal); !errors.Is(err, provider.ErrUnsupportedCapability) || runtime.sendCalls != 1 {
+		commandID, "inspect the accepted repository snapshot", principal); !errors.Is(err, provider.ErrUnsupportedCapability) || runtime.sendCalls != 1 {
 		t.Fatalf("unknown result was resent: sends=%d err=%v", runtime.sendCalls, err)
 	}
 	job, err := database.GetJob(ctx, jobID)
@@ -1121,7 +1121,7 @@ func TestProviderControllerDoesNotCompleteOrResendWhenSavingResponseFails(t *tes
 		EvidenceSHA256: strings.Repeat("e", 64),
 	}
 	_, _, observation, _, err = controller.SendPlanning(ctx, jobID, execution.ID, "session_1",
-		commandID, "inspect the accepted repository snapshot", 100, principal)
+		commandID, "inspect the accepted repository snapshot", principal)
 	if !errors.Is(err, provider.ErrUnsupportedCapability) || observation.Status != domain.PlanningTurnUnknown || runtime.sendCalls != 1 {
 		t.Fatalf("unrecoverable output must remain UNKNOWN: observation=%#v sends=%d err=%v", observation, runtime.sendCalls, err)
 	}
@@ -1131,17 +1131,17 @@ func TestProviderControllerDoesNotCompleteOrResendWhenSavingResponseFails(t *tes
 	)
 	runtime.lookupResult.ResultSHA256 = sha256String("different response")
 	if _, _, observation, _, err := controller.SendPlanning(ctx, jobID, execution.ID, "session_1",
-		commandID, "inspect the accepted repository snapshot", 100, principal); err == nil || observation.Status != domain.PlanningTurnUnknown {
+		commandID, "inspect the accepted repository snapshot", principal); err == nil || observation.Status != domain.PlanningTurnUnknown {
 		t.Fatalf("mismatched recovered output must remain UNKNOWN: observation=%#v err=%v", observation, err)
 	}
 	runtime.lookupResult.ResultSHA256 = sha256String("final provider result")
 	if _, _, observation, _, err := failing.SendPlanning(ctx, jobID, execution.ID, "session_1",
-		commandID, "inspect the accepted repository snapshot", 100, principal); err == nil || observation.Status != domain.PlanningTurnUnknown {
+		commandID, "inspect the accepted repository snapshot", principal); err == nil || observation.Status != domain.PlanningTurnUnknown {
 		t.Fatalf("recovered output save failure: observation=%#v err=%v", observation, err)
 	}
 	runtime.capabilities.FinalOutputRetrieval = false
 	_, _, observation, recovered, err := controller.SendPlanning(ctx, jobID, execution.ID, "session_1",
-		commandID, "inspect the accepted repository snapshot", 100, principal)
+		commandID, "inspect the accepted repository snapshot", principal)
 	if err != nil || observation.Status != domain.PlanningTurnCompleted ||
 		recovered.Output != "final provider result" || runtime.sendCalls != 1 || runtime.resultCalls != 1 {
 		t.Fatalf("recovered response=%#v observation=%#v sends=%d results=%d err=%v", recovered, observation, runtime.sendCalls, runtime.resultCalls, err)
@@ -1151,12 +1151,12 @@ func TestProviderControllerDoesNotCompleteOrResendWhenSavingResponseFails(t *tes
 type rejectTerminalTurnStore struct{ *store.Store }
 
 func (s rejectTerminalTurnStore) AddPlanningTurnObservation(ctx context.Context, jobID string, revision uint64,
-	turnID, commandID, status string, tokens uint64, evidence string, reconciles bool, principal auth.AuthenticatedPrincipal,
+	turnID, commandID, status, evidence string, reconciles bool, principal auth.AuthenticatedPrincipal,
 ) (store.CommandReceipt, domain.PlanningTurnObservation, error) {
 	if status == domain.PlanningTurnCompleted {
 		return store.CommandReceipt{}, domain.PlanningTurnObservation{}, errors.New("terminal observation unavailable")
 	}
-	return s.Store.AddPlanningTurnObservation(ctx, jobID, revision, turnID, commandID, status, tokens, evidence, reconciles, principal)
+	return s.Store.AddPlanningTurnObservation(ctx, jobID, revision, turnID, commandID, status, evidence, reconciles, principal)
 }
 
 func TestProviderControllerPreservesResponseWhenTerminalObservationFails(t *testing.T) {
@@ -1174,7 +1174,7 @@ func TestProviderControllerPreservesResponseWhenTerminalObservationFails(t *test
 	}
 	commandID := "cmd_19191919191919191919191919191919"
 	_, turn, observation, _, err := failing.SendPlanning(ctx, jobID, execution.ID, "session_1",
-		commandID, "inspect the accepted repository snapshot", 100, principal)
+		commandID, "inspect the accepted repository snapshot", principal)
 	if err == nil || observation.Status != domain.PlanningTurnUnknown {
 		t.Fatalf("terminal failure: observation=%#v err=%v", observation, err)
 	}
@@ -1198,13 +1198,13 @@ func TestProviderControllerPreservesResponseWhenTerminalObservationFails(t *test
 	}
 	runtime.lookupResult.Status = domain.PlanningTurnFailed
 	if _, _, observation, _, err := controller.SendPlanning(ctx, jobID, execution.ID, "session_1",
-		commandID, "inspect the accepted repository snapshot", 100, principal); err == nil || observation.Status != domain.PlanningTurnUnknown {
+		commandID, "inspect the accepted repository snapshot", principal); err == nil || observation.Status != domain.PlanningTurnUnknown {
 		t.Fatalf("failure conflicting with saved response must remain UNKNOWN: observation=%#v err=%v", observation, err)
 	}
 	runtime.lookupResult.Status = domain.PlanningTurnCompleted
 	runtime.lookupResult.ResultSHA256 = sha256String("different response")
 	if _, _, observation, _, err := controller.SendPlanning(ctx, jobID, execution.ID, "session_1",
-		commandID, "inspect the accepted repository snapshot", 100, principal); err == nil || observation.Status != domain.PlanningTurnUnknown {
+		commandID, "inspect the accepted repository snapshot", principal); err == nil || observation.Status != domain.PlanningTurnUnknown {
 		t.Fatalf("mismatched saved response must remain UNKNOWN: observation=%#v err=%v", observation, err)
 	}
 	runtime.capabilities.SendLookup = false
@@ -1214,16 +1214,16 @@ func TestProviderControllerPreservesResponseWhenTerminalObservationFails(t *test
 	)
 	runtime.sendResult = provider.TurnResult{
 		OperationID: turn.OperationID, TurnID: turn.ID, SessionID: "session_1",
-		Status: domain.PlanningTurnFailed, TokensUsed: 10, EvidenceSHA256: strings.Repeat("f", 64),
+		Status: domain.PlanningTurnFailed, EvidenceSHA256: strings.Repeat("f", 64),
 	}
 	if _, _, observation, _, err := controller.SendPlanning(ctx, jobID, execution.ID, "session_1",
-		commandID, "inspect the accepted repository snapshot", 100, principal); err == nil || observation.Status != domain.PlanningTurnUnknown {
+		commandID, "inspect the accepted repository snapshot", principal); err == nil || observation.Status != domain.PlanningTurnUnknown {
 		t.Fatalf("retry conflicting with saved response must remain UNKNOWN: observation=%#v err=%v", observation, err)
 	}
 	runtime.capabilities.SendLookup = true
 	runtime.lookupResult.ResultSHA256 = sha256String("turn output")
 	_, _, observation, result, err := controller.SendPlanning(ctx, jobID, execution.ID, "session_1",
-		commandID, "inspect the accepted repository snapshot", 100, principal)
+		commandID, "inspect the accepted repository snapshot", principal)
 	if err != nil || observation.Status != domain.PlanningTurnCompleted ||
 		result.Output != "turn output" || runtime.sendCalls != 2 {
 		t.Fatalf("reconciled response=%#v observation=%#v sends=%d err=%v", result, observation, runtime.sendCalls, err)
@@ -1242,12 +1242,12 @@ func TestProviderControllerDoesNotPublishInvalidTurnResult(t *testing.T) {
 	commandID := "cmd_19191919191919191919191919191919"
 	runtime.sendResult = provider.TurnResult{
 		OperationID: domain.PlanningTurnOperationID(commandID), TurnID: domain.PlanningTurnIntentID(commandID),
-		SessionID: "session_1", Status: domain.PlanningTurnCompleted,
-		TokensUsed: 101, EvidenceSHA256: strings.Repeat("f", 64), Output: "must not be published",
+		SessionID: "session_1", Status: "invalid",
+		EvidenceSHA256: strings.Repeat("f", 64), Output: "must not be published",
 	}
 	if _, _, _, _, err := controller.SendPlanning(ctx, jobID, execution.ID, "session_1",
-		commandID, "inspect the accepted repository snapshot", 100, principal); err == nil {
-		t.Fatal("over-budget result was accepted")
+		commandID, "inspect the accepted repository snapshot", principal); err == nil {
+		t.Fatal("invalid result was accepted")
 	}
 	job, err := database.GetJob(ctx, jobID)
 	if err != nil || len(job.JobMessages) != 0 || len(job.PlanningTurnObservations) != 1 ||
@@ -1267,7 +1267,7 @@ func TestProviderControllerReconcilesVerifiedBlankPlannerResponse(t *testing.T) 
 	}
 	commandID := "cmd_19191919191919191919191919191919"
 	_, turn, unknown, _, err := controller.SendPlanning(ctx, jobID, execution.ID, "session_1",
-		commandID, "inspect the accepted repository snapshot", 100, principal)
+		commandID, "inspect the accepted repository snapshot", principal)
 	if err == nil || unknown.Status != domain.PlanningTurnUnknown {
 		t.Fatalf("initial turn was not UNKNOWN: %#v %v", unknown, err)
 	}
@@ -1292,7 +1292,7 @@ func TestProviderControllerReconcilesVerifiedBlankPlannerResponse(t *testing.T) 
 		ResultSHA256: sha256String(""), Final: true, EvidenceSHA256: strings.Repeat("f", 64),
 	}
 	_, _, observation, result, err := controller.SendPlanning(ctx, jobID, execution.ID, "session_1",
-		commandID, "inspect the accepted repository snapshot", 100, principal)
+		commandID, "inspect the accepted repository snapshot", principal)
 	if err != nil || observation.Status != domain.PlanningTurnCompleted || result.Output != "" || runtime.sendCalls != 1 {
 		t.Fatalf("blank response: observation=%#v result=%#v err=%v", observation, result, err)
 	}
@@ -1303,18 +1303,14 @@ func TestProviderControllerReconcilesVerifiedBlankPlannerResponse(t *testing.T) 
 	}
 }
 
-func TestProviderControllerReconcilesUnknownTurnWithLookupAndCompleteUsage(t *testing.T) {
+func TestProviderControllerReconcilesUnknownTurnWithoutUsage(t *testing.T) {
 	runtime := &fakePlanningProviderRuntime{}
 	controller, database, principal, jobID, grantID, documents := newProviderControllerFixture(t, runtime)
 	now := time.Now().UTC()
 	runtime.capabilities.SendLookup = true
-	runtime.capabilities.UsageIdentity = true
-	runtime.capabilities.UsageCompleteness = true
 	runtime.capabilities.FinalOutputRetrieval = true
 	runtime.capabilities.Evidence = append(runtime.capabilities.Evidence,
 		provider.CapabilityEvidence{Capability: provider.CapabilitySendLookup, Identity: runtime.identity, TestID: "controller-test", EvidenceSHA256: strings.Repeat("a", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
-		provider.CapabilityEvidence{Capability: provider.CapabilityUsageIdentity, Identity: runtime.identity, TestID: "controller-test", EvidenceSHA256: strings.Repeat("b", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
-		provider.CapabilityEvidence{Capability: provider.CapabilityUsageCompleteness, Identity: runtime.identity, TestID: "controller-test", EvidenceSHA256: strings.Repeat("c", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
 		provider.CapabilityEvidence{Capability: provider.CapabilityFinalOutput, Identity: runtime.identity, TestID: "controller-test", EvidenceSHA256: strings.Repeat("d", 64), EvidenceLevel: provider.EvidenceLive, VerifiedAt: now},
 	)
 	_, execution, _, _, err := controller.StartPlanning(
@@ -1333,33 +1329,30 @@ func TestProviderControllerReconcilesUnknownTurnWithLookupAndCompleteUsage(t *te
 	runtime.sendErr = &provider.OperationError{Class: provider.FailureAmbiguous, Code: provider.OperationCodeUnknown}
 	receipt, turn, unknown, _, err := controller.SendPlanning(
 		context.Background(), jobID, execution.ID, "session_1", commandID,
-		"inspect the accepted repository snapshot", 100, principal,
+		"inspect the accepted repository snapshot", principal,
 	)
 	if err == nil || unknown.Status != domain.PlanningTurnUnknown || runtime.sendCalls != 1 || receipt.Revision == 0 {
 		t.Fatalf("ambiguous Send did not persist UNKNOWN: %#v %#v calls=%d err=%v", turn, unknown, runtime.sendCalls, err)
 	}
 	if _, _, _, _, err := controller.SendPlanning(
 		context.Background(), jobID, execution.ID, "session_1", commandID,
-		"inspect the accepted repository snapshot", 100, principal,
+		"inspect the accepted repository snapshot", principal,
 	); !errors.Is(err, provider.ErrUnsupportedCapability) || runtime.sendCalls != 1 {
 		t.Fatalf("NOT_FOUND without idempotency retried Send: calls=%d err=%v", runtime.sendCalls, err)
 	}
 	runtime.lookupResult = provider.LookupResult{
 		Found: true, OperationID: operationID, Status: domain.PlanningTurnCompleted,
 		ReceiptID: "receipt_turn_1", SessionID: "session_1", TurnID: turnID,
-		UsageID: "usage_turn_reconcile", EvidenceSHA256: strings.Repeat("e", 64),
-	}
-	runtime.usageResult = provider.Usage{
-		UsageID: "usage_turn_reconcile", Tokens: 18, Complete: true, EvidenceSHA256: strings.Repeat("f", 64),
+		EvidenceSHA256: strings.Repeat("e", 64),
 	}
 	receipt, reconciledTurn, completed, result, err := controller.SendPlanning(
 		context.Background(), jobID, execution.ID, "session_1", commandID,
-		"inspect the accepted repository snapshot", 100, principal,
+		"inspect the accepted repository snapshot", principal,
 	)
 	if err != nil || receipt.Revision == 0 || reconciledTurn.ID != turn.ID ||
 		completed.Status != domain.PlanningTurnCompleted || !completed.ReconcilesUnknown ||
-		result.Status != domain.PlanningTurnCompleted || result.TokensUsed != 18 ||
-		runtime.sendCalls != 1 || runtime.lookupCalls != 2 || runtime.usageCalls != 1 {
+		result.Status != domain.PlanningTurnCompleted ||
+		runtime.sendCalls != 1 || runtime.lookupCalls != 2 || runtime.usageCalls != 0 {
 		t.Fatalf("same-Turn reconciliation failed: %#v %#v %#v calls(send=%d lookup=%d usage=%d) err=%v",
 			receipt, reconciledTurn, completed, runtime.sendCalls, runtime.lookupCalls, runtime.usageCalls, err)
 	}
@@ -1367,8 +1360,35 @@ func TestProviderControllerReconcilesUnknownTurnWithLookupAndCompleteUsage(t *te
 	if err != nil || len(job.PlanningTurnIntents) != 1 || len(job.PlanningTurnObservations) != 2 ||
 		job.PlanningTurnObservations[0].Status != domain.PlanningTurnUnknown ||
 		!job.PlanningTurnObservations[1].ReconcilesUnknown ||
-		len(job.ProviderUsageObservations) != 1 || !job.ProviderUsageObservations[0].Complete {
+		len(job.ProviderUsageObservations) != 0 {
 		t.Fatalf("reconciled Turn facts are inconsistent: %#v %v", job, err)
+	}
+}
+
+func TestProviderControllerContinuesWithoutUsageReports(t *testing.T) {
+	ctx := context.Background()
+	runtime := &fakePlanningProviderRuntime{}
+	controller, database, principal, jobID, grantID, documents := newProviderControllerFixture(t, runtime)
+	_, execution, _, _, err := controller.StartPlanning(ctx, jobID, grantID,
+		"cmd_18181818181818181818181818181818", documents, principal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, commandID := range []string{
+		"cmd_19191919191919191919191919191919",
+		"cmd_20202020202020202020202020202020",
+		"cmd_21212121212121212121212121212121",
+		"cmd_22222222222222222222222222222222",
+	} {
+		_, _, observation, result, err := controller.SendPlanning(ctx, jobID, execution.ID, "session_1", commandID, "continue", principal)
+		if err != nil || observation.Status != domain.PlanningTurnCompleted || result.Output != "turn output" {
+			t.Fatalf("turn: observation=%#v result=%#v err=%v", observation, result, err)
+		}
+	}
+	job, err := database.GetJob(ctx, jobID)
+	if err != nil || len(job.JobMessages) != 4 || runtime.sendCalls != 4 || runtime.usageCalls != 0 ||
+		len(job.ProviderUsageObservations) != 0 {
+		t.Fatalf("conversation without usage: messages=%d sends=%d usage=%d err=%v", len(job.JobMessages), runtime.sendCalls, runtime.usageCalls, err)
 	}
 }
 
@@ -1386,7 +1406,7 @@ func TestProviderControllerAllowsOneShotSendButNeverRetriesUnknownWithoutProof(t
 	commandID := "cmd_23232323232323232323232323232323"
 	_, turn, observation, _, err := controller.SendPlanning(
 		context.Background(), jobID, execution.ID, "session_1",
-		commandID, "inspect the accepted repository snapshot", 100, principal,
+		commandID, "inspect the accepted repository snapshot", principal,
 	)
 	if err == nil || observation.Status != domain.PlanningTurnUnknown || runtime.sendCalls != 1 {
 		t.Fatalf("initial Send was not attempted exactly once and recorded UNKNOWN: turn=%#v observation=%#v calls=%d err=%v",
@@ -1395,7 +1415,7 @@ func TestProviderControllerAllowsOneShotSendButNeverRetriesUnknownWithoutProof(t
 	runtime.capabilities = provider.Capabilities{Identity: runtime.identity}
 	if _, _, _, _, err := controller.SendPlanning(
 		context.Background(), jobID, execution.ID, "session_1",
-		commandID, "inspect the accepted repository snapshot", 100, principal,
+		commandID, "inspect the accepted repository snapshot", principal,
 	); !errors.Is(err, provider.ErrUnsupportedCapability) {
 		t.Fatalf("UNKNOWN retry error = %v, want ErrUnsupportedCapability", err)
 	}
@@ -1420,7 +1440,7 @@ func TestProviderControllerRetriesMissingTurnOnlyWithIdempotency(t *testing.T) {
 	}
 	commandID := "cmd_25252525252525252525252525252525"
 	_, _, unknown, _, err := controller.SendPlanning(context.Background(), jobID, execution.ID, "session_1",
-		commandID, "inspect the accepted repository snapshot", 100, principal)
+		commandID, "inspect the accepted repository snapshot", principal)
 	if err == nil || unknown.Status != domain.PlanningTurnUnknown || runtime.sendCalls != 1 {
 		t.Fatalf("initial Send did not become UNKNOWN: observation=%#v sends=%d err=%v", unknown, runtime.sendCalls, err)
 	}
@@ -1437,7 +1457,7 @@ func TestProviderControllerRetriesMissingTurnOnlyWithIdempotency(t *testing.T) {
 	}
 	runtime.sendErr = nil
 	_, _, observation, _, err := controller.SendPlanning(context.Background(), jobID, execution.ID, "session_1",
-		commandID, "inspect the accepted repository snapshot", 100, principal)
+		commandID, "inspect the accepted repository snapshot", principal)
 	if err != nil || observation.Status != domain.PlanningTurnCompleted || runtime.sendCalls != 2 {
 		t.Fatalf("idempotent retry failed: observation=%#v sends=%d err=%v", observation, runtime.sendCalls, err)
 	}
@@ -1466,7 +1486,7 @@ func TestProviderControllerPersistsResultAndUsageForAcceptedTurn(t *testing.T) {
 		t.Fatalf("GetJob before Turn intent: %v", err)
 	}
 	_, turn, err := database.AddPlanningTurnIntent(context.Background(), jobID, job.Revision, execution.ID,
-		"session_1", "cmd_13131313131313131313131313131313", strings.Repeat("f", 64), 100, principal)
+		"session_1", "cmd_13131313131313131313131313131313", strings.Repeat("f", 64), principal)
 	if err != nil {
 		t.Fatalf("AddPlanningTurnIntent: %v", err)
 	}
@@ -1537,7 +1557,7 @@ func TestProviderControllerRejectsResultAndUsageWithoutVerifiedCapabilities(t *t
 		t.Fatalf("GetJob before Turn intent: %v", err)
 	}
 	_, turn, err := database.AddPlanningTurnIntent(context.Background(), jobID, job.Revision, execution.ID,
-		"session_1", "cmd_15151515151515151515151515151515", strings.Repeat("f", 64), 100, principal)
+		"session_1", "cmd_15151515151515151515151515151515", strings.Repeat("f", 64), principal)
 	if err != nil {
 		t.Fatalf("AddPlanningTurnIntent: %v", err)
 	}
