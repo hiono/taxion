@@ -231,18 +231,22 @@ func runACPProvider(ctx context.Context, args []string, stdout, stderr io.Writer
 		return report(stderr, resultErr)
 	}
 	if *consult {
+		replyToID := question.Message.ID
 		record := func(label, body string) error {
 			fmt.Fprintf(stdout, "%s\n%s\n\n", label, body)
 			commandID, err := domain.NewID("cmd")
 			if err != nil {
 				return err
 			}
-			_, err = communication.SendFromOrchestrator(ctx, controller.SystemMessageRequest{
+			outcome, err := communication.SendFromOrchestrator(ctx, controller.SystemMessageRequest{
 				JobID: jobID, CommandID: commandID,
 				Recipient:        domain.ActorRef{Kind: domain.ActorController, ID: domain.ControllerActorID},
-				ReplyToMessageID: question.Message.ID,
+				ReplyToMessageID: replyToID,
 				Body:             label + "\n" + body,
 			})
+			if err == nil {
+				replyToID = outcome.Message.ID
+			}
 			return err
 		}
 		if err := record("Main agent question:", result.Content); err != nil {
