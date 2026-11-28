@@ -268,14 +268,11 @@ func runACPProvider(ctx context.Context, args []string, stdout, stderr io.Writer
 		fmt.Fprintln(stdout, "Local Job conversation saved (not an authorized Job execution)")
 		return 0
 	}
-	closeErr := adapter.Close()
-	if closeErr != nil {
-		return report(stderr, fmt.Errorf("%s process did not close cleanly", cliName))
-	}
 	fmt.Fprintf(stdout, "Provider: %s\nSession: %s\nToken usage: not reported by ACP\n\n%s\n", identity.ProviderID, start.SessionID, result.Content)
 	if communication != nil {
 		commandID, err := domain.NewID("cmd")
 		if err != nil {
+			_ = adapter.Close()
 			return report(stderr, err)
 		}
 		if _, err := communication.SendFromOrchestrator(ctx, controller.SystemMessageRequest{
@@ -284,9 +281,13 @@ func runACPProvider(ctx context.Context, args []string, stdout, stderr io.Writer
 			ReplyToMessageID: question.Message.ID,
 			Body:             result.Content,
 		}); err != nil {
+			_ = adapter.Close()
 			return report(stderr, err)
 		}
 		fmt.Fprintln(stdout, "\nLocal Job conversation saved (not an authorized Job execution)")
+	}
+	if err := adapter.Close(); err != nil {
+		return report(stderr, fmt.Errorf("%s process did not close cleanly", cliName))
 	}
 	return 0
 }

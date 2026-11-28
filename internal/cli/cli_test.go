@@ -1106,6 +1106,43 @@ func TestDevProviderConversationPersistsAndReusesLocalJobHistory(t *testing.T) {
 	}
 }
 
+func TestDevProviderConversationPreservesAnswerWhenCloseFails(t *testing.T) {
+	helper := fakeOpenCode(t)
+	work := t.TempDir()
+	if err := os.WriteFile(filepath.Join(work, "close-fail"), nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "jobs.sqlite")
+	var stdout, stderr bytes.Buffer
+	if code := Run(context.Background(), []string{"dev", "job", "create", "--store", path,
+		"--request", "Original task"}, &stdout, &stderr, VersionInfo{}); code != 0 {
+		t.Fatalf("create exit=%d, stderr=%q", code, stderr.String())
+	}
+	jobID := strings.TrimPrefix(strings.Split(stdout.String(), "\n")[1], "ID: ")
+	stdout.Reset()
+	stderr.Reset()
+	code := Run(context.Background(), []string{"dev", "provider", "run", "--provider", "opencode",
+		"--command", helper, "--working-directory", work, "--store", path, "--job", jobID,
+		"--prompt", "hello"}, &stdout, &stderr, VersionInfo{})
+	if code != 1 || !strings.Contains(stderr.String(), "did not close cleanly") ||
+		!strings.Contains(stdout.String(), "Local Job conversation saved") {
+		t.Fatalf("exit=%d, stdout=%q, stderr=%q", code, stdout.String(), stderr.String())
+	}
+	database, err := store.Open(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	job, err := database.GetJob(context.Background(), jobID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(job.JobMessages) != 2 || job.JobMessages[1].Body != "hello from ACP" ||
+		job.JobMessages[1].ReplyToMessageID != job.JobMessages[0].ID {
+		t.Fatalf("stored conversation=%#v", job.JobMessages)
+	}
+}
+
 func TestDevProviderConsultsAndResumesMainSession(t *testing.T) {
 	helper := fakeOpenCode(t)
 	path := filepath.Join(t.TempDir(), "jobs.sqlite")
@@ -1388,6 +1425,9 @@ func TestDevProviderACPHelper(t *testing.T) {
 			_ = writer.Encode(map[string]any{"jsonrpc": "2.0", "id": request.ID,
 				"result": map[string]any{"stopReason": "end_turn"}})
 		}
+	}
+	if _, err := os.Stat("close-fail"); err == nil {
+		time.Sleep(3 * time.Second)
 	}
 	os.Exit(0)
 }
