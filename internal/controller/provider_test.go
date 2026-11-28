@@ -495,7 +495,10 @@ func TestProviderTaskStartDispatchClaimIsExclusive(t *testing.T) {
 		if result.claimed {
 			claims++
 		}
-		if errors.Is(result.err, domain.ErrRevisionConflict) {
+		if result.err != nil {
+			if !strings.Contains(strings.ToLower(result.err.Error()), "revision") {
+				t.Fatalf("dispatch claim failed for an unexpected reason: %v", result.err)
+			}
 			conflicts++
 		}
 	}
