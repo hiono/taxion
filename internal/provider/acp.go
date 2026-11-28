@@ -544,8 +544,7 @@ func (a *ACPAdapter) trackProcess(process *acpProcess) error {
 			<-session.turnGate
 			session.turnGate <- struct{}{}
 		}
-		process.discardQueuedUpdates()
-		<-process.readerDone
+		process.discardQueuedUpdatesUntilReaderExit()
 		process.discardQueuedUpdates()
 		a.mu.Lock()
 		delete(a.processes, process)
@@ -1429,6 +1428,21 @@ func (p *acpProcess) releaseUpdate(update json.RawMessage) {
 	}
 	p.updateMu.Unlock()
 	p.signalUpdateWake()
+}
+
+func (p *acpProcess) discardQueuedUpdatesUntilReaderExit() {
+	if p == nil || p.readerDone == nil {
+		return
+	}
+	for {
+		select {
+		case update := <-p.updates:
+			p.releaseUpdate(update)
+		case <-p.readerDone:
+			p.discardQueuedUpdates()
+			return
+		}
+	}
 }
 
 func (p *acpProcess) discardQueuedUpdates() {
