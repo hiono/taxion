@@ -544,6 +544,7 @@ func (a *ACPAdapter) trackProcess(process *acpProcess) error {
 			<-session.turnGate
 			session.turnGate <- struct{}{}
 		}
+		process.discardQueuedUpdates()
 		<-process.readerDone
 		process.discardQueuedUpdates()
 		a.mu.Lock()
