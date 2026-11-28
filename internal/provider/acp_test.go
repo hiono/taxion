@@ -375,9 +375,11 @@ func TestACPAdapterAssignsUniqueIDsWhenPeerReusesSessionID(t *testing.T) {
 	adapter := newACPTestAdapter(t)
 	defer adapter.Close()
 	requests := []StartRequest{
-		newACPTestStartRequest("operation_start_unique_1", "role_execution_unique_1"),
-		newACPTestStartRequest("operation_start_unique_2", "role_execution_unique_2"),
+		newACPTestStartRequest("initial prompt one", "role_execution_unique_1"),
+		newACPTestStartRequest("initial prompt two", "role_execution_unique_2"),
 	}
+	requests[0].OperationID = "operation_start_unique_1"
+	requests[1].OperationID = "operation_start_unique_2"
 	results := make(chan StartResult, len(requests))
 	errorsFound := make(chan error, len(requests))
 	for _, request := range requests {
